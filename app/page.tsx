@@ -254,47 +254,35 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Hero Section Premium */}
+      {/* Hero Section */}
       <motion.section 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="relative overflow-hidden rounded-3xl bg-slate-950 p-8 text-white shadow-2xl md:p-16"
+        className="relative overflow-hidden rounded-3xl bg-primary p-8 text-white shadow-xl md:p-16"
       >
-        <div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-yellow-500/10 blur-3xl" />
-        <div className="absolute -bottom-20 -left-20 h-96 w-96 rounded-full bg-primary/5 blur-3xl" />
+        <div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
+        <div className="absolute -bottom-20 -left-20 h-96 w-96 rounded-full bg-secondary/10 blur-3xl" />
         
         <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-8">
           <div className="max-w-2xl">
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.2 }}
-            >
-              <div className="mb-6 flex items-center gap-2">
-                <span className="inline-block rounded-full bg-yellow-500/20 px-4 py-1 text-xs font-bold uppercase tracking-widest text-yellow-500">
-                  CapacitorManager Intelligence
-                </span>
-                <div className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
-              </div>
-              <h1 className="mb-6 text-4xl font-black leading-tight md:text-6xl">
-                O cérebro que faz sua indústria trabalhar para o <span className="text-yellow-500">seu bolso.</span>
-              </h1>
-              <p className="text-lg text-slate-400 md:text-xl">
-                Otimização energética em tempo real. Reduza multas de reativo e maximize a vida útil dos seus ativos.
-              </p>
-            </motion.div>
+            <h1 className="mb-6 text-4xl font-bold leading-tight md:text-6xl">
+              Gestão Inteligente de <span className="text-secondary">Capacitores</span>
+            </h1>
+            <p className="text-lg text-white/80 md:text-xl">
+              Monitore, valide e otimize seus bancos de capacitores com precisão técnica e relatórios profissionais.
+            </p>
           </div>
 
           <div className="flex flex-col gap-4 min-w-[280px]">
-            <div className="rounded-2xl bg-white/5 p-6 backdrop-blur-md border border-white/10">
+            <div className="rounded-2xl bg-white/10 p-6 backdrop-blur-md border border-white/10">
               <div className="flex items-center gap-3 mb-2">
-                <div className="rounded-lg bg-yellow-500/20 p-2">
-                  <DollarSign className="text-yellow-500" size={20} />
+                <div className="rounded-lg bg-secondary/20 p-2">
+                  <DollarSign className="text-secondary" size={20} />
                 </div>
-                <span className="text-sm font-medium text-slate-400">Economia Estimada</span>
+                <span className="text-sm font-medium text-white/70">Economia Estimada</span>
               </div>
-              <p className="text-3xl font-black text-white">{formatCurrency(stats.economiaTotal)}</p>
-              <p className="text-xs text-slate-500 mt-1">Baseado em KVAR ativos / mês</p>
+              <p className="text-3xl font-bold text-white">{formatCurrency(stats.economiaTotal)}</p>
+              <p className="text-xs text-white/50 mt-1">Projeção mensal baseada em medições</p>
             </div>
           </div>
         </div>
@@ -379,10 +367,10 @@ export default function Dashboard() {
         animate="visible"
         className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4"
       >
-        <StatCard icon={Users} label="Clientes Ativos" value={stats.clientes} color="bg-slate-100 text-slate-600" />
-        <StatCard icon={Database} label="Bancos de Capacitores" value={stats.bancos} color="bg-slate-100 text-slate-600" />
-        <StatCard icon={ClipboardCheck} label="Total de Medições" value={stats.medicoes} color="bg-slate-100 text-slate-600" />
-        <StatCard icon={TrendingUp} label="Taxa de Sucesso" value={`${stats.eficienciaGeral.toFixed(0)}%`} color="bg-slate-100 text-slate-600" />
+        <StatCard icon={Users} label="Clientes Ativos" value={stats.clientes} color="bg-blue-50 text-blue-600" />
+        <StatCard icon={Database} label="Bancos de Capacitores" value={stats.bancos} color="bg-purple-50 text-purple-600" />
+        <StatCard icon={ClipboardCheck} label="Total de Medições" value={stats.medicoes} color="bg-green-50 text-green-600" />
+        <StatCard icon={TrendingUp} label="Taxa de Sucesso" value={`${stats.eficienciaGeral.toFixed(0)}%`} color="bg-amber-50 text-amber-600" />
       </motion.div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
@@ -412,7 +400,7 @@ export default function Dashboard() {
         </motion.div>
       </div>
 
-      {/* Recent Medicoes - CORRIGIDO */}
+      {/* Recent Medicoes */}
       <motion.div 
         variants={itemVariants}
         initial="hidden"
