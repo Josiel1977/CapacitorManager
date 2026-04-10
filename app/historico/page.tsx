@@ -4,7 +4,24 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Search, Trash2, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 import Swal from 'sweetalert2';
-import { cn, getStatusValidacao, calculateCapacitanciaTeoricaDelta } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+
+// Funções de cálculo locais para garantir consistência
+function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
+    if (!tensaoNominal || tensaoNominal === 0) return 0;
+    return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
+}
+
+function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
+    return capacitanciaNominalFase * 1.5;
+}
+
+function getStatusValidacao(desvio: number): string {
+    if (desvio >= -5 && desvio <= 10) return 'aprovado';
+    if (desvio >= -10 && desvio < -5) return 'atencao';
+    if (desvio > 10 && desvio <= 15) return 'atencao';
+    return 'reprovado';
+}
 
 export default function HistoricoPage() {
   const [medicoes, setMedicoes] = useState<any[]>([]);
@@ -42,42 +59,44 @@ export default function HistoricoPage() {
 
       if (medError) throw medError;
       
-      // 🔧 RECALCULAR dados inconsistentes (medições antigas com erro)
+      // Processar e recalcular cada medição
       const processedData = medData?.map(med => {
         let desvio = med.desvio_percentual;
         let status = med.status_validacao;
-        
-        // Se o desvio não existe ou está estranho, recalcular
-        const precisaRecalcular = desvio === null || desvio === undefined || 
-          (status === 'reprovado' && med.corrente_medida_a && med.corrente_teorica_a);
-        
-        if (precisaRecalcular) {
-          if (med.tipo_teste === 'corrente' && med.corrente_teorica_a && med.corrente_teorica_a > 0 && med.corrente_medida_a) {
-            // Recalcular corrente
-            desvio = ((med.corrente_medida_a - med.corrente_teorica_a) / med.corrente_teorica_a) * 100;
-            status = getStatusValidacao(desvio);
-            
-          } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf && med.capacitores?.capacitancia_nominal_uf) {
-            // Recalcular capacitância
-            const teorico = calculateCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
-            desvio = ((med.capacitancia_medida_uf - teorico) / teorico) * 100;
-            status = getStatusValidacao(desvio);
-          }
-        }
-        
-        // Determinar valor teórico para exibição
         let teoricoLabel = '---';
-        if (med.tipo_teste === 'corrente' && med.corrente_teorica_a) {
-          teoricoLabel = `${med.corrente_teorica_a.toFixed(2)} A`;
-        } else if (med.tipo_teste === 'capacitancia' && med.capacitores?.capacitancia_nominal_uf) {
-          teoricoLabel = `${(med.capacitores.capacitancia_nominal_uf * 1.5).toFixed(2)} µF`;
+        let tensaoExibicao = null;
+        
+        if (med.capacitores) {
+          const tensaoNominal = med.capacitores.tensao_nominal_v;
+          tensaoExibicao = tensaoNominal;
+          
+          if (med.tipo_teste === 'corrente') {
+            // Para corrente, usa a tensão nominal do capacitor
+            const correnteTeorica = calcularCorrenteTeorica(med.capacitores.potencia_kvar, tensaoNominal);
+            teoricoLabel = `${correnteTeorica.toFixed(2)} A @ ${tensaoNominal}V`;
+            
+            if (med.corrente_medida_a && correnteTeorica > 0) {
+              desvio = ((med.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
+              status = getStatusValidacao(desvio);
+            }
+          } else if (med.tipo_teste === 'capacitancia') {
+            // Para capacitância, usa a capacitância nominal × 1.5 (delta)
+            const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
+            teoricoLabel = `${capacitanciaTeorica.toFixed(2)} µF (Δ) @ ${tensaoNominal}V`;
+            
+            if (med.capacitancia_medida_uf && capacitanciaTeorica > 0) {
+              desvio = ((med.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
+              status = getStatusValidacao(desvio);
+            }
+          }
         }
         
         return { 
           ...med, 
           desvio_percentual: desvio,
           status_validacao: status,
-          teoricoLabel
+          teoricoLabel,
+          tensaoNominal: tensaoExibicao
         };
       }) || [];
       
@@ -212,13 +231,18 @@ export default function HistoricoPage() {
                     <div className="font-medium text-primary">{med.clientes?.nome}</div>
                     <div className="text-xs text-slate-500">{med.bancos_capacitores?.nome_banco}</div>
                   </td>
-                  <td className="px-6 py-4 font-bold text-primary">
-                    {med.capacitores?.codigo_identificacao}
+                  <td className="px-6 py-4">
+                    <div className="font-bold text-primary">{med.capacitores?.codigo_identificacao}</div>
+                    {med.tensaoNominal && (
+                      <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full mt-1 inline-block">
+                        ⚡ {med.tensaoNominal}V
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-slate-600">
                     {med.tipo_teste === 'corrente' ? '🔁 Corrente' : '📏 Capacitância'}
                   </td>
-                  <td className="px-6 py-4 text-slate-500">
+                  <td className="px-6 py-4 text-slate-500 text-xs">
                     {med.teoricoLabel}
                   </td>
                   <td className="px-6 py-4 font-medium text-slate-700">
@@ -228,7 +252,7 @@ export default function HistoricoPage() {
                   </td>
                   <td className="px-6 py-4 font-medium">
                     <span className={cn(
-                      med.desvio_percentual && med.desvio_percentual > 0 ? "text-red-600" : 
+                      med.desvio_percentual && med.desvio_percentual > 0 ? "text-red-600 font-bold" : 
                       med.desvio_percentual && med.desvio_percentual < 0 ? "text-amber-600" : "text-slate-700"
                     )}>
                       {med.desvio_percentual !== null && med.desvio_percentual !== undefined
