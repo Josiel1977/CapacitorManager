@@ -36,8 +36,22 @@ export default function ConfiguracoesPage() {
 
   async function fetchTolerancias() {
     try {
-      const { data, error } = await supabase.from('configuracoes').select('*').eq('id', 'global').single();
-      if (data) setTolerancias(data);
+      const { data, error } = await supabase
+        .from('configuracoes')
+        .select('*')
+        .eq('id', 'global')
+        .single();
+      
+      if (data) {
+        setTolerancias({
+          id: data.id,
+          tolerancia_min_aprovado: data.tolerancia_min_aprovado ?? -5,
+          tolerancia_max_aprovado: data.tolerancia_max_aprovado ?? 10,
+          tolerancia_min_atencao: data.tolerancia_min_atencao ?? -10,
+          tolerancia_max_atencao: data.tolerancia_max_atencao ?? 15,
+          norma_referencia: data.norma_referencia || 'IEC 60831-1/2'
+        });
+      }
     } catch (error) {
       console.error('Erro ao buscar tolerâncias:', error);
     }
@@ -46,15 +60,50 @@ export default function ConfiguracoesPage() {
   async function saveTolerancias() {
     setSavingTolerancias(true);
     try {
-      const { error } = await supabase.from('configuracoes').upsert(tolerancias);
+      const payload = {
+        id: 'global',
+        tolerancia_min_aprovado: tolerancias.tolerancia_min_aprovado,
+        tolerancia_max_aprovado: tolerancias.tolerancia_max_aprovado,
+        tolerancia_min_atencao: tolerancias.tolerancia_min_atencao,
+        tolerancia_max_atencao: tolerancias.tolerancia_max_atencao,
+        norma_referencia: tolerancias.norma_referencia || 'IEC 60831-1/2'
+      };
+
+      const { error } = await supabase
+        .from('configuracoes')
+        .upsert(payload, { onConflict: 'id' });
+      
       if (error) throw error;
-      Swal.fire('Sucesso', 'Configurações de tolerância salvas!', 'success');
+      
+      Swal.fire({
+        title: 'Sucesso!',
+        text: 'Configurações de tolerância salvas com sucesso!',
+        icon: 'success',
+        timer: 2000
+      });
     } catch (error: any) {
+      console.error('Erro detalhado ao salvar:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        fullError: error
+      });
+      
+      let errorMessage = error.message || 'Erro desconhecido ao salvar configurações.';
+      
       if (error.code === '42P01') {
-        Swal.fire('Erro', 'A tabela "configuracoes" não existe no seu banco de dados Supabase. Por favor, execute o SQL de criação.', 'error');
-      } else {
-        Swal.fire('Erro', error.message, 'error');
+        errorMessage = 'A tabela "configuracoes" não existe no seu banco de dados Supabase. Por favor, execute o SQL de criação no painel do Supabase.';
+      } else if (error.message?.includes('column "norma_referencia" does not exist') || error.message?.includes('norma_referencia')) {
+        errorMessage = 'A coluna "norma_referencia" não foi encontrada na tabela "configuracoes". Por favor, execute o comando ALTER TABLE no SQL Editor do Supabase.';
       }
+
+      Swal.fire({
+        title: 'Erro ao Salvar',
+        text: errorMessage,
+        icon: 'error',
+        footer: error.code ? `Código do erro: ${error.code}` : undefined
+      });
     } finally {
       setSavingTolerancias(false);
     }
@@ -77,10 +126,19 @@ export default function ConfiguracoesPage() {
       const { data, error } = await supabase.from('clientes').select('id').limit(1);
       if (error) throw error;
       setConnectionStatus('success');
-      Swal.fire('Sucesso', 'Conexão com Supabase estabelecida com sucesso!', 'success');
+      Swal.fire({
+        title: 'Sucesso!',
+        text: 'Conexão com Supabase estabelecida com sucesso!',
+        icon: 'success',
+        timer: 2000
+      });
     } catch (error: any) {
       setConnectionStatus('error');
-      Swal.fire('Erro', 'Falha ao conectar com Supabase: ' + error.message, 'error');
+      Swal.fire({
+        title: 'Erro',
+        text: 'Falha ao conectar com Supabase: ' + error.message,
+        icon: 'error'
+      });
     }
   }
 
@@ -104,10 +162,19 @@ export default function ConfiguracoesPage() {
     try {
       const { error } = await supabase.from(table).update({ ativo: true }).eq('id', id);
       if (error) throw error;
-      Swal.fire('Restaurado', 'Item restaurado com sucesso!', 'success');
+      Swal.fire({
+        title: 'Restaurado!',
+        text: 'Item restaurado com sucesso!',
+        icon: 'success',
+        timer: 1500
+      });
       fetchTrash();
     } catch (error: any) {
-      Swal.fire('Erro', error.message, 'error');
+      Swal.fire({
+        title: 'Erro',
+        text: error.message,
+        icon: 'error'
+      });
     }
   }
 
@@ -118,17 +185,27 @@ export default function ConfiguracoesPage() {
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#e74c3c',
-      confirmButtonText: 'Sim, excluir para sempre'
+      confirmButtonText: 'Sim, excluir para sempre',
+      cancelButtonText: 'Cancelar'
     });
 
     if (result.isConfirmed) {
       try {
         const { error } = await supabase.from(table).delete().eq('id', id);
         if (error) throw error;
-        Swal.fire('Excluído', 'Item removido permanentemente.', 'success');
+        Swal.fire({
+          title: 'Excluído!',
+          text: 'Item removido permanentemente.',
+          icon: 'success',
+          timer: 1500
+        });
         fetchTrash();
       } catch (error: any) {
-        Swal.fire('Erro', error.message, 'error');
+        Swal.fire({
+          title: 'Erro',
+          text: error.message,
+          icon: 'error'
+        });
       }
     }
   }
@@ -190,7 +267,7 @@ export default function ConfiguracoesPage() {
                     <div>
                       <label className="mb-1 block text-[10px] md:text-xs font-medium text-slate-500">Mínimo (Aprovado)</label>
                       <input 
-                        type="text" 
+                        type="number" 
                         className="w-full rounded-lg border border-slate-200 px-3 md:px-4 py-2 text-sm outline-none focus:border-primary"
                         value={tolerancias.tolerancia_min_aprovado}
                         onChange={(e) => setTolerancias({...tolerancias, tolerancia_min_aprovado: parseNumber(e.target.value)})}
@@ -199,7 +276,7 @@ export default function ConfiguracoesPage() {
                     <div>
                       <label className="mb-1 block text-[10px] md:text-xs font-medium text-slate-500">Máximo (Aprovado)</label>
                       <input 
-                        type="text" 
+                        type="number" 
                         className="w-full rounded-lg border border-slate-200 px-3 md:px-4 py-2 text-sm outline-none focus:border-primary"
                         value={tolerancias.tolerancia_max_aprovado}
                         onChange={(e) => setTolerancias({...tolerancias, tolerancia_max_aprovado: parseNumber(e.target.value)})}
@@ -215,7 +292,7 @@ export default function ConfiguracoesPage() {
                     <div>
                       <label className="mb-1 block text-[10px] md:text-xs font-medium text-slate-500">Mínimo (Atenção)</label>
                       <input 
-                        type="text" 
+                        type="number" 
                         className="w-full rounded-lg border border-slate-200 px-3 md:px-4 py-2 text-sm outline-none focus:border-primary"
                         value={tolerancias.tolerancia_min_atencao}
                         onChange={(e) => setTolerancias({...tolerancias, tolerancia_min_atencao: parseNumber(e.target.value)})}
@@ -224,7 +301,7 @@ export default function ConfiguracoesPage() {
                     <div>
                       <label className="mb-1 block text-[10px] md:text-xs font-medium text-slate-500">Máximo (Atenção)</label>
                       <input 
-                        type="text" 
+                        type="number" 
                         className="w-full rounded-lg border border-slate-200 px-3 md:px-4 py-2 text-sm outline-none focus:border-primary"
                         value={tolerancias.tolerancia_max_atencao}
                         onChange={(e) => setTolerancias({...tolerancias, tolerancia_max_atencao: parseNumber(e.target.value)})}
@@ -292,8 +369,8 @@ export default function ConfiguracoesPage() {
           >
             <div className={cn(
               "mb-8 rounded-full p-8 transition-all duration-500",
-              connectionStatus === 'success' ? "bg-success/10 text-success" : 
-              connectionStatus === 'error' ? "bg-error/10 text-error" : "bg-slate-100 text-slate-400"
+              connectionStatus === 'success' ? "bg-green-100 text-green-600" : 
+              connectionStatus === 'error' ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-400"
             )}>
               <Database size={64} className={cn(connectionStatus === 'testing' && "animate-pulse")} />
             </div>
@@ -387,14 +464,14 @@ function TrashSection({ title, items, onRestore, onDelete, renderItem }: any) {
             <div className="flex gap-1">
               <button 
                 onClick={() => onRestore(item.id)}
-                className="rounded p-1.5 text-success hover:bg-success/10"
+                className="rounded p-1.5 text-green-600 hover:bg-green-50 transition-colors"
                 title="Restaurar"
               >
                 <RotateCcw size={18} />
               </button>
               <button 
                 onClick={() => onDelete(item.id)}
-                className="rounded p-1.5 text-error hover:bg-error/10"
+                className="rounded p-1.5 text-red-600 hover:bg-red-50 transition-colors"
                 title="Excluir Permanentemente"
               >
                 <Trash2 size={18} />

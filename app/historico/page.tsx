@@ -190,28 +190,28 @@ export default function HistoricoPage() {
     
     const tendencia = calcularTendencia(capacitorMedicoes);
     
-    //  VERIFICAÇÃO IMPORTANTE: se tendencia for null, não prossegue
+    // 🔧 VERIFICAÇÃO IMPORTANTE: se tendencia for null, não prossegue
     if (!tendencia) {
         Swal.fire('Erro', 'Não foi possível calcular a tendência', 'error');
         return;
     }
     
     Swal.fire({
-        title: ` Análise de Tendência - ${capacitorNome}`,
+        title: `📊 Análise de Tendência - ${capacitorNome}`,
         html: `
             <div style="text-align: left;">
-                <p><strong> Período analisado:</strong> ${tendencia.primeiraData} a ${tendencia.ultimaData}</p>
-                <p><strong> Desvio inicial:</strong> ${tendencia.primeiraDesvio}%</p>
-                <p><strong> Desvio atual:</strong> ${tendencia.ultimaDesvio}%</p>
-                <p><strong> Variação total:</strong> <span style="color: ${parseFloat(tendencia.variacao) > 0 ? '#e74c3c' : '#2ecc71'}; font-weight: bold;">${parseFloat(tendencia.variacao) > 0 ? '+' : ''}${tendencia.variacao}%</span></p>
-                <p><strong> Tendência:</strong> ${tendencia.tendencia === 'piorando' ? '⚠️ Degradação detectada' : tendencia.tendencia === 'melhorando' ? '✅ Melhorando' : '➡️ Estável'}</p>
-                <p><strong> Degradação por mês:</strong> ${tendencia.degradacaoPorMes}%</p>
+                <p><strong>📅 Período analisado:</strong> ${tendencia.primeiraData} a ${tendencia.ultimaData}</p>
+                <p><strong>📉 Desvio inicial:</strong> ${tendencia.primeiraDesvio}%</p>
+                <p><strong>📈 Desvio atual:</strong> ${tendencia.ultimaDesvio}%</p>
+                <p><strong>🔄 Variação total:</strong> <span style="color: ${parseFloat(tendencia.variacao) > 0 ? '#e74c3c' : '#2ecc71'}; font-weight: bold;">${parseFloat(tendencia.variacao) > 0 ? '+' : ''}${tendencia.variacao}%</span></p>
+                <p><strong>📊 Tendência:</strong> ${tendencia.tendencia === 'piorando' ? '⚠️ Degradação detectada' : tendencia.tendencia === 'melhorando' ? '✅ Melhorando' : '➡️ Estável'}</p>
+                <p><strong>⚡ Degradação por mês:</strong> ${tendencia.degradacaoPorMes}%</p>
                 ${tendencia.previsao ? `
                     <hr style="margin: 15px 0;">
                     <p><strong>🔮 PREVISÃO:</strong></p>
                     <p>⚠️ Previsão de substituição em aproximadamente <strong>${tendencia.previsao.meses} meses</strong></p>
-                    <p> Data estimada: <strong>${tendencia.previsao.data}</strong></p>
-                ` : '<p> Capacitor dentro da faixa normal de operação</p>'}
+                    <p>📅 Data estimada: <strong>${tendencia.previsao.data}</strong></p>
+                ` : '<p>✅ Capacitor dentro da faixa normal de operação</p>'}
             </div>
         `,
         icon: tendencia.tendencia === 'piorando' ? 'warning' : 'success',
@@ -321,7 +321,7 @@ export default function HistoricoPage() {
         <div className="flex items-center gap-2 mb-4">
           <BarChart3 size={20} className="text-secondary" />
           <h2 className="text-lg font-bold text-primary">Análise por Capacitor</h2>
-          <span className="text-xs text-slate-400">Clique em "Analisar" para ver tendência e previsão</span>
+          <span className="text-xs text-slate-400">Clique em &quot;Analisar&quot; para ver tendência e previsão</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">

@@ -207,7 +207,57 @@ export default function RelatoriosPage() {
         scale: 2,
         useCORS: true,
         logging: false,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        windowWidth: 1200,
+        onclone: (clonedDoc) => {
+          const modernColorRegex = /(?:oklch|oklab|hwb|display-p3|color)\((?:[^()]+|\([^()]*\))+\)/gi;
+          
+          // 1. Process all style tags
+          const styleTags = Array.from(clonedDoc.getElementsByTagName('style'));
+          styleTags.forEach(style => {
+            try {
+              let css = style.textContent || '';
+              if (css.includes('oklch') || css.includes('oklab') || css.includes('@import') || css.includes('/*')) {
+                css = css.replace(/\/\*[\s\S]*?\*\//g, '');
+                css = css.replace(/@import\s+url\([^)]+\);/gi, '');
+                css = css.replace(/@import\s+['"][^'"]+['"];/gi, '');
+                css = css.replace(/@import\s+[^;]+;/gi, '');
+                css = css.replace(modernColorRegex, '#1e293b');
+                style.textContent = css;
+              }
+            } catch (e) {}
+          });
+
+          // 2. Process all link tags (external stylesheets)
+          // html2canvas fails when it tries to parse external sheets containing oklch
+          const linkTags = Array.from(clonedDoc.getElementsByTagName('link'));
+          linkTags.forEach(link => {
+            if (link.rel === 'stylesheet') {
+              // In production, Next.js styles are in <link> tags.
+              // We remove them to prevent html2canvas from crashing on oklch.
+              // We rely on inline styles and sanitized <style> tags for the PDF layout.
+              link.remove();
+            }
+          });
+
+          // 3. Process all elements for inline styles
+          const allElements = clonedDoc.getElementsByTagName('*');
+          for (let i = 0; i < allElements.length; i++) {
+            const el = allElements[i] as HTMLElement;
+            try {
+              if (el.style && el.style.cssText && (
+                el.style.cssText.includes('oklch') || 
+                el.style.cssText.includes('oklab') || 
+                el.style.cssText.includes('@import')
+              )) {
+                let inlineCss = el.style.cssText;
+                inlineCss = inlineCss.replace(/@import[^;]+;/gi, '');
+                inlineCss = inlineCss.replace(modernColorRegex, '#1e293b');
+                el.style.cssText = inlineCss;
+              }
+            } catch (e) {}
+          }
+        }
       });
       
       const imgData = canvas.toDataURL('image/png');
@@ -250,24 +300,24 @@ export default function RelatoriosPage() {
   }
 
   function getTendenciaIcon(tendencia: string) {
-    if (tendencia === 'piorando') return <TrendingUp size={14} className="text-red-500" />;
-    if (tendencia === 'melhorando') return <TrendingDown size={14} className="text-green-500" />;
+    if (tendencia === 'piorando') return <TrendingUp size={14} className="text-red-600" />;
+    if (tendencia === 'melhorando') return <TrendingDown size={14} className="text-green-600" />;
     return <Activity size={14} className="text-slate-400" />;
   }
 
   return (
     <div className="space-y-8">
       <header>
-        <h1 className="text-3xl font-bold text-primary">Relatórios Técnicos</h1>
+        <h1 className="text-3xl font-bold text-slate-800">Relatórios Técnicos</h1>
         <p className="text-slate-500">Gere relatórios profissionais com análise de tendência</p>
       </header>
 
-      <div className="rounded-xl bg-white p-4 sm:p-6 shadow-sm">
+      <div className="rounded-xl bg-white p-4 sm:p-6 shadow-sm border border-slate-200">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
           <div className="flex-1">
             <label className="mb-1 block text-sm font-medium text-slate-700">Selecione o Cliente</label>
             <select 
-              className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
+              className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-slate-400"
               value={selectedCliente}
               onChange={(e) => setSelectedCliente(e.target.value)}
             >
@@ -279,7 +329,7 @@ export default function RelatoriosPage() {
             <button 
               onClick={generatePreview}
               disabled={!selectedCliente || loading}
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-6 py-2 text-white hover:bg-primary/90 disabled:opacity-50"
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-800 px-6 py-2 text-white hover:bg-slate-700 disabled:opacity-50 transition-colors"
             >
               <Search size={20} />
               Gerar Prévia
@@ -287,7 +337,7 @@ export default function RelatoriosPage() {
             {reportData && (
               <button 
                 onClick={downloadPDF}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-secondary px-6 py-2 font-bold text-primary hover:bg-secondary/90"
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-600 px-6 py-2 font-bold text-white hover:bg-slate-500 transition-colors"
               >
                 <Download size={20} />
                 Exportar PDF
@@ -304,45 +354,45 @@ export default function RelatoriosPage() {
             className="w-full max-w-[800px] bg-white p-4 sm:p-12 shadow-2xl"
             style={{ minHeight: '1122px' }}
           >
-            {/* Header */}
-            <div className="mb-8 sm:mb-12 flex flex-col sm:flex-row items-start sm:items-center justify-between border-b-4 border-primary pb-8 gap-4">
+            {/* Header - Cores mais profissionais */}
+            <div className="mb-8 sm:mb-12 flex flex-col sm:flex-row items-start sm:items-center justify-between border-b-2 pb-8 gap-4" style={{ borderColor: '#e2e8f0' }}>
               <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-primary p-2 sm:p-3 text-white">
+                <div className="rounded-xl p-2 sm:p-3 text-white" style={{ backgroundColor: '#1e293b' }}>
                   <Zap size={32} className="sm:w-10 sm:h-10" />
                 </div>
                 <div>
-                  <h2 className="text-2xl sm:text-3xl font-black tracking-tighter text-primary uppercase">CAPACITOR<span className="text-secondary">MANAGER</span></h2>
+                  <h2 className="text-2xl sm:text-3xl font-black tracking-tighter uppercase" style={{ color: '#1e293b' }}>CAPACITOR<span style={{ color: '#64748b' }}>MANAGER</span></h2>
                   <p className="text-[10px] sm:text-sm font-bold uppercase tracking-widest text-slate-400">Relatório Técnico de Manutenção</p>
                 </div>
               </div>
               <div className="text-left sm:text-right">
                 <p className="text-[10px] sm:text-sm font-bold text-slate-400">DATA DE EMISSÃO</p>
-                <p className="text-base sm:text-lg font-bold text-primary">{reportData.date}</p>
+                <p className="text-base sm:text-lg font-bold" style={{ color: '#1e293b' }}>{reportData.date}</p>
                 <p className="text-[10px] sm:text-xs text-slate-400">{reportData.time}</p>
               </div>
             </div>
 
-            {/* Client Info */}
-            <div className="mb-8 sm:mb-12 grid grid-cols-1 md:grid-cols-2 gap-8 rounded-xl bg-slate-50 p-4 sm:p-8">
+            {/* Client Info - Cores mais profissionais */}
+            <div className="mb-8 sm:mb-12 grid grid-cols-1 md:grid-cols-2 gap-8 rounded-xl p-4 sm:p-8" style={{ backgroundColor: '#f8fafc' }}>
               <div>
                 <h3 className="mb-4 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">DADOS DO CLIENTE</h3>
-                <p className="text-lg sm:text-xl font-bold text-primary">{reportData.cliente.nome}</p>
+                <p className="text-lg sm:text-xl font-bold" style={{ color: '#1e293b' }}>{reportData.cliente.nome}</p>
                 <p className="text-sm text-slate-600">{reportData.cliente.cnpj_cpf || 'CNPJ não informado'}</p>
                 <p className="text-sm text-slate-600">{reportData.cliente.contato_responsavel || ''}</p>
                 <p className="text-sm text-slate-600">{reportData.cliente.telefone || ''}</p>
               </div>
               <div className="grid grid-cols-3 gap-2 sm:gap-4">
                 <div className="text-center">
-                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">✅ APROVADOS</p>
-                  <p className="text-xl sm:text-2xl font-black text-green-600">{reportData.stats.aprovado}</p>
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">APROVADOS</p>
+                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#059669' }}>{reportData.stats.aprovado}</p>
                 </div>
                 <div className="text-center">
-                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">⚠️ ATENÇÃO</p>
-                  <p className="text-xl sm:text-2xl font-black text-amber-600">{reportData.stats.atencao}</p>
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">ATENÇÃO</p>
+                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#d97706' }}>{reportData.stats.atencao}</p>
                 </div>
                 <div className="text-center">
-                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">❌ REPROVADOS</p>
-                  <p className="text-xl sm:text-2xl font-black text-red-600">{reportData.stats.reprovado}</p>
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">REPROVADOS</p>
+                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#dc2626' }}>{reportData.stats.reprovado}</p>
                 </div>
               </div>
             </div>
@@ -362,12 +412,12 @@ export default function RelatoriosPage() {
                         <th className="pb-4">VARIAÇÃO</th>
                         <th className="pb-4">TENDÊNCIA</th>
                         <th className="pb-4">PREVISÃO</th>
-                       </tr>
+                      </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {tendencias.map((t, idx) => (
                         <tr key={idx} className="text-[10px] sm:text-xs">
-                          <td className="py-4 font-bold text-primary">{t.nome}</td>
+                          <td className="py-4 font-bold text-slate-800">{t.nome}</td>
                           <td className="py-4 text-slate-600">{t.banco}</td>
                           <td className="py-4 text-slate-500">{t.primeiraDesvio}%<br/><span className="text-slate-400">{t.primeiraData}</span></td>
                           <td className="py-4 text-slate-500">{t.ultimaDesvio}%<br/><span className="text-slate-400">{t.ultimaData}</span></td>
@@ -378,7 +428,7 @@ export default function RelatoriosPage() {
                             <div className="flex items-center gap-1">
                               {getTendenciaIcon(t.tendencia)}
                               <span className={t.tendencia === 'piorando' ? 'text-red-600' : t.tendencia === 'melhorando' ? 'text-green-600' : 'text-slate-500'}>
-                                {t.tendencia === 'piorando' ? '⚠️ Degradando' : t.tendencia === 'melhorando' ? '✅ Melhorando' : '➡️ Estável'}
+                                {t.tendencia === 'piorando' ? 'Degradando' : t.tendencia === 'melhorando' ? 'Melhorando' : 'Estável'}
                               </span>
                             </div>
                           </td>
@@ -389,7 +439,7 @@ export default function RelatoriosPage() {
                                 <span className="text-slate-400 text-[8px]">{t.previsao.data}</span>
                               </span>
                             ) : (
-                              <span className="text-green-600">✅ OK</span>
+                              <span className="text-green-600">OK</span>
                             )}
                           </td>
                         </tr>
@@ -416,20 +466,20 @@ export default function RelatoriosPage() {
                       <th className="pb-4">MEDIDO</th>
                       <th className="pb-4">DESVIO</th>
                       <th className="pb-4">STATUS</th>
-                     </tr>
+                    </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {reportData.medicoes.map((med: any) => (
                       <tr key={med.id} className="text-[10px] sm:text-xs">
                         <td className="py-4 text-slate-600">{new Date(med.created_at).toLocaleDateString()}</td>
-                        <td className="py-4 font-bold text-primary">{med.bancos_capacitores?.nome_banco || '-'}</td>
+                        <td className="py-4 font-bold text-slate-700">{med.bancos_capacitores?.nome_banco || '-'}</td>
                         <td className="py-4 font-medium text-slate-700">{med.capacitores?.codigo_identificacao || '-'}</td>
                         <td className="py-4">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${med.tensaoNominal === 220 ? 'bg-blue-100 text-blue-700' : med.tensaoNominal === 380 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${med.tensaoNominal === 220 ? 'bg-blue-50 text-blue-700' : med.tensaoNominal === 380 ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
                             ⚡ {med.tensaoNominal}V
                           </span>
                         </td>
-                        <td className="py-4 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? ' Corrente' : ' Capacitância'}</td>
+                        <td className="py-4 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? 'Corrente' : 'Capacitância'}</td>
                         <td className="py-4 text-slate-500">{getValorTeorico(med)}</td>
                         <td className="py-4 font-medium text-slate-700">{getValorMedido(med)}</td>
                         <td className="py-4 font-bold" style={{ color: med.desvio_percentual > 0 ? '#dc2626' : med.desvio_percentual < 0 ? '#d97706' : '#64748b' }}>
@@ -445,17 +495,17 @@ export default function RelatoriosPage() {
               </div>
             </div>
 
-            {/* Summary */}
+            {/* Summary - Cores mais profissionais */}
             <div className="mb-8 rounded-lg bg-slate-50 p-4 sm:p-6">
               <h3 className="mb-4 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">RESUMO EXECUTIVO</h3>
               <div className="grid grid-cols-2 gap-4 text-xs sm:text-sm mb-4">
                 <div>
                   <p className="text-slate-500">Total de Medições:</p>
-                  <p className="text-xl sm:text-2xl font-bold text-primary">{reportData.medicoes.length}</p>
+                  <p className="text-xl sm:text-2xl font-bold text-slate-800">{reportData.medicoes.length}</p>
                 </div>
                 <div>
                   <p className="text-slate-500">Taxa de Aprovação:</p>
-                  <p className="text-xl sm:text-2xl font-bold text-green-600">
+                  <p className="text-xl sm:text-2xl font-bold text-emerald-600">
                     {reportData.medicoes.length > 0 
                       ? ((reportData.stats.aprovado / reportData.medicoes.length) * 100).toFixed(1) 
                       : 0}%
@@ -478,10 +528,23 @@ export default function RelatoriosPage() {
 
             {/* Footer */}
             <div className="mt-auto border-t border-slate-100 pt-12 text-center">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Responsabilidade Técnica</p>
-              <div className="mx-auto h-px w-48 bg-slate-200 mb-4"></div>
-              <p className="text-xs text-slate-500">Este relatório é um documento técnico gerado pelo sistema CapacitorManager.</p>
-              <p className="text-[8px] text-slate-300 mt-8">JM ELETRO SERVICE | contato@jmeletroservice.com.br | (91)98231-9448</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-12">
+                <div className="text-center">
+                  <div className="mx-auto h-px w-48 bg-slate-300 mb-2"></div>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Responsável Técnico</p>
+                  <p className="text-[8px] text-slate-400">Assinatura / Carimbo</p>
+                </div>
+                <div className="text-center">
+                  <div className="mx-auto h-px w-48 bg-slate-300 mb-2"></div>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cliente / Recebedor</p>
+                  <p className="text-[8px] text-slate-400">Assinatura / Data</p>
+                </div>
+              </div>
+              
+              <div className="pt-8 border-t border-slate-50">
+                <p className="text-xs text-slate-500">Este relatório é um documento técnico gerado pelo sistema CapacitorManager.</p>
+                <p className="text-[8px] text-slate-300 mt-4">JM ELETRO SERVICE | contato@jmeletroservice.com.br | (91)98231-9448</p>
+              </div>
             </div>
           </div>
         </div>
@@ -497,16 +560,34 @@ export default function RelatoriosPage() {
 
 function StatusBadge({ status }: { status: string }) {
   const configs: any = {
-    aprovado: { icon: CheckCircle2, color: 'bg-green-100 text-green-700', label: '✅ APROVADO' },
-    atencao: { icon: AlertTriangle, color: 'bg-amber-100 text-amber-700', label: '⚠️ ATENÇÃO' },
-    reprovado: { icon: XCircle, color: 'bg-red-100 text-red-700', label: '❌ REPROVADO' },
+    aprovado: { 
+      icon: CheckCircle2, 
+      color: '#059669', // emerald-600
+      bg: '#ecfdf5',    // emerald-50
+      label: 'APROVADO' 
+    },
+    atencao: { 
+      icon: AlertTriangle, 
+      color: '#d97706', // amber-600
+      bg: '#fffbeb',    // amber-50
+      label: 'ATENÇÃO' 
+    },
+    reprovado: { 
+      icon: XCircle, 
+      color: '#dc2626', // red-600
+      bg: '#fef2f2',    // red-50
+      label: 'REPROVADO' 
+    },
   };
 
   const config = configs[status] || configs.atencao;
   const Icon = config.icon;
 
   return (
-    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold", config.color)}>
+    <span 
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold"
+      style={{ backgroundColor: config.bg, color: config.color }}
+    >
       <Icon size={12} />
       {config.label}
     </span>

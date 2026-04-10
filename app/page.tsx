@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { motion } from 'motion/react';
 import { 
   Users, 
@@ -12,9 +12,7 @@ import {
   AlertTriangle, 
   XCircle,
   DollarSign,
-  Activity,
-  Cpu,
-  ArrowUpRight
+  Activity
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { 
@@ -61,11 +59,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [recentMedicoes, setRecentMedicoes] = useState<any[]>([]);
 
-  useEffect(() => {
-    fetchStats();
-  }, []);
 
-  async function fetchStats() {
+  const fetchStats = useCallback(async () => {
     try {
       setLoading(true);
       
@@ -111,7 +106,6 @@ export default function Dashboard() {
       }, { aprovado: 0, atencao: 0, reprovado: 0 });
 
       // Cálculo de Economia Estimada (Simulado baseado em KVAR gerenciado)
-      // Tarifa R$ 0,95/kWh conforme pedido
       const totalKvarAprovado = processedMedicoes
         .filter(m => m.status_validacao === 'aprovado')
         .reduce((acc, m) => acc + (m.capacitores?.potencia_kvar || 0), 0);
@@ -129,7 +123,6 @@ export default function Dashboard() {
         .order('created_at', { ascending: false })
         .limit(5);
 
-      // Recalcular também as recentes para exibição correta
       const processedRecent = (recent || []).map(med => {
         const found = processedMedicoes.find(pm => pm.id === med.id);
         return found ? { ...med, ...found } : med;
@@ -152,7 +145,11 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
   const pieData = {
     labels: ['Aprovado', 'Atenção', 'Reprovado'],
@@ -193,123 +190,39 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Hero Section Premium */}
+      {/* Hero Section */}
       <motion.section 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="relative overflow-hidden rounded-3xl bg-slate-950 p-8 text-white shadow-2xl md:p-16"
+        className="relative overflow-hidden rounded-3xl bg-primary p-8 text-white shadow-xl md:p-16"
       >
-        <div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-yellow-500/10 blur-3xl" />
-        <div className="absolute -bottom-20 -left-20 h-96 w-96 rounded-full bg-primary/5 blur-3xl" />
+        <div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
+        <div className="absolute -bottom-20 -left-20 h-96 w-96 rounded-full bg-secondary/10 blur-3xl" />
         
         <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-8">
           <div className="max-w-2xl">
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.2 }}
-            >
-              <div className="mb-6 flex items-center gap-2">
-                <span className="inline-block rounded-full bg-yellow-500/20 px-4 py-1 text-xs font-bold uppercase tracking-widest text-yellow-500">
-                  CapacitorManager Intelligence
-                </span>
-                <div className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
-              </div>
-              <h1 className="mb-6 text-4xl font-black leading-tight md:text-6xl">
-                O cérebro que faz sua indústria trabalhar para o <span className="text-yellow-500">seu bolso.</span>
-              </h1>
-              <p className="text-lg text-slate-400 md:text-xl">
-                Otimização energética em tempo real. Reduza multas de reativo e maximize a vida útil dos seus ativos.
-              </p>
-            </motion.div>
+            <h1 className="mb-6 text-4xl font-bold leading-tight md:text-6xl">
+              Gestão Inteligente de <span className="text-secondary">Capacitores</span>
+            </h1>
+            <p className="text-lg text-white/80 md:text-xl">
+              Monitore, valide e otimize seus bancos de capacitores com precisão técnica e relatórios profissionais.
+            </p>
           </div>
 
           <div className="flex flex-col gap-4 min-w-[280px]">
-            <div className="rounded-2xl bg-white/5 p-6 backdrop-blur-md border border-white/10">
+            <div className="rounded-2xl bg-white/10 p-6 backdrop-blur-md border border-white/10">
               <div className="flex items-center gap-3 mb-2">
-                <div className="rounded-lg bg-yellow-500/20 p-2">
-                  <DollarSign className="text-yellow-500" size={20} />
+                <div className="rounded-lg bg-secondary/20 p-2">
+                  <DollarSign className="text-secondary" size={20} />
                 </div>
-                <span className="text-sm font-medium text-slate-400">Economia Estimada</span>
+                <span className="text-sm font-medium text-white/70">Economia Estimada</span>
               </div>
-              <p className="text-3xl font-black text-white">{formatCurrency(stats.economiaTotal)}</p>
-              <p className="text-xs text-slate-500 mt-1">Baseado em KVAR ativos / mês</p>
+              <p className="text-3xl font-bold text-white">{formatCurrency(stats.economiaTotal)}</p>
+              <p className="text-xs text-white/50 mt-1">Projeção mensal baseada em medições</p>
             </div>
           </div>
         </div>
       </motion.section>
-
-      {/* High Impact Indicators */}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100"
-        >
-          <div className="flex items-center justify-between mb-4">
-            <div className="rounded-xl bg-green-50 p-3 text-green-600">
-              <Activity size={24} />
-            </div>
-            <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-md">LIVE</span>
-          </div>
-          <h3 className="text-sm font-medium text-slate-500 mb-1">Eficiência do Banco</h3>
-          <div className="flex items-end gap-2">
-            <p className="text-3xl font-black text-slate-900">{stats.eficienciaGeral.toFixed(1)}%</p>
-            <ArrowUpRight className="text-green-500 mb-1" size={20} />
-          </div>
-          <div className="mt-4 h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-            <motion.div 
-              initial={{ width: 0 }}
-              animate={{ width: `${stats.eficienciaGeral}%` }}
-              className="h-full bg-green-500"
-            />
-          </div>
-        </motion.div>
-
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100"
-        >
-          <div className="flex items-center justify-between mb-4">
-            <div className="rounded-xl bg-blue-50 p-3 text-blue-600">
-              <Cpu size={24} />
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="h-2 w-2 animate-ping rounded-full bg-blue-500" />
-              <span className="text-xs font-bold text-blue-600">ATIVO</span>
-            </div>
-          </div>
-          <h3 className="text-sm font-medium text-slate-500 mb-1">Status do Cérebro</h3>
-          <p className="text-xl font-bold text-slate-900">
-            {stats.reprovados > 0 ? 'Manutenção Necessária' : 'Otimização de Custos'}
-          </p>
-          <p className="text-xs text-slate-500 mt-2">
-            {stats.reprovados > 0 
-              ? `IA sugere trocar ${stats.reprovados} capacitores para evitar multas.` 
-              : 'IA analisando 24/7 para manter o fator de potência ideal.'}
-          </p>
-        </motion.div>
-
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          className="rounded-2xl bg-primary p-6 shadow-lg text-white"
-        >
-          <div className="flex items-center justify-between mb-4">
-            <div className="rounded-xl bg-white/10 p-3">
-              <Zap size={24} />
-            </div>
-            <span className="text-xs font-bold bg-white/10 px-2 py-1 rounded-md">SISTEMA</span>
-          </div>
-          <h3 className="text-sm font-medium text-slate-300 mb-1">Capacitores Monitorados</h3>
-          <p className="text-3xl font-black">{stats.capacitores}</p>
-          <p className="text-xs text-slate-400 mt-2">Total em todos os bancos</p>
-        </motion.div>
-      </div>
 
       {/* Stats Cards Grid */}
       <motion.div 
@@ -318,10 +231,10 @@ export default function Dashboard() {
         animate="visible"
         className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4"
       >
-        <StatCard icon={Users} label="Clientes Ativos" value={stats.clientes} color="bg-slate-100 text-slate-600" />
-        <StatCard icon={Database} label="Bancos de Capacitores" value={stats.bancos} color="bg-slate-100 text-slate-600" />
-        <StatCard icon={ClipboardCheck} label="Total de Medições" value={stats.medicoes} color="bg-slate-100 text-slate-600" />
-        <StatCard icon={TrendingUp} label="Taxa de Sucesso" value={`${stats.eficienciaGeral.toFixed(0)}%`} color="bg-slate-100 text-slate-600" />
+        <StatCard icon={Users} label="Clientes Ativos" value={stats.clientes} color="bg-blue-50 text-blue-600" />
+        <StatCard icon={Database} label="Bancos de Capacitores" value={stats.bancos} color="bg-purple-50 text-purple-600" />
+        <StatCard icon={ClipboardCheck} label="Total de Medições" value={stats.medicoes} color="bg-green-50 text-green-600" />
+        <StatCard icon={TrendingUp} label="Taxa de Sucesso" value={`${stats.eficienciaGeral.toFixed(0)}%`} color="bg-amber-50 text-amber-600" />
       </motion.div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">

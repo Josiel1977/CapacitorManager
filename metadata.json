@@ -1,5 +1,5 @@
 {
   "name": "CapacitorManager",
-  "description": "Sistema de Gestão de Bancos de Capacitores com Supabase",
+  "description": "Sistema profissional de gestão e validação de bancos de capacitores.",
   "requestFramePermissions": []
 }
