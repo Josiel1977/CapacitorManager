@@ -262,11 +262,27 @@ export default function RelatoriosPage() {
       
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgProps = pdf.getImageProperties(imgData);
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      const pdfHeight = pdf.internal.pageSize.getHeight();
       
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      const imgProps = pdf.getImageProperties(imgData);
+      const contentHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      let heightLeft = contentHeight;
+      let position = 0;
+
+      // Add first page
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
+      heightLeft -= pdfHeight;
+
+      // Add subsequent pages if content is longer than one page
+      while (heightLeft >= 0) {
+        position = heightLeft - contentHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
+        heightLeft -= pdfHeight;
+      }
+
       pdf.save(`Relatorio_Tecnico_${reportData.cliente.nome.replace(/\s+/g, '_')}.pdf`);
       
       Swal.close();
@@ -351,24 +367,26 @@ export default function RelatoriosPage() {
         <div className="flex justify-center overflow-x-auto pb-8">
           <div 
             ref={reportRef}
-            className="w-full max-w-[800px] bg-white p-4 sm:p-12 shadow-2xl"
+            className="w-full max-w-[800px] bg-white p-12 shadow-2xl"
             style={{ minHeight: '1122px' }}
           >
-            {/* Header - Cores mais profissionais */}
-            <div className="mb-8 sm:mb-12 flex flex-col sm:flex-row items-start sm:items-center justify-between border-b-2 pb-8 gap-4" style={{ borderColor: '#e2e8f0' }}>
-              <div className="flex items-center gap-3">
-                <div className="rounded-xl p-2 sm:p-3 text-white" style={{ backgroundColor: '#1e293b' }}>
-                  <Zap size={32} className="sm:w-10 sm:h-10" />
+            {/* Header - Dark & Yellow Theme */}
+            <div className="mb-12 flex flex-row items-center justify-between border-b-4 pb-8 gap-4" style={{ borderColor: '#EAB308', backgroundColor: '#0f172a', margin: '-48px -48px 48px -48px', padding: '48px' }}>
+              <div className="flex items-center gap-4">
+                <div className="rounded-2xl p-3 text-primary" style={{ backgroundColor: '#EAB308' }}>
+                  <Zap size={40} className="text-slate-900" />
                 </div>
                 <div>
-                  <h2 className="text-2xl sm:text-3xl font-black tracking-tighter uppercase" style={{ color: '#1e293b' }}>CAPACITOR<span style={{ color: '#64748b' }}>MANAGER</span></h2>
-                  <p className="text-[10px] sm:text-sm font-bold uppercase tracking-widest text-slate-400">Relatório Técnico de Manutenção</p>
+                  <h2 className="text-3xl sm:text-4xl font-black tracking-tighter uppercase" style={{ color: '#ffffff' }}>
+                    CAPACITOR<span style={{ color: '#EAB308' }}>MANAGER</span>
+                  </h2>
+                  <p className="text-xs sm:text-sm font-bold uppercase tracking-widest text-slate-400">Relatório Técnico de Manutenção Especializada</p>
                 </div>
               </div>
               <div className="text-left sm:text-right">
-                <p className="text-[10px] sm:text-sm font-bold text-slate-400">DATA DE EMISSÃO</p>
-                <p className="text-base sm:text-lg font-bold" style={{ color: '#1e293b' }}>{reportData.date}</p>
-                <p className="text-[10px] sm:text-xs text-slate-400">{reportData.time}</p>
+                <p className="text-[10px] sm:text-sm font-bold text-slate-500">DATA DE EMISSÃO</p>
+                <p className="text-base sm:text-lg font-bold text-white">{reportData.date}</p>
+                <p className="text-[10px] sm:text-xs text-[#EAB308]">{reportData.time}</p>
               </div>
             </div>
 
@@ -526,24 +544,29 @@ export default function RelatoriosPage() {
               )}
             </div>
 
-            {/* Footer */}
-            <div className="mt-auto border-t border-slate-100 pt-12 text-center">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-12">
+            {/* Footer - Highlighted */}
+            <div className="mt-auto border-t-4 pt-12 text-center" style={{ borderColor: '#EAB308', backgroundColor: '#f8fafc', margin: '64px -48px -48px -48px', padding: '48px' }}>
+              <div className="grid grid-cols-2 gap-12 mb-12">
                 <div className="text-center">
-                  <div className="mx-auto h-px w-48 bg-slate-300 mb-2"></div>
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Responsável Técnico</p>
-                  <p className="text-[8px] text-slate-400">Assinatura / Carimbo</p>
+                  <div className="mx-auto h-px w-48 bg-slate-400 mb-2"></div>
+                  <p className="text-[10px] font-bold text-slate-700 uppercase tracking-widest">Responsável Técnico</p>
+                  <p className="text-[8px] text-slate-500">Assinatura / Carimbo</p>
                 </div>
                 <div className="text-center">
-                  <div className="mx-auto h-px w-48 bg-slate-300 mb-2"></div>
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cliente / Recebedor</p>
-                  <p className="text-[8px] text-slate-400">Assinatura / Data</p>
+                  <div className="mx-auto h-px w-48 bg-slate-400 mb-2"></div>
+                  <p className="text-[10px] font-bold text-slate-700 uppercase tracking-widest">Cliente / Recebedor</p>
+                  <p className="text-[8px] text-slate-500">Assinatura / Data</p>
                 </div>
               </div>
               
-              <div className="pt-8 border-t border-slate-50">
-                <p className="text-xs text-slate-500">Este relatório é um documento técnico gerado pelo sistema CapacitorManager.</p>
-                <p className="text-[8px] text-slate-300 mt-4">JM ELETRO SERVICE | contato@jmeletroservice.com.br | (91)98231-9448</p>
+              <div className="pt-8 border-t border-slate-200">
+                <p className="text-xs font-bold text-slate-700">Este relatório é um documento técnico oficial gerado pelo sistema CapacitorManager.</p>
+                <p className="text-[10px] text-slate-600 mt-4 font-medium">JM ELETRO SERVICE | contato@jmeletroservice.com.br | (91) 98231-9448</p>
+                <div className="mt-4 flex justify-center gap-2">
+                  <div className="h-1 w-12 bg-[#EAB308]"></div>
+                  <div className="h-1 w-12 bg-slate-900"></div>
+                  <div className="h-1 w-12 bg-[#EAB308]"></div>
+                </div>
               </div>
             </div>
           </div>
