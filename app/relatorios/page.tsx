@@ -6,7 +6,24 @@ import { FileText, Download, Search, Zap, CheckCircle2, AlertTriangle, XCircle }
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import Swal from 'sweetalert2';
-import { cn, calculateCorrenteTeorica, calculateCapacitanciaTeoricaDelta, getStatusValidacao } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+
+// Funções de cálculo locais (independentes do utils)
+function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
+    if (!tensaoNominal || tensaoNominal === 0) return 0;
+    return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
+}
+
+function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
+    return capacitanciaNominalFase * 1.5;
+}
+
+function getStatusValidacao(desvio: number): string {
+    if (desvio >= -5 && desvio <= 10) return 'aprovado';
+    if (desvio >= -10 && desvio < -5) return 'atencao';
+    if (desvio > 10 && desvio <= 15) return 'atencao';
+    return 'reprovado';
+}
 
 export default function RelatoriosPage() {
   const [clientes, setClientes] = useState<any[]>([]);
@@ -24,44 +41,48 @@ export default function RelatoriosPage() {
     setClientes(data || []);
   }
 
-  // 🔧 Função para recalcular dados inconsistentes
   async function fetchAndRecalculateMedicoes(clienteId: string) {
     const { data: medicoes } = await supabase
       .from('medicoes')
       .select(`
         *,
-        bancos_capacitores(nome_banco),
-        capacitores(codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v)
+        bancos_capacitores(id, nome_banco),
+        capacitores(id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v)
       `)
       .eq('cliente_id', clienteId)
       .order('created_at', { ascending: false });
 
     if (!medicoes) return [];
 
-    // Recalcular dados inconsistentes
     const correctedMedicoes = medicoes.map(med => {
       let desvio = med.desvio_percentual;
       let status = med.status_validacao;
       let correnteTeorica = med.corrente_teorica_a;
       let capacitanciaTeorica = med.capacitancia_teorica_uf;
+      let teoricoLabel = '---';
+      let tensaoExibicao = null;
 
-      // Se desvio é nulo ou status é reprovado suspeito, recalcular
-      const precisaRecalcular = desvio === null || desvio === undefined || 
-        (status === 'reprovado' && med.corrente_medida_a && med.corrente_teorica_a);
+      if (med.capacitores) {
+        const tensaoNominal = med.capacitores.tensao_nominal_v;
+        tensaoExibicao = tensaoNominal;
 
-      if (precisaRecalcular) {
-        if (med.tipo_teste === 'corrente' && med.corrente_medida_a && med.capacitores?.potencia_kvar) {
-          // Recalcular corrente
-          const tensao = med.tensao_medida_v || med.capacitores.tensao_nominal_v;
-          correnteTeorica = calculateCorrenteTeorica(med.capacitores.potencia_kvar, tensao);
-          desvio = ((med.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
-          status = getStatusValidacao(desvio);
+        if (med.tipo_teste === 'corrente' && med.corrente_medida_a) {
+          // Usar a tensão nominal do capacitor
+          correnteTeorica = calcularCorrenteTeorica(med.capacitores.potencia_kvar, tensaoNominal);
+          teoricoLabel = `${correnteTeorica.toFixed(2)} A @ ${tensaoNominal}V`;
           
-        } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf && med.capacitores?.capacitancia_nominal_uf) {
-          // Recalcular capacitância
-          capacitanciaTeorica = calculateCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
-          desvio = ((med.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
-          status = getStatusValidacao(desvio);
+          if (correnteTeorica > 0) {
+            desvio = ((med.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
+            status = getStatusValidacao(desvio);
+          }
+        } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf) {
+          capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
+          teoricoLabel = `${capacitanciaTeorica.toFixed(2)} µF (Δ) @ ${tensaoNominal}V`;
+          
+          if (capacitanciaTeorica > 0) {
+            desvio = ((med.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
+            status = getStatusValidacao(desvio);
+          }
         }
       }
 
@@ -70,7 +91,9 @@ export default function RelatoriosPage() {
         desvio_percentual: desvio,
         status_validacao: status,
         corrente_teorica_a: correnteTeorica,
-        capacitancia_teorica_uf: capacitanciaTeorica
+        capacitancia_teorica_uf: capacitanciaTeorica,
+        teoricoLabel,
+        tensaoNominal: tensaoExibicao
       };
     });
 
@@ -83,11 +106,8 @@ export default function RelatoriosPage() {
     setLoading(true);
     try {
       const { data: cliente } = await supabase.from('clientes').select('*').eq('id', selectedCliente).single();
-      
-      // Usar a função corrigida para buscar medições
       const medicoesCorrigidas = await fetchAndRecalculateMedicoes(selectedCliente);
 
-      // Calcular estatísticas com os dados corrigidos
       const stats = (medicoesCorrigidas || []).reduce((acc: any, curr: any) => {
         acc[curr.status_validacao] = (acc[curr.status_validacao] || 0) + 1;
         return acc;
@@ -97,7 +117,8 @@ export default function RelatoriosPage() {
         cliente,
         medicoes: medicoesCorrigidas || [],
         stats,
-        date: new Date().toLocaleDateString('pt-BR')
+        date: new Date().toLocaleDateString('pt-BR'),
+        time: new Date().toLocaleTimeString('pt-BR')
       });
     } catch (error) {
       console.error('Error:', error);
@@ -123,7 +144,8 @@ export default function RelatoriosPage() {
       const canvas = await html2canvas(reportRef.current, {
         scale: 2,
         useCORS: true,
-        logging: false
+        logging: false,
+        backgroundColor: '#ffffff'
       });
       
       const imgData = canvas.toDataURL('image/png');
@@ -143,13 +165,11 @@ export default function RelatoriosPage() {
     }
   }
 
-  // Função para formatar o desvio com sinal
   function formatDesvio(desvio: number): string {
     if (desvio === null || desvio === undefined) return '---';
     return `${desvio > 0 ? '+' : ''}${desvio.toFixed(2)}%`;
   }
 
-  // Função para obter o valor teórico formatado
   function getValorTeorico(med: any): string {
     if (med.tipo_teste === 'corrente') {
       return med.corrente_teorica_a ? `${med.corrente_teorica_a.toFixed(2)} A` : '---';
@@ -158,13 +178,17 @@ export default function RelatoriosPage() {
     }
   }
 
-  // Função para obter o valor medido formatado
   function getValorMedido(med: any): string {
     if (med.tipo_teste === 'corrente') {
       return med.corrente_medida_a ? `${med.corrente_medida_a.toFixed(2)} A` : '---';
     } else {
       return med.capacitancia_medida_uf ? `${med.capacitancia_medida_uf.toFixed(2)} µF` : '---';
     }
+  }
+
+  function getTensaoBadge(tensao: number): string {
+    if (!tensao) return '';
+    return tensao === 220 ? '🔵 220V' : tensao === 380 ? '🟢 380V' : `⚡ ${tensao}V`;
   }
 
   return (
@@ -228,6 +252,7 @@ export default function RelatoriosPage() {
               <div className="text-right">
                 <p className="text-sm font-bold text-slate-400">DATA DE EMISSÃO</p>
                 <p className="text-lg font-bold text-primary">{reportData.date}</p>
+                <p className="text-xs text-slate-400">{reportData.time}</p>
               </div>
             </div>
 
@@ -265,6 +290,7 @@ export default function RelatoriosPage() {
                     <th className="pb-4">DATA</th>
                     <th className="pb-4">BANCO</th>
                     <th className="pb-4">CAPACITOR</th>
+                    <th className="pb-4">TENSÃO</th>
                     <th className="pb-4">TIPO</th>
                     <th className="pb-4">TEÓRICO</th>
                     <th className="pb-4">MEDIDO</th>
@@ -278,10 +304,17 @@ export default function RelatoriosPage() {
                       <td className="py-4 text-slate-600">{new Date(med.created_at).toLocaleDateString()}</td>
                       <td className="py-4 font-bold text-primary">{med.bancos_capacitores?.nome_banco || '-'}</td>
                       <td className="py-4 font-medium text-slate-700">{med.capacitores?.codigo_identificacao || '-'}</td>
+                      <td className="py-4">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${med.tensaoNominal === 220 ? 'bg-blue-100 text-blue-700' : med.tensaoNominal === 380 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                          {getTensaoBadge(med.tensaoNominal)}
+                        </span>
+                      </td>
                       <td className="py-4 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? '🔁 Corrente' : '📏 Capacitância'}</td>
                       <td className="py-4 text-slate-500">{getValorTeorico(med)}</td>
                       <td className="py-4 font-medium text-slate-700">{getValorMedido(med)}</td>
-                      <td className="py-4 font-bold text-primary">{formatDesvio(med.desvio_percentual)}</td>
+                      <td className="py-4 font-bold" style={{ color: med.desvio_percentual > 0 ? '#e74c3c' : med.desvio_percentual < 0 ? '#f39c12' : '#666' }}>
+                        {formatDesvio(med.desvio_percentual)}
+                      </td>
                       <td className="py-4">
                         <StatusBadge status={med.status_validacao} />
                       </td>
@@ -331,16 +364,16 @@ export default function RelatoriosPage() {
 
 function StatusBadge({ status }: { status: string }) {
   const configs: any = {
-    aprovado: { icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50', label: 'APROVADO' },
-    atencao: { icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50', label: 'ATENÇÃO' },
-    reprovado: { icon: XCircle, color: 'text-red-600', bg: 'bg-red-50', label: 'REPROVADO' },
+    aprovado: { icon: CheckCircle2, color: 'bg-green-100 text-green-700', label: '✅ APROVADO' },
+    atencao: { icon: AlertTriangle, color: 'bg-amber-100 text-amber-700', label: '⚠️ ATENÇÃO' },
+    reprovado: { icon: XCircle, color: 'bg-red-100 text-red-700', label: '❌ REPROVADO' },
   };
 
   const config = configs[status] || configs.atencao;
   const Icon = config.icon;
 
   return (
-    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold", config.color, config.bg)}>
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold", config.color)}>
       <Icon size={12} />
       {config.label}
     </span>
