@@ -13,7 +13,8 @@ import {
   History, 
   FileText,
   Menu,
-  X
+  X,
+  Calculator
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -22,6 +23,7 @@ const menuItems = [
   { name: 'Clientes', href: '/clientes', icon: Users },
   { name: 'Bancos', href: '/bancos', icon: Database },
   { name: 'Capacitores', href: '/capacitores', icon: Zap },
+  { name: 'Dimensionar', href: '/dimensionar', icon: Calculator },
   { name: 'Realizar Teste', href: '/testes', icon: ClipboardCheck },
   { name: 'Gráficos', href: '/graficos', icon: BarChart3 },
   { name: 'Histórico', href: '/historico', icon: History },

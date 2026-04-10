@@ -204,56 +204,62 @@ export default function RelatoriosPage() {
       });
 
       const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
+        scale: 3, // Aumentar escala para maior nitidez
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
-        windowWidth: 1200,
+        width: 794,
+        windowWidth: 794, // Garantir que o viewport da captura seja exatamente 794px
         onclone: (clonedDoc) => {
+          const el = clonedDoc.getElementById('report-container');
+          if (el) {
+            el.style.width = '794px';
+            el.style.maxWidth = '794px';
+            el.style.padding = '48px';
+            el.style.margin = '0';
+            el.style.boxShadow = 'none'; // Remover sombra na exportação
+          }
+
           const modernColorRegex = /(?:oklch|oklab|hwb|display-p3|color)\((?:[^()]+|\([^()]*\))+\)/gi;
           
-          // 1. Process all style tags
+          // 1. Processar tags de estilo
           const styleTags = Array.from(clonedDoc.getElementsByTagName('style'));
           styleTags.forEach(style => {
             try {
               let css = style.textContent || '';
-              if (css.includes('oklch') || css.includes('oklab') || css.includes('@import') || css.includes('/*')) {
+              if (css.includes('oklch') || css.includes('oklab') || css.includes('@import')) {
                 css = css.replace(/\/\*[\s\S]*?\*\//g, '');
                 css = css.replace(/@import\s+url\([^)]+\);/gi, '');
-                css = css.replace(/@import\s+['"][^'"]+['"];/gi, '');
-                css = css.replace(/@import\s+[^;]+;/gi, '');
-                css = css.replace(modernColorRegex, '#1e293b');
+                css = css.replace(modernColorRegex, '#1e293b'); // Substituir cores problemáticas
                 style.textContent = css;
               }
             } catch (e) {}
           });
 
-          // 2. Process all link tags (external stylesheets)
-          // html2canvas fails when it tries to parse external sheets containing oklch
+          // 2. Processar links de estilos externos (Next.js production)
+          // REMOVER é necessário pois o html2canvas crasha ao tentar ler oklch em arquivos CSS externos
           const linkTags = Array.from(clonedDoc.getElementsByTagName('link'));
           linkTags.forEach(link => {
             if (link.rel === 'stylesheet') {
-              // In production, Next.js styles are in <link> tags.
-              // We remove them to prevent html2canvas from crashing on oklch.
-              // We rely on inline styles and sanitized <style> tags for the PDF layout.
               link.remove();
             }
           });
 
-          // 3. Process all elements for inline styles
+          // 3. Processar estilos inline em todos os elementos
           const allElements = clonedDoc.getElementsByTagName('*');
           for (let i = 0; i < allElements.length; i++) {
             const el = allElements[i] as HTMLElement;
+            
+            // Forçar cores sólidas para evitar oklch em bordas e textos que o Tailwind v4 aplica
+            if (el.classList.contains('text-primary')) el.style.color = '#EAB308';
+            if (el.classList.contains('bg-primary')) el.style.backgroundColor = '#0f172a';
+            if (el.classList.contains('border-primary')) el.style.borderColor = '#EAB308';
+            
             try {
-              if (el.style && el.style.cssText && (
-                el.style.cssText.includes('oklch') || 
-                el.style.cssText.includes('oklab') || 
-                el.style.cssText.includes('@import')
-              )) {
-                let inlineCss = el.style.cssText;
-                inlineCss = inlineCss.replace(/@import[^;]+;/gi, '');
-                inlineCss = inlineCss.replace(modernColorRegex, '#1e293b');
-                el.style.cssText = inlineCss;
+              if (el.style && el.style.cssText) {
+                if (el.style.cssText.includes('oklch') || el.style.cssText.includes('oklab')) {
+                  el.style.cssText = el.style.cssText.replace(modernColorRegex, '#1e293b');
+                }
               }
             } catch (e) {}
           }
@@ -366,9 +372,10 @@ export default function RelatoriosPage() {
       {reportData ? (
         <div className="flex justify-center overflow-x-auto pb-8">
           <div 
+            id="report-container"
             ref={reportRef}
-            className="w-full max-w-[800px] bg-white p-12 shadow-2xl"
-            style={{ minHeight: '1122px' }}
+            className="bg-white p-12 shadow-2xl"
+            style={{ width: '794px', minHeight: '1122px' }}
           >
             {/* Header - Dark & Yellow Theme */}
             <div className="mb-12 flex flex-row items-center justify-between border-b-4 pb-8 gap-4" style={{ borderColor: '#EAB308', backgroundColor: '#0f172a', margin: '-48px -48px 48px -48px', padding: '48px' }}>

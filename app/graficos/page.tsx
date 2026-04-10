@@ -387,18 +387,28 @@ export default function GraficosPage() {
       });
 
       const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
+        scale: 3,
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
-        windowWidth: 1200,
+        width: 794,
+        windowWidth: 794,
         onclone: (clonedDoc) => {
+          const el = clonedDoc.getElementById('graphics-report-container');
+          if (el) {
+            el.style.width = '794px';
+            el.style.maxWidth = '794px';
+            el.style.padding = '48px';
+            el.style.margin = '0';
+            el.style.boxShadow = 'none';
+          }
+
           const modernColorRegex = /(?:oklch|oklab|hwb|display-p3|color)\((?:[^()]+|\([^()]*\))+\)/gi;
           const styleTags = Array.from(clonedDoc.getElementsByTagName('style'));
           styleTags.forEach(style => {
             try {
               let css = style.textContent || '';
-              if (css.includes('oklch') || css.includes('oklab') || css.includes('@import') || css.includes('/*')) {
+              if (css.includes('oklch') || css.includes('oklab') || css.includes('@import')) {
                 css = css.replace(/\/\*[\s\S]*?\*\//g, '');
                 css = css.replace(/@import\s+url\([^)]+\);/gi, '');
                 css = css.replace(modernColorRegex, '#1e293b');
@@ -409,7 +419,9 @@ export default function GraficosPage() {
 
           const linkTags = Array.from(clonedDoc.getElementsByTagName('link'));
           linkTags.forEach(link => {
-            if (link.rel === 'stylesheet') link.remove();
+            if (link.rel === 'stylesheet') {
+              link.remove();
+            }
           });
 
           const allElements = clonedDoc.getElementsByTagName('*');
@@ -422,6 +434,12 @@ export default function GraficosPage() {
 
           for (let i = 0; i < allElements.length; i++) {
             const el = allElements[i] as HTMLElement;
+            
+            // Forçar cores sólidas para evitar oklch em bordas e textos que o Tailwind v4 aplica
+            if (el.classList.contains('text-primary')) el.style.color = '#EAB308';
+            if (el.classList.contains('bg-primary')) el.style.backgroundColor = '#0f172a';
+            if (el.classList.contains('border-primary')) el.style.borderColor = '#EAB308';
+
             try {
               if (el.style && el.style.cssText && (el.style.cssText.includes('oklch') || el.style.cssText.includes('oklab'))) {
                 el.style.cssText = el.style.cssText.replace(modernColorRegex, '#1e293b');
@@ -523,8 +541,14 @@ export default function GraficosPage() {
       </div>
 
       {selectedCapacitor && selectedCapacitorData ? (
-        <div className="space-y-8" ref={reportRef}>
-          {/* Header para o PDF (Visível apenas no PDF via onclone ou se quisermos manter no preview) */}
+        <div className="flex justify-center overflow-x-auto pb-8">
+          <div 
+            id="graphics-report-container" 
+            ref={reportRef}
+            className="bg-white p-12 shadow-2xl space-y-8"
+            style={{ width: '794px', minHeight: '1122px' }}
+          >
+            {/* Header para o PDF (Visível apenas no PDF via onclone ou se quisermos manter no preview) */}
           <div className="hidden pdf-header mb-8 flex flex-row items-center justify-between border-b-4 pb-8 gap-4" style={{ borderColor: '#EAB308', backgroundColor: '#0f172a', margin: '-24px -24px 24px -24px', padding: '24px' }}>
             <div className="flex items-center gap-4">
               <div className="rounded-2xl p-3 text-primary" style={{ backgroundColor: '#EAB308' }}>
@@ -717,6 +741,7 @@ export default function GraficosPage() {
           <div className="hidden pdf-footer mt-auto border-t-4 pt-8 text-center" style={{ borderColor: '#EAB308', backgroundColor: '#f8fafc', margin: '24px -24px -24px -24px', padding: '24px' }}>
             <p className="text-xs font-bold text-slate-700">Este documento é uma análise gráfica técnica oficial gerada pelo sistema CapacitorManager.</p>
             <p className="text-[10px] text-slate-600 mt-2 font-medium">JM ELETRO SERVICE | contato@jmeletroservice.com.br</p>
+          </div>
           </div>
         </div>
       ) : (
