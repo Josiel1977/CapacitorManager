@@ -270,7 +270,7 @@ export default function Dashboard() {
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.2 }}
             >
-             v
+            
       {/* High Impact Indicators */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         <motion.div 
