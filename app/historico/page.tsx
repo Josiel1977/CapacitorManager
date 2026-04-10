@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Search, Trash2, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 import Swal from 'sweetalert2';
-import { cn } from '@/lib/utils';
+import { cn, getStatusValidacao, calculateCapacitanciaTeoricaDelta } from '@/lib/utils';
 
 export default function HistoricoPage() {
   const [medicoes, setMedicoes] = useState<any[]>([]);
@@ -55,22 +55,13 @@ export default function HistoricoPage() {
           if (med.tipo_teste === 'corrente' && med.corrente_teorica_a && med.corrente_teorica_a > 0 && med.corrente_medida_a) {
             // Recalcular corrente
             desvio = ((med.corrente_medida_a - med.corrente_teorica_a) / med.corrente_teorica_a) * 100;
-            
-            // Reclassificar
-            if (desvio >= -5 && desvio <= 10) status = 'aprovado';
-            else if (desvio >= -10 && desvio < -5) status = 'atencao';
-            else if (desvio > 10 && desvio <= 15) status = 'atencao';
-            else status = 'reprovado';
+            status = getStatusValidacao(desvio);
             
           } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf && med.capacitores?.capacitancia_nominal_uf) {
             // Recalcular capacitância
-            const teorico = med.capacitores.capacitancia_nominal_uf * 1.5;
+            const teorico = calculateCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
             desvio = ((med.capacitancia_medida_uf - teorico) / teorico) * 100;
-            
-            if (desvio >= -5 && desvio <= 10) status = 'aprovado';
-            else if (desvio >= -10 && desvio < -5) status = 'atencao';
-            else if (desvio > 10 && desvio <= 15) status = 'atencao';
-            else status = 'reprovado';
+            status = getStatusValidacao(desvio);
           }
         }
         

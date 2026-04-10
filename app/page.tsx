@@ -10,9 +10,19 @@ import {
   TrendingUp, 
   CheckCircle2, 
   AlertTriangle, 
-  XCircle 
+  XCircle,
+  DollarSign,
+  Activity,
+  Cpu,
+  ArrowUpRight
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { 
+  calculateCorrenteTeorica, 
+  calculateCapacitanciaTeoricaDelta, 
+  getStatusValidacao,
+  formatCurrency 
+} from '@/lib/utils';
 import { 
   Chart as ChartJS, 
   CategoryScale, 
@@ -44,7 +54,9 @@ export default function Dashboard() {
     medicoes: 0,
     aprovados: 0,
     atencao: 0,
-    reprovados: 0
+    reprovados: 0,
+    economiaTotal: 0,
+    eficienciaGeral: 0
   });
   const [loading, setLoading] = useState(true);
   const [recentMedicoes, setRecentMedicoes] = useState<any[]>([]);
@@ -62,18 +74,66 @@ export default function Dashboard() {
       const { count: capacitoresCount } = await supabase.from('capacitores').select('*', { count: 'exact', head: true });
       const { count: medicoesCount } = await supabase.from('medicoes').select('*', { count: 'exact', head: true });
       
-      const { data: statusData } = await supabase.from('medicoes').select('status_validacao, corrente_medida_a, tensao_medida_v');
+      // Buscar todas as medições para recalcular estatísticas reais
+      const { data: statusData } = await supabase
+        .from('medicoes')
+        .select(`
+          *,
+          capacitores(potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v)
+        `);
       
-      const statusCounts = (statusData || []).reduce((acc: any, curr: any) => {
+      // Processar e recalcular dados inconsistentes para o Dashboard
+      const processedMedicoes = (statusData || []).map(med => {
+        let desvio = med.desvio_percentual;
+        let status = med.status_validacao;
+        
+        const precisaRecalcular = desvio === null || desvio === undefined || 
+          (status === 'reprovado' && med.corrente_medida_a && med.corrente_teorica_a);
+        
+        if (precisaRecalcular) {
+          if (med.tipo_teste === 'corrente' && med.corrente_medida_a && med.capacitores?.potencia_kvar) {
+            const tensao = med.tensao_medida_v || med.capacitores.tensao_nominal_v;
+            const teorica = calculateCorrenteTeorica(med.capacitores.potencia_kvar, tensao);
+            desvio = ((med.corrente_medida_a - teorica) / teorica) * 100;
+            status = getStatusValidacao(desvio);
+          } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf && med.capacitores?.capacitancia_nominal_uf) {
+            const teorica = calculateCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
+            desvio = ((med.capacitancia_medida_uf - teorica) / teorica) * 100;
+            status = getStatusValidacao(desvio);
+          }
+        }
+        return { ...med, status_validacao: status, desvio_percentual: desvio };
+      });
+
+      const statusCounts = processedMedicoes.reduce((acc: any, curr: any) => {
         acc[curr.status_validacao] = (acc[curr.status_validacao] || 0) + 1;
         return acc;
       }, { aprovado: 0, atencao: 0, reprovado: 0 });
+
+      // Cálculo de Economia Estimada (Simulado baseado em KVAR gerenciado)
+      // Tarifa R$ 0,95/kWh conforme pedido
+      const totalKvarAprovado = processedMedicoes
+        .filter(m => m.status_validacao === 'aprovado')
+        .reduce((acc, m) => acc + (m.capacitores?.potencia_kvar || 0), 0);
+      
+      // Estimativa: Cada 1 KVAR aprovado economiza aprox. 0.5 kWh de perdas/multas por hora
+      const economiaEstimada = totalKvarAprovado * 0.5 * 24 * 30 * 0.95;
+
+      const eficiencia = medicoesCount && medicoesCount > 0 
+        ? (statusCounts.aprovado / medicoesCount) * 100 
+        : 0;
 
       const { data: recent } = await supabase
         .from('medicoes')
         .select('*, capacitores(codigo_identificacao), clientes(nome)')
         .order('created_at', { ascending: false })
         .limit(5);
+
+      // Recalcular também as recentes para exibição correta
+      const processedRecent = (recent || []).map(med => {
+        const found = processedMedicoes.find(pm => pm.id === med.id);
+        return found ? { ...med, ...found } : med;
+      });
 
       setStats({
         clientes: clientesCount || 0,
@@ -82,9 +142,11 @@ export default function Dashboard() {
         medicoes: medicoesCount || 0,
         aprovados: statusCounts.aprovado,
         atencao: statusCounts.atencao,
-        reprovados: statusCounts.reprovado
+        reprovados: statusCounts.reprovado,
+        economiaTotal: economiaEstimada,
+        eficienciaGeral: eficiencia
       });
-      setRecentMedicoes(recent || []);
+      setRecentMedicoes(processedRecent);
     } catch (error) {
       console.error('Error fetching stats:', error);
     } finally {
@@ -130,46 +192,136 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="space-y-8">
-      {/* Hero Section */}
+    <div className="space-y-8 pb-12">
+      {/* Hero Section Premium */}
       <motion.section 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="relative overflow-hidden rounded-2xl bg-primary p-8 text-white shadow-xl md:p-12"
+        className="relative overflow-hidden rounded-3xl bg-slate-950 p-8 text-white shadow-2xl md:p-16"
       >
-        <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-secondary/20 blur-3xl" />
-        <div className="absolute -bottom-20 -left-20 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-yellow-500/10 blur-3xl" />
+        <div className="absolute -bottom-20 -left-20 h-96 w-96 rounded-full bg-primary/5 blur-3xl" />
         
-        <div className="relative z-10 max-w-2xl">
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            <span className="mb-4 inline-block rounded-full bg-secondary/20 px-4 py-1 text-xs font-bold uppercase tracking-widest text-secondary">
-              CapacitorManager Pro
-            </span>
-            <h1 className="mb-4 text-3xl font-black md:text-5xl">
-              Capacitores sob controle, resultados sob medida.
-            </h1>
-            <p className="text-lg text-slate-300">
-              Gestão inteligente e precisa de bancos de capacitores para máxima eficiência industrial.
-            </p>
-          </motion.div>
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-8">
+          <div className="max-w-2xl">
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.2 }}
+            >
+              <div className="mb-6 flex items-center gap-2">
+                <span className="inline-block rounded-full bg-yellow-500/20 px-4 py-1 text-xs font-bold uppercase tracking-widest text-yellow-500">
+                  CapacitorManager Intelligence
+                </span>
+                <div className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
+              </div>
+              <h1 className="mb-6 text-4xl font-black leading-tight md:text-6xl">
+                O cérebro que faz sua indústria trabalhar para o <span className="text-yellow-500">seu bolso.</span>
+              </h1>
+              <p className="text-lg text-slate-400 md:text-xl">
+                Otimização energética em tempo real. Reduza multas de reativo e maximize a vida útil dos seus ativos.
+              </p>
+            </motion.div>
+          </div>
+
+          <div className="flex flex-col gap-4 min-w-[280px]">
+            <div className="rounded-2xl bg-white/5 p-6 backdrop-blur-md border border-white/10">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="rounded-lg bg-yellow-500/20 p-2">
+                  <DollarSign className="text-yellow-500" size={20} />
+                </div>
+                <span className="text-sm font-medium text-slate-400">Economia Estimada</span>
+              </div>
+              <p className="text-3xl font-black text-white">{formatCurrency(stats.economiaTotal)}</p>
+              <p className="text-xs text-slate-500 mt-1">Baseado em KVAR ativos / mês</p>
+            </div>
+          </div>
         </div>
       </motion.section>
 
-      {/* Stats Cards */}
+      {/* High Impact Indicators */}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div className="rounded-xl bg-green-50 p-3 text-green-600">
+              <Activity size={24} />
+            </div>
+            <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-md">LIVE</span>
+          </div>
+          <h3 className="text-sm font-medium text-slate-500 mb-1">Eficiência do Banco</h3>
+          <div className="flex items-end gap-2">
+            <p className="text-3xl font-black text-slate-900">{stats.eficienciaGeral.toFixed(1)}%</p>
+            <ArrowUpRight className="text-green-500 mb-1" size={20} />
+          </div>
+          <div className="mt-4 h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${stats.eficienciaGeral}%` }}
+              className="h-full bg-green-500"
+            />
+          </div>
+        </motion.div>
+
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div className="rounded-xl bg-blue-50 p-3 text-blue-600">
+              <Cpu size={24} />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="h-2 w-2 animate-ping rounded-full bg-blue-500" />
+              <span className="text-xs font-bold text-blue-600">ATIVO</span>
+            </div>
+          </div>
+          <h3 className="text-sm font-medium text-slate-500 mb-1">Status do Cérebro</h3>
+          <p className="text-xl font-bold text-slate-900">
+            {stats.reprovados > 0 ? 'Manutenção Necessária' : 'Otimização de Custos'}
+          </p>
+          <p className="text-xs text-slate-500 mt-2">
+            {stats.reprovados > 0 
+              ? `IA sugere trocar ${stats.reprovados} capacitores para evitar multas.` 
+              : 'IA analisando 24/7 para manter o fator de potência ideal.'}
+          </p>
+        </motion.div>
+
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="rounded-2xl bg-primary p-6 shadow-lg text-white"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div className="rounded-xl bg-white/10 p-3">
+              <Zap size={24} />
+            </div>
+            <span className="text-xs font-bold bg-white/10 px-2 py-1 rounded-md">SISTEMA</span>
+          </div>
+          <h3 className="text-sm font-medium text-slate-300 mb-1">Capacitores Monitorados</h3>
+          <p className="text-3xl font-black">{stats.capacitores}</p>
+          <p className="text-xs text-slate-400 mt-2">Total em todos os bancos</p>
+        </motion.div>
+      </div>
+
+      {/* Stats Cards Grid */}
       <motion.div 
         variants={containerVariants}
         initial="hidden"
         animate="visible"
         className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4"
       >
-        <StatCard icon={Users} label="Clientes" value={stats.clientes} color="bg-blue-600" />
-        <StatCard icon={Database} label="Bancos" value={stats.bancos} color="bg-indigo-600" />
-        <StatCard icon={Zap} label="Capacitores" value={stats.capacitores} color="bg-amber-600" />
-        <StatCard icon={ClipboardCheck} label="Medições" value={stats.medicoes} color="bg-emerald-600" />
+        <StatCard icon={Users} label="Clientes Ativos" value={stats.clientes} color="bg-slate-100 text-slate-600" />
+        <StatCard icon={Database} label="Bancos de Capacitores" value={stats.bancos} color="bg-slate-100 text-slate-600" />
+        <StatCard icon={ClipboardCheck} label="Total de Medições" value={stats.medicoes} color="bg-slate-100 text-slate-600" />
+        <StatCard icon={TrendingUp} label="Taxa de Sucesso" value={`${stats.eficienciaGeral.toFixed(0)}%`} color="bg-slate-100 text-slate-600" />
       </motion.div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
@@ -240,7 +392,12 @@ export default function Dashboard() {
                     </span>
                   </td>
                   <td className="py-4">
-                    <StatusBadge status={med.status_validacao} />
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={med.status_validacao} />
+                      {med.status_validacao === 'aprovado' && (
+                        <Zap size={14} className="text-yellow-500 fill-yellow-500" />
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -264,14 +421,14 @@ function StatCard({ icon: Icon, label, value, color }: any) {
         hidden: { y: 20, opacity: 0 },
         visible: { y: 0, opacity: 1 }
       }}
-      className="flex items-center gap-4 rounded-xl bg-white p-6 shadow-sm"
+      className="flex items-center gap-4 rounded-2xl bg-white p-6 shadow-sm border border-slate-100"
     >
-      <div className={cn("rounded-lg p-3 text-white", color)}>
+      <div className={cn("rounded-xl p-3", color)}>
         <Icon size={24} />
       </div>
       <div>
-        <p className="text-sm font-medium text-slate-500">{label}</p>
-        <p className="text-2xl font-bold text-primary">{value}</p>
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{label}</p>
+        <p className="text-2xl font-black text-slate-900">{value}</p>
       </div>
     </motion.div>
   );
@@ -279,17 +436,17 @@ function StatCard({ icon: Icon, label, value, color }: any) {
 
 function StatusBadge({ status }: { status: string }) {
   const configs: any = {
-    aprovado: { icon: CheckCircle2, color: 'text-success bg-success/10', label: 'Aprovado' },
-    atencao: { icon: AlertTriangle, color: 'text-secondary bg-secondary/10', label: 'Atenção' },
-    reprovado: { icon: XCircle, color: 'text-error bg-error/10', label: 'Reprovado' },
+    aprovado: { icon: CheckCircle2, color: 'text-green-700 bg-green-50', label: '✅ Aprovado' },
+    atencao: { icon: AlertTriangle, color: 'text-amber-700 bg-amber-50', label: '⚠️ Atenção' },
+    reprovado: { icon: XCircle, color: 'text-red-700 bg-red-50', label: '❌ Reprovado' },
   };
 
-  const config = configs[status] || configs.atencao;
+  const config = configs[status?.toLowerCase()] || configs.atencao;
   const Icon = config.icon;
 
   return (
-    <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium", config.color)}>
-      <Icon size={12} />
+    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold", config.color)}>
+      <Icon size={14} />
       {config.label}
     </span>
   );

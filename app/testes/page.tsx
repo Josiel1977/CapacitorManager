@@ -501,7 +501,7 @@ export default function RealizarTestePage() {
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center text-center text-slate-400">
                 <Calculator size={48} className="mb-4 opacity-20" />
-                <p>Preencha os dados e clique em "Calcular" para ver o resultado.</p>
+                <p>Preencha os dados e clique em &quot;Calcular&quot; para ver o resultado.</p>
               </div>
             )}
           </section>
