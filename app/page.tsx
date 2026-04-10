@@ -270,7 +270,36 @@ export default function Dashboard() {
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.2 }}
             >
-            
+              <div className="mb-6 flex items-center gap-2">
+                <span className="inline-block rounded-full bg-yellow-500/20 px-4 py-1 text-xs font-bold uppercase tracking-widest text-yellow-500">
+                  CapacitorManager Intelligence
+                </span>
+                <div className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
+              </div>
+              <h1 className="mb-6 text-4xl font-black leading-tight md:text-6xl">
+                O cérebro que faz sua indústria trabalhar para o <span className="text-yellow-500">seu bolso.</span>
+              </h1>
+              <p className="text-lg text-slate-400 md:text-xl">
+                Otimização energética em tempo real. Reduza multas de reativo e maximize a vida útil dos seus ativos.
+              </p>
+            </motion.div>
+          </div>
+
+          <div className="flex flex-col gap-4 min-w-[280px]">
+            <div className="rounded-2xl bg-white/5 p-6 backdrop-blur-md border border-white/10">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="rounded-lg bg-yellow-500/20 p-2">
+                  <DollarSign className="text-yellow-500" size={20} />
+                </div>
+                <span className="text-sm font-medium text-slate-400">Economia Estimada</span>
+              </div>
+              <p className="text-3xl font-black text-white">{formatCurrency(stats.economiaTotal)}</p>
+              <p className="text-xs text-slate-500 mt-1">Baseado em KVAR ativos / mês</p>
+            </div>
+          </div>
+        </div>
+      </motion.section>
+
       {/* High Impact Indicators */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         <motion.div 
