@@ -2,7 +2,9 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { BarChart3, TrendingUp, AlertCircle, Zap, Download, Calendar, TrendingDown, Activity } from 'lucide-react';
+import { BarChart3, TrendingUp, AlertCircle, Zap, Download, Calendar, TrendingDown, Activity, FileText } from 'lucide-react';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -51,6 +53,7 @@ export default function GraficosPage() {
   const [loading, setLoading] = useState(false);
   const [comparacaoCapacitores, setComparacaoCapacitores] = useState<any[]>([]);
   const chartRef = useRef<any>(null);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   const [selection, setSelection] = useState({
     cliente_id: '',
@@ -345,7 +348,18 @@ export default function GraficosPage() {
     try {
       Swal.fire({ title: 'Exportando...', text: 'Aguarde', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
       
-      const canvas = await (chartRef.current as any).canvas.toDataURL('image/png');
+      // Forçar visibilidade dos elementos do PDF durante a captura
+      const header = document.querySelector('.pdf-header') as HTMLElement;
+      const footer = document.querySelector('.pdf-footer') as HTMLElement;
+      if (header) header.style.display = 'flex';
+      if (footer) footer.style.display = 'block';
+
+      const canvas = chartRef.current.toBase64Image();
+      
+      // Restaurar estado original
+      if (header) header.style.display = 'none';
+      if (footer) footer.style.display = 'none';
+
       const link = document.createElement('a');
       link.download = `grafico_${selectedCapacitorData?.codigo_identificacao || 'capacitor'}.png`;
       link.href = canvas;
@@ -359,11 +373,112 @@ export default function GraficosPage() {
     }
   }
 
+  async function downloadPDF() {
+    if (!reportRef.current) return;
+
+    try {
+      Swal.fire({
+        title: 'Gerando PDF...',
+        text: 'Por favor, aguarde.',
+        allowOutsideClick: false,
+        didOpen: () => {
+          Swal.showLoading();
+        }
+      });
+
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 1200,
+        onclone: (clonedDoc) => {
+          const modernColorRegex = /(?:oklch|oklab|hwb|display-p3|color)\((?:[^()]+|\([^()]*\))+\)/gi;
+          const styleTags = Array.from(clonedDoc.getElementsByTagName('style'));
+          styleTags.forEach(style => {
+            try {
+              let css = style.textContent || '';
+              if (css.includes('oklch') || css.includes('oklab') || css.includes('@import') || css.includes('/*')) {
+                css = css.replace(/\/\*[\s\S]*?\*\//g, '');
+                css = css.replace(/@import\s+url\([^)]+\);/gi, '');
+                css = css.replace(modernColorRegex, '#1e293b');
+                style.textContent = css;
+              }
+            } catch (e) {}
+          });
+
+          const linkTags = Array.from(clonedDoc.getElementsByTagName('link'));
+          linkTags.forEach(link => {
+            if (link.rel === 'stylesheet') link.remove();
+          });
+
+          const allElements = clonedDoc.getElementsByTagName('*');
+          
+          // Tornar elementos do PDF visíveis no clone
+          const clonedHeader = clonedDoc.querySelector('.pdf-header') as HTMLElement;
+          const clonedFooter = clonedDoc.querySelector('.pdf-footer') as HTMLElement;
+          if (clonedHeader) clonedHeader.style.display = 'flex';
+          if (clonedFooter) clonedFooter.style.display = 'block';
+
+          for (let i = 0; i < allElements.length; i++) {
+            const el = allElements[i] as HTMLElement;
+            try {
+              if (el.style && el.style.cssText && (el.style.cssText.includes('oklch') || el.style.cssText.includes('oklab'))) {
+                el.style.cssText = el.style.cssText.replace(modernColorRegex, '#1e293b');
+              }
+            } catch (e) {}
+          }
+        }
+      });
+      
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      
+      const imgProps = pdf.getImageProperties(imgData);
+      const contentHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      let heightLeft = contentHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
+      heightLeft -= pdfHeight;
+
+      while (heightLeft >= 0) {
+        position = heightLeft - contentHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
+        heightLeft -= pdfHeight;
+      }
+
+      pdf.save(`Analise_Grafica_${selectedCapacitorData?.codigo_identificacao || 'capacitor'}.pdf`);
+      
+      Swal.close();
+      Swal.fire('Sucesso', 'Relatório exportado com sucesso!', 'success');
+    } catch (error) {
+      console.error('PDF Error:', error);
+      Swal.close();
+      Swal.fire('Erro', 'Falha ao gerar o PDF.', 'error');
+    }
+  }
+
   return (
     <div className="space-y-8">
-      <header>
-        <h1 className="text-3xl font-bold text-primary">Análise Gráfica</h1>
-        <p className="text-slate-500">Acompanhe a evolução, tendência e compare capacitores</p>
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-primary">Análise Gráfica</h1>
+          <p className="text-slate-500">Acompanhe a evolução, tendência e compare capacitores</p>
+        </div>
+        {selectedCapacitor && (
+          <button 
+            onClick={downloadPDF}
+            className="flex items-center gap-2 rounded-lg bg-slate-800 px-6 py-2 font-bold text-white hover:bg-slate-700 transition-colors"
+          >
+            <FileText size={20} />
+            Exportar PDF
+          </button>
+        )}
       </header>
 
       {/* Selectors */}
@@ -408,7 +523,26 @@ export default function GraficosPage() {
       </div>
 
       {selectedCapacitor && selectedCapacitorData ? (
-        <div className="space-y-8">
+        <div className="space-y-8" ref={reportRef}>
+          {/* Header para o PDF (Visível apenas no PDF via onclone ou se quisermos manter no preview) */}
+          <div className="hidden pdf-header mb-8 flex flex-row items-center justify-between border-b-4 pb-8 gap-4" style={{ borderColor: '#EAB308', backgroundColor: '#0f172a', margin: '-24px -24px 24px -24px', padding: '24px' }}>
+            <div className="flex items-center gap-4">
+              <div className="rounded-2xl p-3 text-primary" style={{ backgroundColor: '#EAB308' }}>
+                <Zap size={32} className="text-slate-900" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black tracking-tighter uppercase" style={{ color: '#ffffff' }}>
+                  CAPACITOR<span style={{ color: '#EAB308' }}>MANAGER</span>
+                </h2>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Análise Gráfica e Tendência Técnica</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] font-bold text-slate-500">DATA DE EMISSÃO</p>
+              <p className="text-sm font-bold text-white">{new Date().toLocaleDateString('pt-BR')}</p>
+            </div>
+          </div>
+
           {/* Informações do Capacitor */}
           <div className="rounded-xl bg-gradient-to-r from-primary to-primary-light p-6 text-white shadow-sm">
             <div className="flex flex-wrap justify-between items-center gap-4">
@@ -449,9 +583,9 @@ export default function GraficosPage() {
                   Exportar
                 </button>
               </div>
-              <div className="h-[400px]" ref={chartRef}>
+              <div className="h-[400px]">
                 {history.length > 0 ? (
-                  <Line data={chartData} options={chartOptions} />
+                  <Line ref={chartRef} data={chartData} options={chartOptions} />
                 ) : (
                   <div className="flex h-full items-center justify-center text-slate-400">
                     Nenhuma medição encontrada para este capacitor
@@ -578,6 +712,12 @@ export default function GraficosPage() {
               </p>
             </div>
           )}
+
+          {/* Footer para o PDF */}
+          <div className="hidden pdf-footer mt-auto border-t-4 pt-8 text-center" style={{ borderColor: '#EAB308', backgroundColor: '#f8fafc', margin: '24px -24px -24px -24px', padding: '24px' }}>
+            <p className="text-xs font-bold text-slate-700">Este documento é uma análise gráfica técnica oficial gerada pelo sistema CapacitorManager.</p>
+            <p className="text-[10px] text-slate-600 mt-2 font-medium">JM ELETRO SERVICE | contato@jmeletroservice.com.br</p>
+          </div>
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center rounded-xl bg-white py-24 shadow-sm text-slate-400">

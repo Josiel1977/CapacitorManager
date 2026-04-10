@@ -134,6 +134,7 @@ export default function RelatoriosPage() {
     return correctedMedicoes;
   }
 
+  // Agrupar medições por capacitor para análise de tendência
   function agruparPorCapacitor(medicoes: any[]) {
     const grupos: any = {};
     medicoes.forEach(med => {
@@ -202,38 +203,63 @@ export default function RelatoriosPage() {
         }
       });
 
-      // Clonar o elemento para não afetar a tela
-      const originalElement = reportRef.current;
-      const cloneElement = originalElement.cloneNode(true) as HTMLElement;
-      
-      // Estilizar o clone para garantir a renderização correta
-      cloneElement.style.position = 'absolute';
-      cloneElement.style.top = '-9999px';
-      cloneElement.style.left = '-9999px';
-      cloneElement.style.width = '800px';
-      cloneElement.style.backgroundColor = '#ffffff';
-      document.body.appendChild(cloneElement);
-
-      // Garantir que todos os estilos sejam aplicados
-      const canvas = await html2canvas(cloneElement, {
-        scale: 2.5,
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
-        windowWidth: 800,
-        onclone: (clonedDoc, element) => {
-          // Ajustar estilos no clone
-          const clonedHeader = clonedDoc.querySelector('.report-header');
-          if (clonedHeader) {
-            (clonedHeader as HTMLElement).style.margin = '0';
-            (clonedHeader as HTMLElement).style.padding = '40px';
+        windowWidth: 1200,
+        onclone: (clonedDoc) => {
+          const modernColorRegex = /(?:oklch|oklab|hwb|display-p3|color)\((?:[^()]+|\([^()]*\))+\)/gi;
+          
+          // 1. Process all style tags
+          const styleTags = Array.from(clonedDoc.getElementsByTagName('style'));
+          styleTags.forEach(style => {
+            try {
+              let css = style.textContent || '';
+              if (css.includes('oklch') || css.includes('oklab') || css.includes('@import') || css.includes('/*')) {
+                css = css.replace(/\/\*[\s\S]*?\*\//g, '');
+                css = css.replace(/@import\s+url\([^)]+\);/gi, '');
+                css = css.replace(/@import\s+['"][^'"]+['"];/gi, '');
+                css = css.replace(/@import\s+[^;]+;/gi, '');
+                css = css.replace(modernColorRegex, '#1e293b');
+                style.textContent = css;
+              }
+            } catch (e) {}
+          });
+
+          // 2. Process all link tags (external stylesheets)
+          // html2canvas fails when it tries to parse external sheets containing oklch
+          const linkTags = Array.from(clonedDoc.getElementsByTagName('link'));
+          linkTags.forEach(link => {
+            if (link.rel === 'stylesheet') {
+              // In production, Next.js styles are in <link> tags.
+              // We remove them to prevent html2canvas from crashing on oklch.
+              // We rely on inline styles and sanitized <style> tags for the PDF layout.
+              link.remove();
+            }
+          });
+
+          // 3. Process all elements for inline styles
+          const allElements = clonedDoc.getElementsByTagName('*');
+          for (let i = 0; i < allElements.length; i++) {
+            const el = allElements[i] as HTMLElement;
+            try {
+              if (el.style && el.style.cssText && (
+                el.style.cssText.includes('oklch') || 
+                el.style.cssText.includes('oklab') || 
+                el.style.cssText.includes('@import')
+              )) {
+                let inlineCss = el.style.cssText;
+                inlineCss = inlineCss.replace(/@import[^;]+;/gi, '');
+                inlineCss = inlineCss.replace(modernColorRegex, '#1e293b');
+                el.style.cssText = inlineCss;
+              }
+            } catch (e) {}
           }
         }
       });
-
-      // Remover o clone
-      document.body.removeChild(cloneElement);
-
+      
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
@@ -245,10 +271,12 @@ export default function RelatoriosPage() {
       let heightLeft = contentHeight;
       let position = 0;
 
+      // Add first page
       pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
       heightLeft -= pdfHeight;
 
-      while (heightLeft > 0) {
+      // Add subsequent pages if content is longer than one page
+      while (heightLeft >= 0) {
         position = heightLeft - contentHeight;
         pdf.addPage();
         pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
@@ -339,86 +367,82 @@ export default function RelatoriosPage() {
         <div className="flex justify-center overflow-x-auto pb-8">
           <div 
             ref={reportRef}
-            className="w-full max-w-[800px] bg-white shadow-2xl"
-            style={{ padding: '40px' }}
+            className="w-full max-w-[800px] bg-white p-12 shadow-2xl"
+            style={{ minHeight: '1122px' }}
           >
             {/* Header - Dark & Yellow Theme */}
-            <div className="mb-8" style={{ backgroundColor: '#0f172a', margin: '-40px -40px 40px -40px', padding: '40px' }}>
-              <div className="flex flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <div className="rounded-2xl p-3" style={{ backgroundColor: '#EAB308' }}>
-                    <Zap size={40} className="text-slate-900" />
-                  </div>
-                  <div>
-                    <h2 className="text-3xl font-black tracking-tighter uppercase" style={{ color: '#ffffff' }}>
-                      CAPACITOR<span style={{ color: '#EAB308' }}>MANAGER</span>
-                    </h2>
-                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Relatório Técnico de Manutenção Especializada</p>
-                  </div>
+            <div className="mb-12 flex flex-row items-center justify-between border-b-4 pb-8 gap-4" style={{ borderColor: '#EAB308', backgroundColor: '#0f172a', margin: '-48px -48px 48px -48px', padding: '48px' }}>
+              <div className="flex items-center gap-4">
+                <div className="rounded-2xl p-3 text-primary" style={{ backgroundColor: '#EAB308' }}>
+                  <Zap size={40} className="text-slate-900" />
                 </div>
-                <div className="text-right">
-                  <p className="text-xs font-bold text-slate-500">DATA DE EMISSÃO</p>
-                  <p className="text-base font-bold text-white">{reportData.date}</p>
-                  <p className="text-xs" style={{ color: '#EAB308' }}>{reportData.time}</p>
+                <div>
+                  <h2 className="text-3xl sm:text-4xl font-black tracking-tighter uppercase" style={{ color: '#ffffff' }}>
+                    CAPACITOR<span style={{ color: '#EAB308' }}>MANAGER</span>
+                  </h2>
+                  <p className="text-xs sm:text-sm font-bold uppercase tracking-widest text-slate-400">Relatório Técnico de Manutenção Especializada</p>
                 </div>
+              </div>
+              <div className="text-left sm:text-right">
+                <p className="text-[10px] sm:text-sm font-bold text-slate-500">DATA DE EMISSÃO</p>
+                <p className="text-base sm:text-lg font-bold text-white">{reportData.date}</p>
+                <p className="text-[10px] sm:text-xs text-[#EAB308]">{reportData.time}</p>
               </div>
             </div>
 
-            {/* Client Info */}
-            <div className="mb-8 rounded-xl p-6" style={{ backgroundColor: '#f8fafc' }}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="mb-3 text-xs font-black uppercase tracking-widest text-slate-400">DADOS DO CLIENTE</h3>
-                  <p className="text-lg font-bold" style={{ color: '#1e293b' }}>{reportData.cliente.nome}</p>
-                  <p className="text-sm text-slate-600">{reportData.cliente.cnpj_cpf || 'CNPJ não informado'}</p>
-                  <p className="text-sm text-slate-600">{reportData.cliente.contato_responsavel || ''}</p>
-                  <p className="text-sm text-slate-600">{reportData.cliente.telefone || ''}</p>
+            {/* Client Info - Cores mais profissionais */}
+            <div className="mb-8 sm:mb-12 grid grid-cols-1 md:grid-cols-2 gap-8 rounded-xl p-4 sm:p-8" style={{ backgroundColor: '#f8fafc' }}>
+              <div>
+                <h3 className="mb-4 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">DADOS DO CLIENTE</h3>
+                <p className="text-lg sm:text-xl font-bold" style={{ color: '#1e293b' }}>{reportData.cliente.nome}</p>
+                <p className="text-sm text-slate-600">{reportData.cliente.cnpj_cpf || 'CNPJ não informado'}</p>
+                <p className="text-sm text-slate-600">{reportData.cliente.contato_responsavel || ''}</p>
+                <p className="text-sm text-slate-600">{reportData.cliente.telefone || ''}</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                <div className="text-center">
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">APROVADOS</p>
+                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#059669' }}>{reportData.stats.aprovado}</p>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="text-center">
-                    <p className="text-[10px] font-bold text-slate-400">APROVADOS</p>
-                    <p className="text-2xl font-black" style={{ color: '#059669' }}>{reportData.stats.aprovado}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[10px] font-bold text-slate-400">ATENÇÃO</p>
-                    <p className="text-2xl font-black" style={{ color: '#d97706' }}>{reportData.stats.atencao}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[10px] font-bold text-slate-400">REPROVADOS</p>
-                    <p className="text-2xl font-black" style={{ color: '#dc2626' }}>{reportData.stats.reprovado}</p>
-                  </div>
+                <div className="text-center">
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">ATENÇÃO</p>
+                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#d97706' }}>{reportData.stats.atencao}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">REPROVADOS</p>
+                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#dc2626' }}>{reportData.stats.reprovado}</p>
                 </div>
               </div>
             </div>
 
             {/* Análise de Tendência por Capacitor */}
             {tendencias.length > 0 && (
-              <div className="mb-8">
-                <h3 className="mb-4 text-xs font-black uppercase tracking-widest text-slate-400">📊 ANÁLISE DE TENDÊNCIA POR CAPACITOR</h3>
+              <div className="mb-8 sm:mb-12">
+                <h3 className="mb-6 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">📊 ANÁLISE DE TENDÊNCIA POR CAPACITOR</h3>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full text-left min-w-[600px]">
                     <thead>
-                      <tr className="border-b-2 border-slate-200">
-                        <th className="pb-3">CAPACITOR</th>
-                        <th className="pb-3">BANCO</th>
-                        <th className="pb-3">1ª MEDIÇÃO</th>
-                        <th className="pb-3">ÚLTIMA</th>
-                        <th className="pb-3">VARIAÇÃO</th>
-                        <th className="pb-3">TENDÊNCIA</th>
-                        <th className="pb-3">PREVISÃO</th>
+                      <tr className="border-b-2 border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        <th className="pb-4">CAPACITOR</th>
+                        <th className="pb-4">BANCO</th>
+                        <th className="pb-4">1ª MEDIÇÃO</th>
+                        <th className="pb-4">ÚLTIMA</th>
+                        <th className="pb-4">VARIAÇÃO</th>
+                        <th className="pb-4">TENDÊNCIA</th>
+                        <th className="pb-4">PREVISÃO</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {tendencias.map((t, idx) => (
-                        <tr key={idx}>
-                          <td className="py-3 font-bold text-slate-800">{t.nome}</td>
-                          <td className="py-3 text-slate-600">{t.banco}</td>
-                          <td className="py-3 text-slate-500">{t.primeiraDesvio}%<br/><span className="text-slate-400">{t.primeiraData}</span></td>
-                          <td className="py-3 text-slate-500">{t.ultimaDesvio}%<br/><span className="text-slate-400">{t.ultimaData}</span></td>
-                          <td className="py-3 font-bold" style={{ color: parseFloat(t.variacao) > 0 ? '#dc2626' : parseFloat(t.variacao) < 0 ? '#10b981' : '#64748b' }}>
+                        <tr key={idx} className="text-[10px] sm:text-xs">
+                          <td className="py-4 font-bold text-slate-800">{t.nome}</td>
+                          <td className="py-4 text-slate-600">{t.banco}</td>
+                          <td className="py-4 text-slate-500">{t.primeiraDesvio}%<br/><span className="text-slate-400">{t.primeiraData}</span></td>
+                          <td className="py-4 text-slate-500">{t.ultimaDesvio}%<br/><span className="text-slate-400">{t.ultimaData}</span></td>
+                          <td className="py-4 font-bold" style={{ color: parseFloat(t.variacao) > 0 ? '#dc2626' : parseFloat(t.variacao) < 0 ? '#10b981' : '#64748b' }}>
                             {parseFloat(t.variacao) > 0 ? '+' : ''}{t.variacao}%
                           </td>
-                          <td className="py-3">
+                          <td className="py-4">
                             <div className="flex items-center gap-1">
                               {getTendenciaIcon(t.tendencia)}
                               <span className={t.tendencia === 'piorando' ? 'text-red-600' : t.tendencia === 'melhorando' ? 'text-green-600' : 'text-slate-500'}>
@@ -426,10 +450,11 @@ export default function RelatoriosPage() {
                               </span>
                             </div>
                           </td>
-                          <td className="py-3">
+                          <td className="py-4">
                             {t.previsao ? (
                               <span className="text-amber-600 font-medium">
-                                ~{t.previsao.meses} meses
+                                ~{t.previsao.meses} meses<br/>
+                                <span className="text-slate-400 text-[8px]">{t.previsao.data}</span>
                               </span>
                             ) : (
                               <span className="text-green-600">OK</span>
@@ -444,41 +469,41 @@ export default function RelatoriosPage() {
             )}
 
             {/* Measurements Table */}
-            <div className="mb-8">
-              <h3 className="mb-4 text-xs font-black uppercase tracking-widest text-slate-400">DETALHAMENTO DAS MEDIÇÕES</h3>
+            <div className="mb-8 sm:mb-12">
+              <h3 className="mb-6 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">DETALHAMENTO DAS MEDIÇÕES</h3>
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
+                <table className="w-full text-left min-w-[700px]">
                   <thead>
-                    <tr className="border-b-2 border-slate-200">
-                      <th className="pb-3">DATA</th>
-                      <th className="pb-3">BANCO</th>
-                      <th className="pb-3">CAPACITOR</th>
-                      <th className="pb-3">TENSÃO</th>
-                      <th className="pb-3">TIPO</th>
-                      <th className="pb-3">TEÓRICO</th>
-                      <th className="pb-3">MEDIDO</th>
-                      <th className="pb-3">DESVIO</th>
-                      <th className="pb-3">STATUS</th>
+                    <tr className="border-b-2 border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                      <th className="pb-4">DATA</th>
+                      <th className="pb-4">BANCO</th>
+                      <th className="pb-4">CAPACITOR</th>
+                      <th className="pb-4">TENSÃO</th>
+                      <th className="pb-4">TIPO</th>
+                      <th className="pb-4">TEÓRICO</th>
+                      <th className="pb-4">MEDIDO</th>
+                      <th className="pb-4">DESVIO</th>
+                      <th className="pb-4">STATUS</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {reportData.medicoes.map((med: any) => (
-                      <tr key={med.id}>
-                        <td className="py-3 text-slate-600">{new Date(med.created_at).toLocaleDateString()}</td>
-                        <td className="py-3 font-bold text-slate-700">{med.bancos_capacitores?.nome_banco || '-'}</td>
-                        <td className="py-3 font-medium text-slate-700">{med.capacitores?.codigo_identificacao || '-'}</td>
-                        <td className="py-3">
+                      <tr key={med.id} className="text-[10px] sm:text-xs">
+                        <td className="py-4 text-slate-600">{new Date(med.created_at).toLocaleDateString()}</td>
+                        <td className="py-4 font-bold text-slate-700">{med.bancos_capacitores?.nome_banco || '-'}</td>
+                        <td className="py-4 font-medium text-slate-700">{med.capacitores?.codigo_identificacao || '-'}</td>
+                        <td className="py-4">
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${med.tensaoNominal === 220 ? 'bg-blue-50 text-blue-700' : med.tensaoNominal === 380 ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
                             ⚡ {med.tensaoNominal}V
                           </span>
                         </td>
-                        <td className="py-3 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? 'Corrente' : 'Capacitância'}</td>
-                        <td className="py-3 text-slate-500">{getValorTeorico(med)}</td>
-                        <td className="py-3 font-medium text-slate-700">{getValorMedido(med)}</td>
-                        <td className="py-3 font-bold" style={{ color: med.desvio_percentual > 0 ? '#dc2626' : med.desvio_percentual < 0 ? '#d97706' : '#64748b' }}>
+                        <td className="py-4 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? 'Corrente' : 'Capacitância'}</td>
+                        <td className="py-4 text-slate-500">{getValorTeorico(med)}</td>
+                        <td className="py-4 font-medium text-slate-700">{getValorMedido(med)}</td>
+                        <td className="py-4 font-bold" style={{ color: med.desvio_percentual > 0 ? '#dc2626' : med.desvio_percentual < 0 ? '#d97706' : '#64748b' }}>
                           {formatDesvio(med.desvio_percentual)}
                         </td>
-                        <td className="py-3">
+                        <td className="py-4">
                           <StatusBadge status={med.status_validacao} />
                         </td>
                       </tr>
@@ -488,17 +513,17 @@ export default function RelatoriosPage() {
               </div>
             </div>
 
-            {/* Summary */}
-            <div className="mb-8 rounded-lg p-5" style={{ backgroundColor: '#f8fafc' }}>
-              <h3 className="mb-3 text-xs font-black uppercase tracking-widest text-slate-400">RESUMO EXECUTIVO</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm mb-3">
+            {/* Summary - Cores mais profissionais */}
+            <div className="mb-8 rounded-lg bg-slate-50 p-4 sm:p-6">
+              <h3 className="mb-4 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">RESUMO EXECUTIVO</h3>
+              <div className="grid grid-cols-2 gap-4 text-xs sm:text-sm mb-4">
                 <div>
                   <p className="text-slate-500">Total de Medições:</p>
-                  <p className="text-xl font-bold text-slate-800">{reportData.medicoes.length}</p>
+                  <p className="text-xl sm:text-2xl font-bold text-slate-800">{reportData.medicoes.length}</p>
                 </div>
                 <div>
                   <p className="text-slate-500">Taxa de Aprovação:</p>
-                  <p className="text-xl font-bold text-emerald-600">
+                  <p className="text-xl sm:text-2xl font-bold text-emerald-600">
                     {reportData.medicoes.length > 0 
                       ? ((reportData.stats.aprovado / reportData.medicoes.length) * 100).toFixed(1) 
                       : 0}%
@@ -508,7 +533,7 @@ export default function RelatoriosPage() {
               
               {/* Capacitores Críticos */}
               {tendencias.filter(t => t.tendencia === 'piorando' && parseFloat(t.variacao) > 5).length > 0 && (
-                <div className="mt-3 p-3 bg-red-50 rounded-lg border border-red-200">
+                <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
                   <p className="text-xs font-bold text-red-700 mb-2">⚠️ CAPACITORES QUE NECESSITAM ATENÇÃO:</p>
                   <ul className="text-xs text-red-600 space-y-1">
                     {tendencias.filter(t => t.tendencia === 'piorando' && parseFloat(t.variacao) > 5).map((t, idx) => (
@@ -519,28 +544,28 @@ export default function RelatoriosPage() {
               )}
             </div>
 
-            {/* Footer */}
-            <div className="mt-8 pt-6 text-center border-t-4" style={{ borderColor: '#EAB308' }}>
-              <div className="grid grid-cols-2 gap-8 mb-6">
+            {/* Footer - Highlighted */}
+            <div className="mt-auto border-t-4 pt-12 text-center" style={{ borderColor: '#EAB308', backgroundColor: '#f8fafc', margin: '64px -48px -48px -48px', padding: '48px' }}>
+              <div className="grid grid-cols-2 gap-12 mb-12">
                 <div className="text-center">
-                  <div className="mx-auto h-px w-32 bg-slate-400 mb-2"></div>
+                  <div className="mx-auto h-px w-48 bg-slate-400 mb-2"></div>
                   <p className="text-[10px] font-bold text-slate-700 uppercase tracking-widest">Responsável Técnico</p>
                   <p className="text-[8px] text-slate-500">Assinatura / Carimbo</p>
                 </div>
                 <div className="text-center">
-                  <div className="mx-auto h-px w-32 bg-slate-400 mb-2"></div>
+                  <div className="mx-auto h-px w-48 bg-slate-400 mb-2"></div>
                   <p className="text-[10px] font-bold text-slate-700 uppercase tracking-widest">Cliente / Recebedor</p>
                   <p className="text-[8px] text-slate-500">Assinatura / Data</p>
                 </div>
               </div>
               
-              <div className="pt-4 border-t border-slate-200">
+              <div className="pt-8 border-t border-slate-200">
                 <p className="text-xs font-bold text-slate-700">Este relatório é um documento técnico oficial gerado pelo sistema CapacitorManager.</p>
-                <p className="text-[10px] text-slate-600 mt-3 font-medium">JM ELETRO SERVICE | contato@jmeletroservice.com.br | (91) 98231-9448</p>
-                <div className="mt-3 flex justify-center gap-2">
-                  <div className="h-1 w-10" style={{ backgroundColor: '#EAB308' }}></div>
-                  <div className="h-1 w-10" style={{ backgroundColor: '#0f172a' }}></div>
-                  <div className="h-1 w-10" style={{ backgroundColor: '#EAB308' }}></div>
+                <p className="text-[10px] text-slate-600 mt-4 font-medium">JM ELETRO SERVICE | contato@jmeletroservice.com.br | (91) 98231-9448</p>
+                <div className="mt-4 flex justify-center gap-2">
+                  <div className="h-1 w-12 bg-[#EAB308]"></div>
+                  <div className="h-1 w-12 bg-slate-900"></div>
+                  <div className="h-1 w-12 bg-[#EAB308]"></div>
                 </div>
               </div>
             </div>
@@ -560,20 +585,20 @@ function StatusBadge({ status }: { status: string }) {
   const configs: any = {
     aprovado: { 
       icon: CheckCircle2, 
-      color: '#059669',
-      bg: '#ecfdf5',
+      color: '#059669', // emerald-600
+      bg: '#ecfdf5',    // emerald-50
       label: 'APROVADO' 
     },
     atencao: { 
       icon: AlertTriangle, 
-      color: '#d97706',
-      bg: '#fffbeb',
+      color: '#d97706', // amber-600
+      bg: '#fffbeb',    // amber-50
       label: 'ATENÇÃO' 
     },
     reprovado: { 
       icon: XCircle, 
-      color: '#dc2626',
-      bg: '#fef2f2',
+      color: '#dc2626', // red-600
+      bg: '#fef2f2',    // red-50
       label: 'REPROVADO' 
     },
   };
