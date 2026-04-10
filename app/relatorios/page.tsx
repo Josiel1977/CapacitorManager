@@ -55,13 +55,13 @@ export default function RelatoriosPage() {
           const tensao = med.tensao_medida_v || med.capacitores.tensao_nominal_v;
           correnteTeorica = calculateCorrenteTeorica(med.capacitores.potencia_kvar, tensao);
           desvio = ((med.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
-          status = getStatusValidacao(desvio, null);
+          status = getStatusValidacao(desvio);
           
         } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf && med.capacitores?.capacitancia_nominal_uf) {
           // Recalcular capacitância
           capacitanciaTeorica = calculateCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
           desvio = ((med.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
-          status = getStatusValidacao(desvio, null);
+          status = getStatusValidacao(desvio);
         }
       }
 
