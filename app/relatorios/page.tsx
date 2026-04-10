@@ -245,21 +245,31 @@ export default function RelatoriosPage() {
             }
           });
 
-          // 3. Processar estilos inline em todos os elementos
+          // 3. Process inline styles and computed styles
           const allElements = clonedDoc.getElementsByTagName('*');
           for (let i = 0; i < allElements.length; i++) {
             const el = allElements[i] as HTMLElement;
             
             // Forçar cores sólidas para evitar oklch em bordas e textos que o Tailwind v4 aplica
-            if (el.classList.contains('text-primary')) el.style.color = '#EAB308';
-            if (el.classList.contains('bg-primary')) el.style.backgroundColor = '#0f172a';
-            if (el.classList.contains('border-primary')) el.style.borderColor = '#EAB308';
+            if (el.classList.contains('text-primary')) el.style.color = '#0a2b3c';
+            if (el.classList.contains('bg-primary')) el.style.backgroundColor = '#0a2b3c';
+            if (el.classList.contains('border-primary')) el.style.borderColor = '#0a2b3c';
+            if (el.classList.contains('text-secondary')) el.style.color = '#f39c12';
+            if (el.classList.contains('bg-secondary')) el.style.backgroundColor = '#f39c12';
             
             try {
               if (el.style && el.style.cssText) {
                 if (el.style.cssText.includes('oklch') || el.style.cssText.includes('oklab')) {
-                  el.style.cssText = el.style.cssText.replace(modernColorRegex, '#1e293b');
+                  el.style.cssText = el.style.cssText.replace(modernColorRegex, '#0a2b3c');
                 }
+              }
+              
+              const style = window.getComputedStyle(el);
+              if (style.color.includes('oklch') || style.color.includes('oklab')) {
+                el.style.color = '#0a2b3c';
+              }
+              if (style.backgroundColor.includes('oklch') || style.backgroundColor.includes('oklab')) {
+                if (!el.style.backgroundColor) el.style.backgroundColor = '#ffffff';
               }
             } catch (e) {}
           }
