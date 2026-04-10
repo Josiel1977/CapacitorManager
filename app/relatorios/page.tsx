@@ -429,7 +429,7 @@ export default function RelatoriosPage() {
                             ⚡ {med.tensaoNominal}V
                           </span>
                         </td>
-                        <td className="py-4 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? '🔁 Corrente' : '📏 Capacitância'}</td>
+                        <td className="py-4 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? ' Corrente' : ' Capacitância'}</td>
                         <td className="py-4 text-slate-500">{getValorTeorico(med)}</td>
                         <td className="py-4 font-medium text-slate-700">{getValorMedido(med)}</td>
                         <td className="py-4 font-bold" style={{ color: med.desvio_percentual > 0 ? '#dc2626' : med.desvio_percentual < 0 ? '#d97706' : '#64748b' }}>
