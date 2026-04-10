@@ -2,11 +2,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Search, Trash2, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { Search, Trash2, CheckCircle2, AlertTriangle, XCircle, TrendingUp, TrendingDown, Calendar, BarChart3, Activity } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 
-// Funções de cálculo locais para garantir consistência
+// Funções de cálculo
 function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
     if (!tensaoNominal || tensaoNominal === 0) return 0;
     return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
@@ -23,15 +23,50 @@ function getStatusValidacao(desvio: number): string {
     return 'reprovado';
 }
 
+// Função para calcular tendência de degradação
+function calcularTendencia(medicoes: any[]) {
+    if (medicoes.length < 2) return null;
+    
+    const primeira = medicoes[medicoes.length - 1];
+    const ultima = medicoes[0];
+    
+    const variacao = ultima.desvio_percentual - primeira.desvio_percentual;
+    const dias = (new Date(ultima.created_at).getTime() - new Date(primeira.created_at).getTime()) / (1000 * 3600 * 24);
+    const degradacaoPorMes = dias > 0 ? (variacao / dias) * 30 : 0;
+    
+    let previsao = null;
+    if (degradacaoPorMes > 0 && ultima.desvio_percentual < 15) {
+        const mesesRestantes = (15 - ultima.desvio_percentual) / degradacaoPorMes;
+        previsao = {
+            meses: mesesRestantes.toFixed(1),
+            data: new Date(Date.now() + mesesRestantes * 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR')
+        };
+    }
+    
+    return {
+        variacao: variacao.toFixed(2),
+        degradacaoPorMes: degradacaoPorMes.toFixed(2),
+        tendencia: variacao > 0 ? 'piorando' : variacao < 0 ? 'melhorando' : 'estavel',
+        primeiraData: new Date(primeira.created_at).toLocaleDateString('pt-BR'),
+        ultimaData: new Date(ultima.created_at).toLocaleDateString('pt-BR'),
+        primeiraDesvio: primeira.desvio_percentual?.toFixed(2) || '0',
+        ultimaDesvio: ultima.desvio_percentual?.toFixed(2) || '0',
+        previsao
+    };
+}
+
 export default function HistoricoPage() {
   const [medicoes, setMedicoes] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedCapacitor, setSelectedCapacitor] = useState<string | null>(null);
+  const [analiseData, setAnaliseData] = useState<any>(null);
   const [filters, setFilters] = useState({
     cliente_id: '',
     tipo_teste: '',
     status: '',
-    search: ''
+    search: '',
+    periodo: 'todos' // todos, 30dias, 60dias, 90dias
   });
 
   useEffect(() => {
@@ -59,7 +94,6 @@ export default function HistoricoPage() {
 
       if (medError) throw medError;
       
-      // Processar e recalcular cada medição
       const processedData = medData?.map(med => {
         let desvio = med.desvio_percentual;
         let status = med.status_validacao;
@@ -71,7 +105,6 @@ export default function HistoricoPage() {
           tensaoExibicao = tensaoNominal;
           
           if (med.tipo_teste === 'corrente') {
-            // Para corrente, usa a tensão nominal do capacitor
             const correnteTeorica = calcularCorrenteTeorica(med.capacitores.potencia_kvar, tensaoNominal);
             teoricoLabel = `${correnteTeorica.toFixed(2)} A @ ${tensaoNominal}V`;
             
@@ -80,7 +113,6 @@ export default function HistoricoPage() {
               status = getStatusValidacao(desvio);
             }
           } else if (med.tipo_teste === 'capacitancia') {
-            // Para capacitância, usa a capacitância nominal × 1.5 (delta)
             const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
             teoricoLabel = `${capacitanciaTeorica.toFixed(2)} µF (Δ) @ ${tensaoNominal}V`;
             
@@ -109,6 +141,17 @@ export default function HistoricoPage() {
     }
   }
 
+  // Filtrar por período
+  const getDataLimite = () => {
+    const hoje = new Date();
+    switch (filters.periodo) {
+      case '30dias': return new Date(hoje.setDate(hoje.getDate() - 30));
+      case '60dias': return new Date(hoje.setDate(hoje.getDate() - 60));
+      case '90dias': return new Date(hoje.setDate(hoje.getDate() - 90));
+      default: return null;
+    }
+  };
+
   const filteredMedicoes = medicoes.filter(m => {
     const matchCliente = !filters.cliente_id || m.cliente_id === filters.cliente_id;
     const matchTipo = !filters.tipo_teste || m.tipo_teste === filters.tipo_teste;
@@ -117,8 +160,65 @@ export default function HistoricoPage() {
       m.capacitores?.codigo_identificacao?.toLowerCase().includes(filters.search.toLowerCase()) ||
       m.bancos_capacitores?.nome_banco?.toLowerCase().includes(filters.search.toLowerCase());
     
-    return matchCliente && matchTipo && matchStatus && matchSearch;
+    const dataLimite = getDataLimite();
+    const matchPeriodo = !dataLimite || new Date(m.created_at) >= dataLimite;
+    
+    return matchCliente && matchTipo && matchStatus && matchSearch && matchPeriodo;
   });
+
+  // Agrupar medições por capacitor para análise
+  const medicoesPorCapacitor = filteredMedicoes.reduce((acc: any, med) => {
+    const key = `${med.capacitores?.codigo_identificacao}_${med.capacitores?.id}`;
+    if (!acc[key]) {
+      acc[key] = {
+        nome: med.capacitores?.codigo_identificacao,
+        id: med.capacitores?.id,
+        medicoes: []
+      };
+    }
+    acc[key].medicoes.push(med);
+    return acc;
+  }, {});
+
+  // Ordenar medições de cada capacitor por data
+  Object.keys(medicoesPorCapacitor).forEach(key => {
+    medicoesPorCapacitor[key].medicoes.sort((a: any, b: any) => 
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+  });
+
+  function handleAnalisarCapacitor(capacitorNome: string, capacitorMedicoes: any[]) {
+    if (capacitorMedicoes.length < 2) {
+      Swal.fire('Atenção', 'São necessárias pelo menos 2 medições para análise de tendência', 'info');
+      return;
+    }
+    
+    const tendencia = calcularTendencia(capacitorMedicoes);
+    setSelectedCapacitor(capacitorNome);
+    setAnaliseData(tendencia);
+    
+    Swal.fire({
+      title: `📊 Análise de Tendência - ${capacitorNome}`,
+      html: `
+        <div style="text-align: left;">
+          <p><strong>📅 Período analisado:</strong> ${tendencia.primeiraData} a ${tendencia.ultimaData}</p>
+          <p><strong>📉 Desvio inicial:</strong> ${tendencia.primeiraDesvio}%</p>
+          <p><strong>📈 Desvio atual:</strong> ${tendencia.ultimaDesvio}%</p>
+          <p><strong>🔄 Variação total:</strong> <span style="color: ${tendencia.variacao > 0 ? '#e74c3c' : '#2ecc71'}; font-weight: bold;">${tendencia.variacao > 0 ? '+' : ''}${tendencia.variacao}%</span></p>
+          <p><strong>📊 Tendência:</strong> ${tendencia.tendencia === 'piorando' ? '⚠️ Degradação detectada' : tendencia.tendencia === 'melhorando' ? '✅ Melhorando' : '➡️ Estável'}</p>
+          <p><strong>⚡ Degradação por mês:</strong> ${tendencia.degradacaoPorMes}%</p>
+          ${tendencia.previsao ? `
+            <hr style="margin: 15px 0;">
+            <p><strong>🔮 PREVISÃO:</strong></p>
+            <p>⚠️ Previsão de substituição em aproximadamente <strong>${tendencia.previsao.meses} meses</strong></p>
+            <p>📅 Data estimada: <strong>${tendencia.previsao.data}</strong></p>
+          ` : '<p>✅ Capacitor dentro da faixa normal de operação</p>'}
+        </div>
+      `,
+      icon: tendencia.tendencia === 'piorando' ? 'warning' : 'success',
+      confirmButtonText: 'Fechar'
+    });
+  }
 
   async function handleDelete(id: string) {
     const result = await Swal.fire({
@@ -148,12 +248,13 @@ export default function HistoricoPage() {
     <div className="space-y-6">
       <header>
         <h1 className="text-3xl font-bold text-primary">Histórico de Medições</h1>
-        <p className="text-slate-500">Consulte todas as medições realizadas no sistema</p>
+        <p className="text-slate-500">Consulte, compare e analise a evolução dos capacitores</p>
       </header>
 
+      {/* Filters */}
       <div className="rounded-xl bg-white p-6 shadow-sm">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          <div className="md:col-span-1">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+          <div>
             <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Cliente</label>
             <select 
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
@@ -165,7 +266,7 @@ export default function HistoricoPage() {
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Tipo de Teste</label>
+            <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Tipo</label>
             <select 
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
               value={filters.tipo_teste}
@@ -190,6 +291,19 @@ export default function HistoricoPage() {
             </select>
           </div>
           <div>
+            <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Período</label>
+            <select 
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+              value={filters.periodo}
+              onChange={(e) => setFilters({...filters, periodo: e.target.value})}
+            >
+              <option value="todos">📅 Todos os períodos</option>
+              <option value="30dias">📆 Últimos 30 dias</option>
+              <option value="60dias">📆 Últimos 60 dias</option>
+              <option value="90dias">📆 Últimos 90 dias</option>
+            </select>
+          </div>
+          <div>
             <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Buscar</label>
             <div className="relative">
               <Search className="absolute top-1/2 left-3 -translate-y-1/2 text-slate-400" size={16} />
@@ -205,6 +319,76 @@ export default function HistoricoPage() {
         </div>
       </div>
 
+      {/* Análise por Capacitor */}
+      <div className="rounded-xl bg-white p-6 shadow-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <BarChart3 size={20} className="text-secondary" />
+          <h2 className="text-lg font-bold text-primary">Análise por Capacitor</h2>
+          <span className="text-xs text-slate-400">Clique em "Analisar" para ver tendência e previsão</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead className="bg-slate-50 text-sm font-medium text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Capacitor</th>
+                <th className="px-4 py-3">Banco</th>
+                <th className="px-4 py-3">Medições</th>
+                <th className="px-4 py-3">1ª Medição</th>
+                <th className="px-4 py-3">Última</th>
+                <th className="px-4 py-3">Variação</th>
+                <th className="px-4 py-3 text-center">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {Object.entries(medicoesPorCapacitor).map(([key, data]: [string, any]) => {
+                const medicoes = data.medicoes;
+                const primeira = medicoes[medicoes.length - 1];
+                const ultima = medicoes[0];
+                const variacao = ultima.desvio_percentual - primeira.desvio_percentual;
+                const tendenciaIcon = variacao > 0 ? <TrendingUp size={14} className="text-red-500" /> : variacao < 0 ? <TrendingDown size={14} className="text-green-500" /> : <Activity size={14} className="text-slate-400" />;
+                
+                return (
+                  <tr key={key} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-bold text-primary">{data.nome}</td>
+                    <td className="px-4 py-3 text-slate-600">{ultima.bancos_capacitores?.nome_banco || '-'}</td>
+                    <td className="px-4 py-3">
+                      <span className="bg-primary/10 text-primary px-2 py-1 rounded-full text-xs font-medium">
+                        {medicoes.length} medições
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500">
+                      {new Date(primeira.created_at).toLocaleDateString('pt-BR')}<br/>
+                      <span className="font-medium">{primeira.desvio_percentual?.toFixed(2)}%</span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500">
+                      {new Date(ultima.created_at).toLocaleDateString('pt-BR')}<br/>
+                      <span className="font-medium">{ultima.desvio_percentual?.toFixed(2)}%</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        {tendenciaIcon}
+                        <span className={variacao > 0 ? 'text-red-600' : variacao < 0 ? 'text-green-600' : 'text-slate-600'}>
+                          {variacao > 0 ? '+' : ''}{variacao.toFixed(2)}%
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <button 
+                        onClick={() => handleAnalisarCapacitor(data.nome, medicoes)}
+                        className="bg-secondary/10 text-secondary hover:bg-secondary/20 px-3 py-1 rounded-full text-xs font-medium transition-colors"
+                      >
+                        🔍 Analisar
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Histórico de Medições */}
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left">

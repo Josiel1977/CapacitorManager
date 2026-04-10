@@ -2,13 +2,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { FileText, Download, Search, Zap, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { FileText, Download, Search, Zap, CheckCircle2, AlertTriangle, XCircle, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 
-// Funções de cálculo locais (independentes do utils)
+// Funções de cálculo
 function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
     if (!tensaoNominal || tensaoNominal === 0) return 0;
     return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
@@ -25,11 +25,46 @@ function getStatusValidacao(desvio: number): string {
     return 'reprovado';
 }
 
+// Função para calcular tendência de degradação
+function calcularTendenciaCapacitor(medicoes: any[]) {
+    if (medicoes.length < 2) return null;
+    
+    const primeira = medicoes[medicoes.length - 1];
+    const ultima = medicoes[0];
+    
+    const variacao = ultima.desvio_percentual - primeira.desvio_percentual;
+    const dias = (new Date(ultima.created_at).getTime() - new Date(primeira.created_at).getTime()) / (1000 * 3600 * 24);
+    const degradacaoPorMes = dias > 0 ? (variacao / dias) * 30 : 0;
+    
+    let previsao = null;
+    if (degradacaoPorMes > 0 && ultima.desvio_percentual < 15) {
+        const mesesRestantes = (15 - ultima.desvio_percentual) / degradacaoPorMes;
+        previsao = {
+            meses: mesesRestantes.toFixed(1),
+            data: new Date(Date.now() + mesesRestantes * 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR')
+        };
+    }
+    
+    return {
+        nome: primeira.capacitores?.codigo_identificacao,
+        banco: primeira.bancos_capacitores?.nome_banco,
+        variacao: variacao.toFixed(2),
+        degradacaoPorMes: degradacaoPorMes.toFixed(2),
+        tendencia: variacao > 0 ? 'piorando' : variacao < 0 ? 'melhorando' : 'estavel',
+        primeiraData: new Date(primeira.created_at).toLocaleDateString('pt-BR'),
+        ultimaData: new Date(ultima.created_at).toLocaleDateString('pt-BR'),
+        primeiraDesvio: primeira.desvio_percentual?.toFixed(2) || '0',
+        ultimaDesvio: ultima.desvio_percentual?.toFixed(2) || '0',
+        previsao
+    };
+}
+
 export default function RelatoriosPage() {
   const [clientes, setClientes] = useState<any[]>([]);
   const [selectedCliente, setSelectedCliente] = useState('');
   const [reportData, setReportData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [tendencias, setTendencias] = useState<any[]>([]);
   const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -67,7 +102,6 @@ export default function RelatoriosPage() {
         tensaoExibicao = tensaoNominal;
 
         if (med.tipo_teste === 'corrente' && med.corrente_medida_a) {
-          // Usar a tensão nominal do capacitor
           correnteTeorica = calcularCorrenteTeorica(med.capacitores.potencia_kvar, tensaoNominal);
           teoricoLabel = `${correnteTeorica.toFixed(2)} A @ ${tensaoNominal}V`;
           
@@ -100,6 +134,27 @@ export default function RelatoriosPage() {
     return correctedMedicoes;
   }
 
+  // Agrupar medições por capacitor para análise de tendência
+  function agruparPorCapacitor(medicoes: any[]) {
+    const grupos: any = {};
+    medicoes.forEach(med => {
+      const key = med.capacitores?.id;
+      if (!key) return;
+      if (!grupos[key]) {
+        grupos[key] = [];
+      }
+      grupos[key].push(med);
+    });
+    
+    Object.keys(grupos).forEach(key => {
+      grupos[key].sort((a: any, b: any) => 
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+    });
+    
+    return grupos;
+  }
+
   async function generatePreview() {
     if (!selectedCliente) return;
     
@@ -112,6 +167,13 @@ export default function RelatoriosPage() {
         acc[curr.status_validacao] = (acc[curr.status_validacao] || 0) + 1;
         return acc;
       }, { aprovado: 0, atencao: 0, reprovado: 0 });
+
+      const grupos = agruparPorCapacitor(medicoesCorrigidas);
+      const tendenciasCalculadas = Object.values(grupos)
+        .map((meds: any) => calcularTendenciaCapacitor(meds))
+        .filter(t => t !== null);
+      
+      setTendencias(tendenciasCalculadas);
 
       setReportData({
         cliente,
@@ -161,6 +223,7 @@ export default function RelatoriosPage() {
       Swal.fire('Sucesso', 'Relatório exportado com sucesso!', 'success');
     } catch (error) {
       console.error('PDF Error:', error);
+      Swal.close();
       Swal.fire('Erro', 'Falha ao gerar o PDF.', 'error');
     }
   }
@@ -186,16 +249,17 @@ export default function RelatoriosPage() {
     }
   }
 
-  function getTensaoBadge(tensao: number): string {
-    if (!tensao) return '';
-    return tensao === 220 ? '🔵 220V' : tensao === 380 ? '🟢 380V' : `⚡ ${tensao}V`;
+  function getTendenciaIcon(tendencia: string) {
+    if (tendencia === 'piorando') return <TrendingUp size={14} className="text-red-500" />;
+    if (tendencia === 'melhorando') return <TrendingDown size={14} className="text-green-500" />;
+    return <Activity size={14} className="text-slate-400" />;
   }
 
   return (
     <div className="space-y-8">
       <header>
         <h1 className="text-3xl font-bold text-primary">Relatórios Técnicos</h1>
-        <p className="text-slate-500">Gere relatórios profissionais em PDF para seus clientes</p>
+        <p className="text-slate-500">Gere relatórios profissionais com análise de tendência</p>
       </header>
 
       <div className="rounded-xl bg-white p-4 sm:p-6 shadow-sm">
@@ -283,6 +347,59 @@ export default function RelatoriosPage() {
               </div>
             </div>
 
+            {/* Análise de Tendência por Capacitor */}
+            {tendencias.length > 0 && (
+              <div className="mb-8 sm:mb-12">
+                <h3 className="mb-6 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">📊 ANÁLISE DE TENDÊNCIA POR CAPACITOR</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left min-w-[600px]">
+                    <thead>
+                      <tr className="border-b-2 border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        <th className="pb-4">CAPACITOR</th>
+                        <th className="pb-4">BANCO</th>
+                        <th className="pb-4">1ª MEDIÇÃO</th>
+                        <th className="pb-4">ÚLTIMA</th>
+                        <th className="pb-4">VARIAÇÃO</th>
+                        <th className="pb-4">TENDÊNCIA</th>
+                        <th className="pb-4">PREVISÃO</th>
+                       </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {tendencias.map((t, idx) => (
+                        <tr key={idx} className="text-[10px] sm:text-xs">
+                          <td className="py-4 font-bold text-primary">{t.nome}</td>
+                          <td className="py-4 text-slate-600">{t.banco}</td>
+                          <td className="py-4 text-slate-500">{t.primeiraDesvio}%<br/><span className="text-slate-400">{t.primeiraData}</span></td>
+                          <td className="py-4 text-slate-500">{t.ultimaDesvio}%<br/><span className="text-slate-400">{t.ultimaData}</span></td>
+                          <td className="py-4 font-bold" style={{ color: parseFloat(t.variacao) > 0 ? '#dc2626' : parseFloat(t.variacao) < 0 ? '#10b981' : '#64748b' }}>
+                            {parseFloat(t.variacao) > 0 ? '+' : ''}{t.variacao}%
+                          </td>
+                          <td className="py-4">
+                            <div className="flex items-center gap-1">
+                              {getTendenciaIcon(t.tendencia)}
+                              <span className={t.tendencia === 'piorando' ? 'text-red-600' : t.tendencia === 'melhorando' ? 'text-green-600' : 'text-slate-500'}>
+                                {t.tendencia === 'piorando' ? '⚠️ Degradando' : t.tendencia === 'melhorando' ? '✅ Melhorando' : '➡️ Estável'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-4">
+                            {t.previsao ? (
+                              <span className="text-amber-600 font-medium">
+                                ~{t.previsao.meses} meses<br/>
+                                <span className="text-slate-400 text-[8px]">{t.previsao.data}</span>
+                              </span>
+                            ) : (
+                              <span className="text-green-600">✅ OK</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Measurements Table */}
             <div className="mb-8 sm:mb-12">
               <h3 className="mb-6 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">DETALHAMENTO DAS MEDIÇÕES</h3>
@@ -299,7 +416,7 @@ export default function RelatoriosPage() {
                       <th className="pb-4">MEDIDO</th>
                       <th className="pb-4">DESVIO</th>
                       <th className="pb-4">STATUS</th>
-                    </tr>
+                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {reportData.medicoes.map((med: any) => (
@@ -309,7 +426,7 @@ export default function RelatoriosPage() {
                         <td className="py-4 font-medium text-slate-700">{med.capacitores?.codigo_identificacao || '-'}</td>
                         <td className="py-4">
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${med.tensaoNominal === 220 ? 'bg-blue-100 text-blue-700' : med.tensaoNominal === 380 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                            {getTensaoBadge(med.tensaoNominal)}
+                            ⚡ {med.tensaoNominal}V
                           </span>
                         </td>
                         <td className="py-4 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? '🔁 Corrente' : '📏 Capacitância'}</td>
@@ -331,7 +448,7 @@ export default function RelatoriosPage() {
             {/* Summary */}
             <div className="mb-8 rounded-lg bg-slate-50 p-4 sm:p-6">
               <h3 className="mb-4 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">RESUMO EXECUTIVO</h3>
-              <div className="grid grid-cols-2 gap-4 text-xs sm:text-sm">
+              <div className="grid grid-cols-2 gap-4 text-xs sm:text-sm mb-4">
                 <div>
                   <p className="text-slate-500">Total de Medições:</p>
                   <p className="text-xl sm:text-2xl font-bold text-primary">{reportData.medicoes.length}</p>
@@ -345,6 +462,18 @@ export default function RelatoriosPage() {
                   </p>
                 </div>
               </div>
+              
+              {/* Capacitores Críticos */}
+              {tendencias.filter(t => t.tendencia === 'piorando' && parseFloat(t.variacao) > 5).length > 0 && (
+                <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
+                  <p className="text-xs font-bold text-red-700 mb-2">⚠️ CAPACITORES QUE NECESSITAM ATENÇÃO:</p>
+                  <ul className="text-xs text-red-600 space-y-1">
+                    {tendencias.filter(t => t.tendencia === 'piorando' && parseFloat(t.variacao) > 5).map((t, idx) => (
+                      <li key={idx}>• {t.nome} - Variação de {t.variacao}% (previsão de substituição em {t.previsao?.meses || 'breve'} meses)</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             {/* Footer */}
