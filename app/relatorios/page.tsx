@@ -198,8 +198,8 @@ export default function RelatoriosPage() {
         <p className="text-slate-500">Gere relatórios profissionais em PDF para seus clientes</p>
       </header>
 
-      <div className="rounded-xl bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+      <div className="rounded-xl bg-white p-4 sm:p-6 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
           <div className="flex-1">
             <label className="mb-1 block text-sm font-medium text-slate-700">Selecione o Cliente</label>
             <select 
@@ -211,130 +211,134 @@ export default function RelatoriosPage() {
               {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
             </select>
           </div>
-          <button 
-            onClick={generatePreview}
-            disabled={!selectedCliente || loading}
-            className="flex items-center justify-center gap-2 rounded-lg bg-primary px-6 py-2 text-white hover:bg-primary/90 disabled:opacity-50"
-          >
-            <Search size={20} />
-            Gerar Prévia
-          </button>
-          {reportData && (
+          <div className="flex flex-col sm:flex-row gap-3">
             <button 
-              onClick={downloadPDF}
-              className="flex items-center justify-center gap-2 rounded-lg bg-secondary px-6 py-2 font-bold text-primary hover:bg-secondary/90"
+              onClick={generatePreview}
+              disabled={!selectedCliente || loading}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-6 py-2 text-white hover:bg-primary/90 disabled:opacity-50"
             >
-              <Download size={20} />
-              Exportar PDF
+              <Search size={20} />
+              Gerar Prévia
             </button>
-          )}
+            {reportData && (
+              <button 
+                onClick={downloadPDF}
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-secondary px-6 py-2 font-bold text-primary hover:bg-secondary/90"
+              >
+                <Download size={20} />
+                Exportar PDF
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {reportData ? (
-        <div className="flex justify-center">
+        <div className="flex justify-center overflow-x-auto pb-8">
           <div 
             ref={reportRef}
-            className="w-full max-w-[800px] bg-white p-12 shadow-2xl"
+            className="w-full max-w-[800px] bg-white p-4 sm:p-12 shadow-2xl"
             style={{ minHeight: '1122px' }}
           >
             {/* Header */}
-            <div className="mb-12 flex items-center justify-between border-b-4 border-primary pb-8">
+            <div className="mb-8 sm:mb-12 flex flex-col sm:flex-row items-start sm:items-center justify-between border-b-4 border-primary pb-8 gap-4">
               <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-primary p-3 text-white">
-                  <Zap size={40} />
+                <div className="rounded-xl bg-primary p-2 sm:p-3 text-white">
+                  <Zap size={32} className="sm:w-10 sm:h-10" />
                 </div>
                 <div>
-                  <h2 className="text-3xl font-black tracking-tighter text-primary">CAPACITOR<span className="text-secondary">MANAGER</span></h2>
-                  <p className="text-sm font-bold uppercase tracking-widest text-slate-400">Relatório Técnico de Manutenção</p>
+                  <h2 className="text-2xl sm:text-3xl font-black tracking-tighter text-primary uppercase">CAPACITOR<span className="text-secondary">MANAGER</span></h2>
+                  <p className="text-[10px] sm:text-sm font-bold uppercase tracking-widest text-slate-400">Relatório Técnico de Manutenção</p>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-sm font-bold text-slate-400">DATA DE EMISSÃO</p>
-                <p className="text-lg font-bold text-primary">{reportData.date}</p>
-                <p className="text-xs text-slate-400">{reportData.time}</p>
+              <div className="text-left sm:text-right">
+                <p className="text-[10px] sm:text-sm font-bold text-slate-400">DATA DE EMISSÃO</p>
+                <p className="text-base sm:text-lg font-bold text-primary">{reportData.date}</p>
+                <p className="text-[10px] sm:text-xs text-slate-400">{reportData.time}</p>
               </div>
             </div>
 
             {/* Client Info */}
-            <div className="mb-12 grid grid-cols-2 gap-8 rounded-xl bg-slate-50 p-8">
+            <div className="mb-8 sm:mb-12 grid grid-cols-1 md:grid-cols-2 gap-8 rounded-xl bg-slate-50 p-4 sm:p-8">
               <div>
-                <h3 className="mb-4 text-xs font-black uppercase tracking-widest text-slate-400">DADOS DO CLIENTE</h3>
-                <p className="text-xl font-bold text-primary">{reportData.cliente.nome}</p>
-                <p className="text-slate-600">{reportData.cliente.cnpj_cpf || 'CNPJ não informado'}</p>
-                <p className="text-slate-600">{reportData.cliente.contato_responsavel || ''}</p>
-                <p className="text-slate-600">{reportData.cliente.telefone || ''}</p>
+                <h3 className="mb-4 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">DADOS DO CLIENTE</h3>
+                <p className="text-lg sm:text-xl font-bold text-primary">{reportData.cliente.nome}</p>
+                <p className="text-sm text-slate-600">{reportData.cliente.cnpj_cpf || 'CNPJ não informado'}</p>
+                <p className="text-sm text-slate-600">{reportData.cliente.contato_responsavel || ''}</p>
+                <p className="text-sm text-slate-600">{reportData.cliente.telefone || ''}</p>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-3 gap-2 sm:gap-4">
                 <div className="text-center">
-                  <p className="text-[10px] font-bold text-slate-400">✅ APROVADOS</p>
-                  <p className="text-2xl font-black text-green-600">{reportData.stats.aprovado}</p>
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">✅ APROVADOS</p>
+                  <p className="text-xl sm:text-2xl font-black text-green-600">{reportData.stats.aprovado}</p>
                 </div>
                 <div className="text-center">
-                  <p className="text-[10px] font-bold text-slate-400">⚠️ ATENÇÃO</p>
-                  <p className="text-2xl font-black text-amber-600">{reportData.stats.atencao}</p>
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">⚠️ ATENÇÃO</p>
+                  <p className="text-xl sm:text-2xl font-black text-amber-600">{reportData.stats.atencao}</p>
                 </div>
                 <div className="text-center">
-                  <p className="text-[10px] font-bold text-slate-400">❌ REPROVADOS</p>
-                  <p className="text-2xl font-black text-red-600">{reportData.stats.reprovado}</p>
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">❌ REPROVADOS</p>
+                  <p className="text-xl sm:text-2xl font-black text-red-600">{reportData.stats.reprovado}</p>
                 </div>
               </div>
             </div>
 
             {/* Measurements Table */}
-            <div className="mb-12">
-              <h3 className="mb-6 text-xs font-black uppercase tracking-widest text-slate-400">DETALHAMENTO DAS MEDIÇÕES</h3>
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="border-b-2 border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
-                    <th className="pb-4">DATA</th>
-                    <th className="pb-4">BANCO</th>
-                    <th className="pb-4">CAPACITOR</th>
-                    <th className="pb-4">TENSÃO</th>
-                    <th className="pb-4">TIPO</th>
-                    <th className="pb-4">TEÓRICO</th>
-                    <th className="pb-4">MEDIDO</th>
-                    <th className="pb-4">DESVIO</th>
-                    <th className="pb-4">STATUS</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {reportData.medicoes.map((med: any) => (
-                    <tr key={med.id} className="text-xs">
-                      <td className="py-4 text-slate-600">{new Date(med.created_at).toLocaleDateString()}</td>
-                      <td className="py-4 font-bold text-primary">{med.bancos_capacitores?.nome_banco || '-'}</td>
-                      <td className="py-4 font-medium text-slate-700">{med.capacitores?.codigo_identificacao || '-'}</td>
-                      <td className="py-4">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${med.tensaoNominal === 220 ? 'bg-blue-100 text-blue-700' : med.tensaoNominal === 380 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                          {getTensaoBadge(med.tensaoNominal)}
-                        </span>
-                      </td>
-                      <td className="py-4 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? '🔁 Corrente' : '📏 Capacitância'}</td>
-                      <td className="py-4 text-slate-500">{getValorTeorico(med)}</td>
-                      <td className="py-4 font-medium text-slate-700">{getValorMedido(med)}</td>
-                      <td className="py-4 font-bold" style={{ color: med.desvio_percentual > 0 ? '#e74c3c' : med.desvio_percentual < 0 ? '#f39c12' : '#666' }}>
-                        {formatDesvio(med.desvio_percentual)}
-                      </td>
-                      <td className="py-4">
-                        <StatusBadge status={med.status_validacao} />
-                      </td>
+            <div className="mb-8 sm:mb-12">
+              <h3 className="mb-6 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">DETALHAMENTO DAS MEDIÇÕES</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left min-w-[700px]">
+                  <thead>
+                    <tr className="border-b-2 border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                      <th className="pb-4">DATA</th>
+                      <th className="pb-4">BANCO</th>
+                      <th className="pb-4">CAPACITOR</th>
+                      <th className="pb-4">TENSÃO</th>
+                      <th className="pb-4">TIPO</th>
+                      <th className="pb-4">TEÓRICO</th>
+                      <th className="pb-4">MEDIDO</th>
+                      <th className="pb-4">DESVIO</th>
+                      <th className="pb-4">STATUS</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {reportData.medicoes.map((med: any) => (
+                      <tr key={med.id} className="text-[10px] sm:text-xs">
+                        <td className="py-4 text-slate-600">{new Date(med.created_at).toLocaleDateString()}</td>
+                        <td className="py-4 font-bold text-primary">{med.bancos_capacitores?.nome_banco || '-'}</td>
+                        <td className="py-4 font-medium text-slate-700">{med.capacitores?.codigo_identificacao || '-'}</td>
+                        <td className="py-4">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${med.tensaoNominal === 220 ? 'bg-blue-100 text-blue-700' : med.tensaoNominal === 380 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                            {getTensaoBadge(med.tensaoNominal)}
+                          </span>
+                        </td>
+                        <td className="py-4 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? '🔁 Corrente' : '📏 Capacitância'}</td>
+                        <td className="py-4 text-slate-500">{getValorTeorico(med)}</td>
+                        <td className="py-4 font-medium text-slate-700">{getValorMedido(med)}</td>
+                        <td className="py-4 font-bold" style={{ color: med.desvio_percentual > 0 ? '#dc2626' : med.desvio_percentual < 0 ? '#d97706' : '#64748b' }}>
+                          {formatDesvio(med.desvio_percentual)}
+                        </td>
+                        <td className="py-4">
+                          <StatusBadge status={med.status_validacao} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Summary */}
-            <div className="mb-8 rounded-lg bg-slate-50 p-6">
-              <h3 className="mb-4 text-xs font-black uppercase tracking-widest text-slate-400">RESUMO EXECUTIVO</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="mb-8 rounded-lg bg-slate-50 p-4 sm:p-6">
+              <h3 className="mb-4 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">RESUMO EXECUTIVO</h3>
+              <div className="grid grid-cols-2 gap-4 text-xs sm:text-sm">
                 <div>
                   <p className="text-slate-500">Total de Medições:</p>
-                  <p className="text-2xl font-bold text-primary">{reportData.medicoes.length}</p>
+                  <p className="text-xl sm:text-2xl font-bold text-primary">{reportData.medicoes.length}</p>
                 </div>
                 <div>
                   <p className="text-slate-500">Taxa de Aprovação:</p>
-                  <p className="text-2xl font-bold text-green-600">
+                  <p className="text-xl sm:text-2xl font-bold text-green-600">
                     {reportData.medicoes.length > 0 
                       ? ((reportData.stats.aprovado / reportData.medicoes.length) * 100).toFixed(1) 
                       : 0}%
