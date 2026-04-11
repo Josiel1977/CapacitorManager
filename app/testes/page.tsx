@@ -128,7 +128,7 @@ export default function RealizarTestePage() {
       const status = getStatusValidacao(desvio, config);
       const desvioExibicao = Math.round(desvio * 100) / 100;
       
-      console.log('🔍 Cálculo Corrente:', {
+      console.log(' Cálculo Corrente:', {
         potencia: cap.potencia_kvar,
         tensao: vMedida,
         correnteMedida: iMedida,
@@ -162,7 +162,7 @@ export default function RealizarTestePage() {
       const status = getStatusValidacao(desvio, config);
       const desvioExibicao = Math.round(desvio * 100) / 100;
       
-      console.log('🔍 Cálculo Capacitância:', {
+      console.log(' Cálculo Capacitância:', {
         nominalFase: cap.capacitancia_nominal_uf,
         teoricaEntreFases: capacitanciaTeorica,
         medida: cMedida,
@@ -218,7 +218,7 @@ export default function RealizarTestePage() {
         payload.capacitancia_teorica_uf = resultado.capacitanciaTeorica;
       }
 
-      // 🔍 LOG EXTREMAMENTE DETALHADO
+      //  LOG EXTREMAMENTE DETALHADO
       console.log('========== DEBUG SALVAMENTO ==========');
       console.log('1. Status calculado:', resultado.status);
       console.log('2. Desvio calculado:', resultado.desvioOriginal || resultado.desvio);
@@ -334,7 +334,7 @@ export default function RealizarTestePage() {
                   selection.tipo_teste === 'corrente' ? "border-primary bg-primary text-white" : "border-slate-200 text-slate-600 hover:border-primary/50"
                 )}
               >
-                🔁 Teste por Corrente (Campo)
+                 Teste por Corrente (Campo)
               </button>
               <button 
                 onClick={() => setSelection({...selection, tipo_teste: 'capacitancia'})}
@@ -343,7 +343,7 @@ export default function RealizarTestePage() {
                   selection.tipo_teste === 'capacitancia' ? "border-primary bg-primary text-white" : "border-slate-200 text-slate-600 hover:border-primary/50"
                 )}
               >
-                📏 Teste por Capacitância (Bancada)
+                 Teste por Capacitância (Bancada)
               </button>
             </div>
 
