@@ -197,15 +197,15 @@ export default function HistoricoPage() {
     }
     
     Swal.fire({
-        title: `📊 Análise de Tendência - ${capacitorNome}`,
+        title: ` Análise de Tendência - ${capacitorNome}`,
         html: `
             <div style="text-align: left;">
-                <p><strong>📅 Período analisado:</strong> ${tendencia.primeiraData} a ${tendencia.ultimaData}</p>
-                <p><strong>📉 Desvio inicial:</strong> ${tendencia.primeiraDesvio}%</p>
-                <p><strong>📈 Desvio atual:</strong> ${tendencia.ultimaDesvio}%</p>
-                <p><strong>🔄 Variação total:</strong> <span style="color: ${parseFloat(tendencia.variacao) > 0 ? '#e74c3c' : '#2ecc71'}; font-weight: bold;">${parseFloat(tendencia.variacao) > 0 ? '+' : ''}${tendencia.variacao}%</span></p>
-                <p><strong>📊 Tendência:</strong> ${tendencia.tendencia === 'piorando' ? '⚠️ Degradação detectada' : tendencia.tendencia === 'melhorando' ? '✅ Melhorando' : '➡️ Estável'}</p>
-                <p><strong>⚡ Degradação por mês:</strong> ${tendencia.degradacaoPorMes}%</p>
+                <p><strong> Período analisado:</strong> ${tendencia.primeiraData} a ${tendencia.ultimaData}</p>
+                <p><strong> Desvio inicial:</strong> ${tendencia.primeiraDesvio}%</p>
+                <p><strong> Desvio atual:</strong> ${tendencia.ultimaDesvio}%</p>
+                <p><strong> Variação total:</strong> <span style="color: ${parseFloat(tendencia.variacao) > 0 ? '#e74c3c' : '#2ecc71'}; font-weight: bold;">${parseFloat(tendencia.variacao) > 0 ? '+' : ''}${tendencia.variacao}%</span></p>
+                <p><strong> Tendência:</strong> ${tendencia.tendencia === 'piorando' ? '⚠️ Degradação detectada' : tendencia.tendencia === 'melhorando' ? '✅ Melhorando' : '➡️ Estável'}</p>
+                <p><strong> Degradação por mês:</strong> ${tendencia.degradacaoPorMes}%</p>
                 ${tendencia.previsao ? `
                     <hr style="margin: 15px 0;">
                     <p><strong>🔮 PREVISÃO:</strong></p>
@@ -271,8 +271,8 @@ export default function HistoricoPage() {
               onChange={(e) => setFilters({...filters, tipo_teste: e.target.value})}
             >
               <option value="">Todos</option>
-              <option value="corrente">🔁 Corrente</option>
-              <option value="capacitancia">📏 Capacitância</option>
+              <option value="corrente"> Corrente</option>
+              <option value="capacitancia"> Capacitância</option>
             </select>
           </div>
           <div>
@@ -373,7 +373,7 @@ export default function HistoricoPage() {
                         onClick={() => handleAnalisarCapacitor(data.nome, medicoes)}
                         className="bg-secondary/10 text-secondary hover:bg-secondary/20 px-3 py-1 rounded-full text-xs font-medium transition-colors"
                       >
-                        🔍 Analisar
+                         Analisar
                       </button>
                     </td>
                   </tr>
@@ -419,7 +419,7 @@ export default function HistoricoPage() {
                     )}
                   </td>
                   <td className="px-6 py-4 text-slate-600">
-                    {med.tipo_teste === 'corrente' ? '🔁 Corrente' : '📏 Capacitância'}
+                    {med.tipo_teste === 'corrente' ? ' Corrente' : ' Capacitância'}
                   </td>
                   <td className="px-6 py-4 text-slate-500 text-xs">
                     {med.teoricoLabel}
