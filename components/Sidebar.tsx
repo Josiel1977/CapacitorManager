@@ -14,7 +14,8 @@ import {
   FileText,
   Menu,
   X,
-  Calculator
+  Calculator,
+  Activity
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -27,6 +28,7 @@ const menuItems = [
   { name: 'Realizar Teste', href: '/testes', icon: ClipboardCheck },
   { name: 'Gráficos', href: '/graficos', icon: BarChart3 },
   { name: 'Histórico', href: '/historico', icon: History },
+  { name: 'Análise de Fatura', href: '/analise-fatura', icon: Activity },
   { name: 'Relatórios', href: '/relatorios', icon: FileText },
   { name: 'Configurações', href: '/configuracoes', icon: Database },
 ];
