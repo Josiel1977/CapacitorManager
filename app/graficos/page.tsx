@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { BarChart3, TrendingUp, AlertCircle, Zap, Download, Calendar, TrendingDown, Activity, FileText } from 'lucide-react';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import { toPng } from 'html-to-image';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -386,99 +386,46 @@ export default function GraficosPage() {
         }
       });
 
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 3,
-        useCORS: true,
-        logging: false,
+      // Tornar elementos do PDF visíveis antes de capturar
+      const header = reportRef.current.querySelector('.pdf-header') as HTMLElement;
+      const footer = reportRef.current.querySelector('.pdf-footer') as HTMLElement;
+      if (header) header.style.display = 'flex';
+      if (footer) footer.style.display = 'block';
+
+      const dataUrl = await toPng(reportRef.current, {
+        quality: 1.0,
         backgroundColor: '#ffffff',
-        width: 794,
-        windowWidth: 794,
-        onclone: (clonedDoc) => {
-          const el = clonedDoc.getElementById('graphics-report-container');
-          if (el) {
-            el.style.width = '794px';
-            el.style.maxWidth = '794px';
-            el.style.padding = '48px';
-            el.style.margin = '0';
-            el.style.boxShadow = 'none';
-          }
-
-          const modernColorRegex = /(?:oklch|oklab|hwb|display-p3|color)\((?:[^()]+|\([^()]*\))+\)/gi;
-          const styleTags = Array.from(clonedDoc.getElementsByTagName('style'));
-          styleTags.forEach(style => {
-            try {
-              let css = style.textContent || '';
-              if (css.includes('oklch') || css.includes('oklab') || css.includes('@import')) {
-                css = css.replace(/\/\*[\s\S]*?\*\//g, '');
-                css = css.replace(/@import\s+url\([^)]+\);/gi, '');
-                css = css.replace(modernColorRegex, '#1e293b');
-                style.textContent = css;
-              }
-            } catch (e) {}
-          });
-
-          const linkTags = Array.from(clonedDoc.getElementsByTagName('link'));
-          linkTags.forEach(link => {
-            if (link.rel === 'stylesheet') {
-              link.remove();
-            }
-          });
-
-          const allElements = clonedDoc.getElementsByTagName('*');
-          
-          // Tornar elementos do PDF visíveis no clone
-          const clonedHeader = clonedDoc.querySelector('.pdf-header') as HTMLElement;
-          const clonedFooter = clonedDoc.querySelector('.pdf-footer') as HTMLElement;
-          if (clonedHeader) clonedHeader.style.display = 'flex';
-          if (clonedFooter) clonedFooter.style.display = 'block';
-
-          for (let i = 0; i < allElements.length; i++) {
-            const el = allElements[i] as HTMLElement;
-            
-            // Forçar cores sólidas para evitar oklch em bordas e textos que o Tailwind v4 aplica
-            if (el.classList.contains('text-primary')) el.style.color = '#0a2b3c';
-            if (el.classList.contains('bg-primary')) el.style.backgroundColor = '#0a2b3c';
-            if (el.classList.contains('border-primary')) el.style.borderColor = '#0a2b3c';
-            if (el.classList.contains('text-secondary')) el.style.color = '#f39c12';
-            if (el.classList.contains('bg-secondary')) el.style.backgroundColor = '#f39c12';
-
-            try {
-              if (el.style && el.style.cssText) {
-                if (el.style.cssText.includes('oklch') || el.style.cssText.includes('oklab')) {
-                  el.style.cssText = el.style.cssText.replace(modernColorRegex, '#0a2b3c');
-                }
-              }
-              
-              const style = window.getComputedStyle(el);
-              if (style.color.includes('oklch') || style.color.includes('oklab')) {
-                el.style.color = '#0a2b3c';
-              }
-              if (style.backgroundColor.includes('oklch') || style.backgroundColor.includes('oklab')) {
-                if (!el.style.backgroundColor) el.style.backgroundColor = '#ffffff';
-              }
-            } catch (e) {}
-          }
+        pixelRatio: 3,
+        style: {
+          width: '794px',
+          maxWidth: '794px',
+          padding: '48px',
+          margin: '0',
+          boxShadow: 'none'
         }
       });
+
+      // Esconder novamente os elementos
+      if (header) header.style.display = 'none';
+      if (footer) footer.style.display = 'none';
       
-      const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
       
-      const imgProps = pdf.getImageProperties(imgData);
+      const imgProps = pdf.getImageProperties(dataUrl);
       const contentHeight = (imgProps.height * pdfWidth) / imgProps.width;
       
       let heightLeft = contentHeight;
       let position = 0;
 
-      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
+      pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, contentHeight);
       heightLeft -= pdfHeight;
 
       while (heightLeft >= 0) {
         position = heightLeft - contentHeight;
         pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
+        pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, contentHeight);
         heightLeft -= pdfHeight;
       }
 

@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import Papa from 'papaparse';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import { toPng } from 'html-to-image';
 import { 
   Upload, FileText, AlertTriangle, TrendingUp, TrendingDown, Zap, 
   DollarSign, Info, CheckCircle2, ArrowRight, Download, Activity, 
@@ -335,32 +335,29 @@ export default function AnaliseFaturaPage() {
 
     setLoading(true);
     try {
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
+      const dataUrl = await toPng(element, {
+        quality: 1.0,
         backgroundColor: '#ffffff',
-        windowWidth: 1200,
-        windowHeight: 800,
-        scrollX: 0,
-        scrollY: 0,
-        x: 0,
-        y: 0
+        pixelRatio: 2,
       });
-
-      const imgData = canvas.toDataURL('image/png', 1.0);
       
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
       
-      const imgWidth = canvas.width;
-      const imgHeight = canvas.height;
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise((resolve) => {
+        img.onload = resolve;
+      });
+
+      const imgWidth = img.width;
+      const imgHeight = img.height;
       const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
       const imgX = (pdfWidth - imgWidth * ratio) / 2;
       const imgY = 10;
       
-      pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
+      pdf.addImage(dataUrl, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
       
       const dataAtual = new Date().toISOString().slice(0, 10).split('-').reverse().join('/');
       pdf.save(`Relatorio_EnergyWise_${dataAtual}.pdf`);

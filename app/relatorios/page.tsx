@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { FileText, Download, Search, Zap, CheckCircle2, AlertTriangle, XCircle, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import { toPng } from 'html-to-image';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 
@@ -203,99 +203,45 @@ export default function RelatoriosPage() {
         }
       });
 
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 3, // Aumentar escala para maior nitidez
-        useCORS: true,
-        logging: false,
+      const dataUrl = await toPng(reportRef.current, {
+        quality: 1.0,
         backgroundColor: '#ffffff',
-        width: 794,
-        windowWidth: 794, // Garantir que o viewport da captura seja exatamente 794px
-        onclone: (clonedDoc) => {
-          const el = clonedDoc.getElementById('report-container');
-          if (el) {
-            el.style.width = '794px';
-            el.style.maxWidth = '794px';
-            el.style.padding = '48px';
-            el.style.margin = '0';
-            el.style.boxShadow = 'none'; // Remover sombra na exportação
-          }
-
-          const modernColorRegex = /(?:oklch|oklab|hwb|display-p3|color)\((?:[^()]+|\([^()]*\))+\)/gi;
-          
-          // 1. Processar tags de estilo
-          const styleTags = Array.from(clonedDoc.getElementsByTagName('style'));
-          styleTags.forEach(style => {
-            try {
-              let css = style.textContent || '';
-              if (css.includes('oklch') || css.includes('oklab') || css.includes('@import')) {
-                css = css.replace(/\/\*[\s\S]*?\*\//g, '');
-                css = css.replace(/@import\s+url\([^)]+\);/gi, '');
-                css = css.replace(modernColorRegex, '#1e293b'); // Substituir cores problemáticas
-                style.textContent = css;
-              }
-            } catch (e) {}
-          });
-
-          // 2. Processar links de estilos externos (Next.js production)
-          // REMOVER é necessário pois o html2canvas crasha ao tentar ler oklch em arquivos CSS externos
-          const linkTags = Array.from(clonedDoc.getElementsByTagName('link'));
-          linkTags.forEach(link => {
-            if (link.rel === 'stylesheet') {
-              link.remove();
-            }
-          });
-
-          // 3. Process inline styles and computed styles
-          const allElements = clonedDoc.getElementsByTagName('*');
-          for (let i = 0; i < allElements.length; i++) {
-            const el = allElements[i] as HTMLElement;
-            
-            // Forçar cores sólidas para evitar oklch em bordas e textos que o Tailwind v4 aplica
-            if (el.classList.contains('text-primary')) el.style.color = '#0a2b3c';
-            if (el.classList.contains('bg-primary')) el.style.backgroundColor = '#0a2b3c';
-            if (el.classList.contains('border-primary')) el.style.borderColor = '#0a2b3c';
-            if (el.classList.contains('text-secondary')) el.style.color = '#f39c12';
-            if (el.classList.contains('bg-secondary')) el.style.backgroundColor = '#f39c12';
-            
-            try {
-              if (el.style && el.style.cssText) {
-                if (el.style.cssText.includes('oklch') || el.style.cssText.includes('oklab')) {
-                  el.style.cssText = el.style.cssText.replace(modernColorRegex, '#0a2b3c');
-                }
-              }
-              
-              const style = window.getComputedStyle(el);
-              if (style.color.includes('oklch') || style.color.includes('oklab')) {
-                el.style.color = '#0a2b3c';
-              }
-              if (style.backgroundColor.includes('oklch') || style.backgroundColor.includes('oklab')) {
-                if (!el.style.backgroundColor) el.style.backgroundColor = '#ffffff';
-              }
-            } catch (e) {}
-          }
+        pixelRatio: 3,
+        style: {
+          width: '794px',
+          maxWidth: '794px',
+          padding: '48px',
+          margin: '0',
+          boxShadow: 'none'
         }
       });
       
-      const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
       
-      const imgProps = pdf.getImageProperties(imgData);
-      const contentHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise((resolve) => {
+        img.onload = resolve;
+      });
+
+      const imgWidth = img.width;
+      const imgHeight = img.height;
+      const contentHeight = (imgHeight * pdfWidth) / imgWidth;
       
       let heightLeft = contentHeight;
       let position = 0;
 
       // Add first page
-      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
+      pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, contentHeight);
       heightLeft -= pdfHeight;
 
       // Add subsequent pages if content is longer than one page
       while (heightLeft >= 0) {
         position = heightLeft - contentHeight;
         pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
+        pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, contentHeight);
         heightLeft -= pdfHeight;
       }
 

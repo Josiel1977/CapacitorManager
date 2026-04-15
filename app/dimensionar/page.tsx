@@ -26,7 +26,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import Swal from 'sweetalert2';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import { toPng } from 'html-to-image';
 
 interface MonthlyData {
   month: string;
@@ -468,75 +468,24 @@ export default function DimensionarPage() {
         }
       });
 
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
+      const dataUrl = await toPng(reportRef.current, {
+        quality: 1.0,
         backgroundColor: '#ffffff',
-        onclone: (clonedDoc) => {
-          const modernColorRegex = /(?:oklch|oklab|hwb|display-p3|color)\((?:[^()]+|\([^()]*\))+\)/gi;
-          
-          // 1. Process style tags
-          const styleTags = Array.from(clonedDoc.getElementsByTagName('style'));
-          styleTags.forEach(style => {
-            try {
-              let css = style.textContent || '';
-              if (css.includes('oklch') || css.includes('oklab') || css.includes('@import')) {
-                css = css.replace(/\/\*[\s\S]*?\*\//g, '');
-                css = css.replace(/@import\s+url\([^)]+\);/gi, '');
-                css = css.replace(modernColorRegex, '#0f172a'); // primary fallback
-                style.textContent = css;
-              }
-            } catch (e) {}
-          });
-
-          // 2. Remove external links to avoid parsing errors
-          const linkTags = Array.from(clonedDoc.getElementsByTagName('link'));
-          linkTags.forEach(link => {
-            if (link.rel === 'stylesheet') link.remove();
-          });
-
-          // 3. Process inline styles and computed styles
-          const elements = clonedDoc.getElementsByTagName('*');
-          for (let i = 0; i < elements.length; i++) {
-            const el = elements[i] as HTMLElement;
-            
-            // Forçar cores sólidas para evitar oklch em bordas e textos que o Tailwind v4 aplica
-            if (el.classList.contains('text-primary')) el.style.color = '#0a2b3c';
-            if (el.classList.contains('bg-primary')) el.style.backgroundColor = '#0a2b3c';
-            if (el.classList.contains('border-primary')) el.style.borderColor = '#0a2b3c';
-            if (el.classList.contains('text-secondary')) el.style.color = '#f39c12';
-            if (el.classList.contains('bg-secondary')) el.style.backgroundColor = '#f39c12';
-
-            // Fix inline styles directly
-            try {
-              if (el.style && el.style.cssText) {
-                if (el.style.cssText.includes('oklch') || el.style.cssText.includes('oklab')) {
-                  el.style.cssText = el.style.cssText.replace(modernColorRegex, '#0a2b3c');
-                }
-              }
-              
-              const style = window.getComputedStyle(el);
-              if (style.color.includes('oklch') || style.color.includes('oklab')) {
-                el.style.color = '#0a2b3c';
-              }
-              if (style.backgroundColor.includes('oklch') || style.backgroundColor.includes('oklab')) {
-                if (!el.style.backgroundColor) el.style.backgroundColor = '#ffffff';
-              }
-              if (style.borderColor.includes('oklch') || style.borderColor.includes('oklab')) {
-                el.style.borderColor = '#e2e8f0';
-              }
-            } catch (e) {}
-          }
-        }
+        pixelRatio: 2,
       });
 
-      const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise((resolve) => {
+        img.onload = resolve;
+      });
 
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      const pdfHeight = (img.height * pdfWidth) / img.width;
+
+      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
       pdf.save(`Memorial_Dimensionamento_${new Date().getTime()}.pdf`);
 
       Swal.close();
