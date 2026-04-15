@@ -28,7 +28,8 @@ const menuItems = [
   { name: 'Realizar Teste', href: '/testes', icon: ClipboardCheck },
   { name: 'Gráficos', href: '/graficos', icon: BarChart3 },
   { name: 'Histórico', href: '/historico', icon: History },
-  { name: 'Análise de Fatura', href: '/analise-fatura', icon: Activity },
+  { name: 'Memória de Massa', href: '/analise-fatura', icon: Activity },
+  { name: 'EnergyWise', href: '/energywise', icon: Zap },
   { name: 'Relatórios', href: '/relatorios', icon: FileText },
   { name: 'Configurações', href: '/configuracoes', icon: Database },
 ];

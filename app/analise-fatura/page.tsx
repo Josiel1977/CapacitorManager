@@ -476,13 +476,13 @@ export default function AnaliseFaturaPage() {
         <div className="relative z-10 max-w-2xl space-y-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-secondary text-xs font-bold tracking-wider uppercase">
             <Cpu size={14} />
-            IA de Otimização Ativa • ANEEL 414/2010
+            Análise Avançada • ANEEL 414/2010
           </div>
           <h1 className="text-4xl md:text-5xl font-black tracking-tight leading-tight">
-            EnergyWise: O cérebro que faz sua instalação trabalhar para o seu bolso.
+            Memória de Massa
           </h1>
           <p className="text-lg text-white/70 leading-relaxed">
-            Transforme memória de massa em economia real. Detectamos reativo excedente, calculamos multas conforme ANEEL e sugerimos a correção exata.
+            Transforme dados brutos em economia real. Detectamos reativo excedente, calculamos multas conforme ANEEL e sugerimos a correção exata.
           </p>
           
           <div className="flex flex-wrap gap-4 pt-4">
