@@ -67,10 +67,21 @@ interface DimensionamentoStats {
 const parseBrazilianNumber = (val: any): number => {
   if (val === undefined || val === null) return 0;
   if (typeof val === 'number') return val;
-  const str = String(val).trim();
+  let str = String(val).trim();
   if (!str || str === '-' || str === '#VALOR!') return 0;
-  const normalized = str.replace(/\./g, '').replace(',', '.');
-  const num = parseFloat(normalized);
+  
+  const lastComma = str.lastIndexOf(',');
+  const lastDot = str.lastIndexOf('.');
+  
+  if (lastComma > lastDot) {
+    // Formato brasileiro: 1.234,56 ou 1234,56
+    str = str.replace(/\./g, '').replace(',', '.');
+  } else if (lastDot > lastComma) {
+    // Formato americano: 1,234.56 ou 1234.56
+    str = str.replace(/,/g, '');
+  }
+  
+  const num = parseFloat(str);
   return isNaN(num) ? 0 : num;
 };
 
@@ -259,8 +270,8 @@ export default function AnaliseFaturaPage() {
                 return foundKey ? normalizedRow[foundKey] : '0';
               };
 
-              const kw = parseBrazilianNumber(getVal(['kw fornecido', 'ativa(kw)', 'kw', 'ativa', 'demanda ativa']));
-              let kvar = parseBrazilianNumber(getVal(['kvar indutivo', 'kvar capacitivo', 'reativa(kvar)', 'kvar', 'reativa']));
+              const kw = parseBrazilianNumber(getVal(['kw fornecido', 'ativa(kw)', 'kw', 'ativa', 'demanda ativa', 'consumo ativo', 'potencia ativa']));
+              let kvar = parseBrazilianNumber(getVal(['kvar indutivo', 'kvar capacitivo', 'reativa(kvar)', 'kvar', 'reativa', 'consumo reativo', 'potencia reativa']));
               
               const tipoReativo: 'indutivo' | 'capacitivo' | 'neutro' = 
                 kvar > 0.01 ? 'indutivo' : kvar < -0.01 ? 'capacitivo' : 'neutro';
@@ -293,10 +304,11 @@ export default function AnaliseFaturaPage() {
               };
             });
 
-            const validData = processed.filter(d => d.kw > 0);
+            const validData = processed.filter(d => d.kw > 0 || d.kvar !== 0);
 
             if (validData.length === 0) {
-              throw new Error('Nenhum dado de consumo (kW) válido encontrado.');
+              const columns = results.meta.fields ? results.meta.fields.join(', ') : 'Nenhuma';
+              throw new Error(`Nenhum dado de consumo (kW) válido encontrado. Colunas detectadas: ${columns}`);
             }
 
             validData.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
@@ -854,7 +866,6 @@ export default function AnaliseFaturaPage() {
                     />
                     <Line type="monotone" dataKey="fp" stroke="#f59e0b" strokeWidth={2} dot={false} />
                     <Line 
-                      yDomain={[0.5, 1]}
                       dataKey={() => targetFP} 
                       stroke="#ef4444" 
                       strokeDasharray="5 5" 
@@ -933,20 +944,20 @@ export default function AnaliseFaturaPage() {
                   Cérebro EnergyWise
                 </h3>
                 <p className="text-white/70 text-sm mb-6 leading-relaxed">
-                  {stats?.maxKvarNecessario > 0 
-                    ? `Identificamos necessidade de correção de até ${stats.maxKvarNecessario.toFixed(1)} kVAr para manter FP ≥ ${targetFP}.`
+                  {(stats?.maxKvarNecessario ?? 0) > 0 
+                    ? `Identificamos necessidade de correção de até ${stats?.maxKvarNecessario?.toFixed(1)} kVAr para manter FP ≥ ${targetFP}.`
                     : "Seu sistema está dentro da conformidade! Mantenha a monitoração."
                   }
                 </p>
                 
-                {stats?.maxKvarNecessario > 0 && (
+                {(stats?.maxKvarNecessario ?? 0) > 0 && (
                   <div className="space-y-4 mb-6">
                     <div className="flex items-start gap-3">
                       <div className="mt-1 p-1 bg-white/10 rounded">
                         <ArrowRight size={14} className="text-secondary" />
                       </div>
                       <p className="text-sm font-medium">
-                        Banco sugerido: <span className="text-secondary font-bold">{Math.ceil(stats.maxKvarNecessario / 5) * 5} kVAr</span>
+                        Banco sugerido: <span className="text-secondary font-bold">{Math.ceil((stats?.maxKvarNecessario ?? 0) / 5) * 5} kVAr</span>
                       </p>
                     </div>
                     <div className="flex items-start gap-3">
@@ -962,7 +973,7 @@ export default function AnaliseFaturaPage() {
                         <ArrowRight size={14} className="text-secondary" />
                       </div>
                       <p className="text-sm font-medium">
-                        Economia estimada: <span className="text-green-300 font-bold">R$ {stats.multaEstimada.toLocaleString('pt-BR', {minimumFractionDigits: 2})}/mês</span>
+                        Economia estimada: <span className="text-green-300 font-bold">R$ {(stats?.multaEstimada ?? 0).toLocaleString('pt-BR', {minimumFractionDigits: 2})}/mês</span>
                       </p>
                     </div>
                   </div>
