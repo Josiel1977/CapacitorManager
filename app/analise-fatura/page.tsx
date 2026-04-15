@@ -107,8 +107,17 @@ const calcularMultaANEEL = (
 ): number => {
   return registros.reduce((total, reg) => {
     if (reg.fp >= fpMinimo || reg.tipoReativo !== 'indutivo') return total;
-    const fpCalculo = Math.max(0.01, reg.fp); // Evita divisão por zero
-    const fatorAjuste = Math.max(0, (fpMinimo / fpCalculo) - 1);
+    
+    let fatorAjuste = 0;
+    // Regra ANEEL: Se a energia ativa for nula (ou muito próxima de zero) e houver reativo, 
+    // o fator (0.92/FP - 1) assume o valor 1.
+    if (reg.kw <= 0.01) {
+      fatorAjuste = 1;
+    } else {
+      const fpCalculo = Math.max(0.01, reg.fp);
+      fatorAjuste = Math.max(0, (fpMinimo / fpCalculo) - 1);
+    }
+    
     const kvarhIntervalo = Math.abs(reg.kvar) / samplesPerHour;
     return total + (kvarhIntervalo * tarifa * fatorAjuste);
   }, 0);
