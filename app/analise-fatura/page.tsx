@@ -92,7 +92,8 @@ const calcularFP = (kw: number, kvar: number): number => {
 
 const calcularCorrecaoNecessaria = (kw: number, fpAtual: number, fpDesejado: number): number => {
   if (kw <= 0) return 0;
-  const phiAtual = Math.acos(Math.min(1, Math.max(0, Math.abs(fpAtual))));
+  const fpCalculo = Math.max(0.01, Math.abs(fpAtual)); // Evita Infinity no tan()
+  const phiAtual = Math.acos(Math.min(1, fpCalculo));
   const phiDesejado = Math.acos(Math.min(1, Math.max(0, fpDesejado)));
   const kvarNecessario = kw * (Math.tan(phiAtual) - Math.tan(phiDesejado));
   return kvarNecessario > 0 ? Math.round(kvarNecessario * 10) / 10 : 0;
@@ -106,7 +107,8 @@ const calcularMultaANEEL = (
 ): number => {
   return registros.reduce((total, reg) => {
     if (reg.fp >= fpMinimo || reg.tipoReativo !== 'indutivo') return total;
-    const fatorAjuste = Math.max(0, (fpMinimo / reg.fp) - 1);
+    const fpCalculo = Math.max(0.01, reg.fp); // Evita divisão por zero
+    const fatorAjuste = Math.max(0, (fpMinimo / fpCalculo) - 1);
     const kvarhIntervalo = Math.abs(reg.kvar) / samplesPerHour;
     return total + (kvarhIntervalo * tarifa * fatorAjuste);
   }, 0);
