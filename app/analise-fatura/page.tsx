@@ -12,7 +12,7 @@ import {
 import { motion } from 'motion/react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-  ResponsiveContainer, AreaChart, Area, BarChart, Bar
+  ResponsiveContainer, AreaChart, Area, BarChart, Bar, ReferenceLine
 } from 'recharts';
 import { cn } from '@/lib/utils';
 import Swal from 'sweetalert2';
@@ -867,11 +867,10 @@ export default function AnaliseFaturaPage() {
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                     />
                     <Line type="monotone" dataKey="fp" stroke="#f59e0b" strokeWidth={2} dot={false} />
-                    <Line 
-                      dataKey={() => targetFP} 
+                    <ReferenceLine 
+                      y={targetFP} 
                       stroke="#ef4444" 
                       strokeDasharray="5 5" 
-                      dot={false} 
                       strokeWidth={1.5} 
                     />
                   </LineChart>
