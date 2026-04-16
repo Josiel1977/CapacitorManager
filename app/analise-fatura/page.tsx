@@ -58,6 +58,8 @@ interface DimensionamentoStats {
   tipoRecomendado: 'fixo' | 'automatico' | 'hibrido';
   justificativa: string;
   coeficienteVariacao: number;
+  orcamentoEstimado: { min: number; max: number };
+  alertaTransformador: boolean;
 }
 
 // ============================================================================
@@ -147,9 +149,30 @@ const getPercentile = (arr: number[], percentile: number): number => {
   return sorted[Math.max(0, index)];
 };
 
+const estimarOrcamento = (kvar: number, tipo: 'fixo' | 'automatico' | 'hibrido'): { min: number, max: number } => {
+  if (kvar <= 0) return { min: 0, max: 0 };
+  
+  const precoKvarFixo = 90;
+  const precoKvarAuto = 180;
+  const custoControlador = 2500;
+
+  if (tipo === 'fixo') {
+    return {
+      min: kvar * precoKvarFixo * 0.8,
+      max: kvar * precoKvarFixo * 1.2
+    };
+  } else {
+    return {
+      min: (kvar * precoKvarAuto + custoControlador) * 0.8,
+      max: (kvar * precoKvarAuto + custoControlador) * 1.2
+    };
+  }
+};
+
 const analisarDimensionamento = (
   data: MassMemoryData[],
-  targetFP: number
+  targetFP: number,
+  transformadorKVA: number
 ): DimensionamentoStats => {
   const periodosCriticos = data.filter(d => 
     d.fp < targetFP && d.tipoReativo === 'indutivo'
@@ -163,7 +186,9 @@ const analisarDimensionamento = (
   const mediaKvarCritico = kvarCriticos.length > 0 
     ? kvarCriticos.reduce((a, b) => a + b, 0) / kvarCriticos.length 
     : 0;
-  const percentil90KvarCritico = getPercentile(kvarCriticos, 90);
+  
+  // Usar o percentil 85 para evitar superdimensionamento por picos muito isolados
+  const percentil85KvarCritico = getPercentile(kvarCriticos, 85);
   const maxKvarCritico = Math.max(...kvarCriticos, 0);
   
   const variancia = periodosCriticos.length > 0
@@ -189,6 +214,24 @@ const analisarDimensionamento = (
     justificativa = `Variabilidade moderada (CV=${coeficienteVariacao.toFixed(2)}). Considere banco híbrido (fixo + automático).`;
   }
   
+  let bancoSugeridoFixo = Math.ceil(mediaKvarCritico / 5) * 5;
+  let bancoSugeridoAutomatico = Math.ceil(percentil85KvarCritico / 5) * 5;
+
+  // Limite de segurança baseado no transformador (max 40% do trafo)
+  const limiteTrafo = transformadorKVA > 0 ? transformadorKVA * 0.4 : Infinity;
+  const alertaTransformador = bancoSugeridoAutomatico > limiteTrafo;
+
+  if (alertaTransformador) {
+    bancoSugeridoAutomatico = Math.floor(limiteTrafo / 5) * 5;
+    bancoSugeridoFixo = Math.min(bancoSugeridoFixo, bancoSugeridoAutomatico);
+    justificativa += ` ATENÇÃO: O dimensionamento original excedia 40% da capacidade do transformador (${transformadorKVA} kVA). O valor foi limitado por segurança.`;
+  }
+
+  const orcamentoEstimado = estimarOrcamento(
+    tipoRecomendado === 'fixo' ? bancoSugeridoFixo : bancoSugeridoAutomatico, 
+    tipoRecomendado
+  );
+
   return {
     mediaKW,
     mediaKvar,
@@ -196,13 +239,15 @@ const analisarDimensionamento = (
     periodosCriticos: periodosCriticos.length,
     percentualCritico: (periodosCriticos.length / data.length) * 100,
     mediaKvarCritico,
-    percentil90KvarCritico,
+    percentil90KvarCritico: percentil85KvarCritico, // Mantendo o nome da prop para compatibilidade
     maxKvarCritico,
-    bancoSugeridoFixo: Math.ceil(mediaKvarCritico / 5) * 5,
-    bancoSugeridoAutomatico: Math.ceil(percentil90KvarCritico / 5) * 5,
+    bancoSugeridoFixo,
+    bancoSugeridoAutomatico,
     tipoRecomendado,
     justificativa,
-    coeficienteVariacao
+    coeficienteVariacao,
+    orcamentoEstimado,
+    alertaTransformador
   };
 };
 
@@ -220,7 +265,7 @@ const gerarEstagios = (totalKvar: number): number[] => {
     restante -= estagio;
   }
   
-  return estagios;
+  return estagios.sort((a, b) => a - b);
 };
 
 // ============================================================================
@@ -231,6 +276,7 @@ export default function AnaliseFaturaPage() {
   const [loading, setLoading] = useState(false);
   const [targetFP, setTargetFP] = useState(0.92);
   const [tariff, setTariff] = useState(0.95);
+  const [transformadorKVA, setTransformadorKVA] = useState<number>(500);
   const [samplingInterval, setSamplingInterval] = useState(15);
   const [fileName, setFileName] = useState<string>('');
 
@@ -488,8 +534,8 @@ export default function AnaliseFaturaPage() {
 
   const dimensionamento: DimensionamentoStats | null = useMemo(() => {
     if (data.length === 0) return null;
-    return analisarDimensionamento(data, targetFP);
-  }, [data, targetFP]);
+    return analisarDimensionamento(data, targetFP, transformadorKVA);
+  }, [data, targetFP, transformadorKVA]);
 
   const chartData = useMemo(() => {
     if (data.length === 0) return [];
@@ -614,7 +660,7 @@ export default function AnaliseFaturaPage() {
                 <span className="text-sm font-medium text-slate-500">Multa Estimada (ANEEL)</span>
               </div>
               <p className="text-3xl font-bold text-slate-900">
-                R$ {stats?.multaEstimada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                R$ {stats?.multaEstimada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
               <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
                 <AlertTriangle size={12} />
@@ -819,6 +865,43 @@ export default function AnaliseFaturaPage() {
                   </p>
                 </div>
               )}
+
+              {/* ORÇAMENTO ESTIMADO */}
+              <div className="mt-6 bg-white p-6 rounded-2xl shadow-sm border-2 border-green-500">
+                <h4 className="text-sm font-bold text-green-600 uppercase mb-4 flex items-center gap-2">
+                  <DollarSign size={16} />
+                  Orçamento Estimado
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-600">Investimento Mínimo:</span>
+                      <span className="font-bold text-lg text-slate-900">
+                        R$ {dimensionamento.orcamentoEstimado.min.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-600">Investimento Máximo:</span>
+                      <span className="font-bold text-lg text-slate-900">
+                        R$ {dimensionamento.orcamentoEstimado.max.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-3 md:border-l md:border-slate-100 md:pl-6">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-600">Payback Estimado:</span>
+                      <span className="font-bold text-green-600 text-lg">
+                        {stats?.multaEstimada && stats.multaEstimada > 0 
+                          ? `${(dimensionamento.orcamentoEstimado.max / stats.multaEstimada).toFixed(1)} meses` 
+                          : 'N/A'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      * Valores baseados em estimativas de mercado para componentes e montagem. Não inclui instalação no local.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </motion.div>
           )}
 
@@ -1004,7 +1087,7 @@ export default function AnaliseFaturaPage() {
                         <ArrowRight size={14} className="text-secondary" />
                       </div>
                       <p className="text-sm font-medium">
-                        Economia estimada: <span className="text-green-300 font-bold">R$ {(stats?.multaEstimada ?? 0).toLocaleString('pt-BR', {minimumFractionDigits: 2})}/mês</span>
+                        Economia estimada: <span className="text-green-300 font-bold">R$ {(stats?.multaEstimada ?? 0).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}/mês</span>
                       </p>
                     </div>
                   </div>
@@ -1033,9 +1116,23 @@ export default function AnaliseFaturaPage() {
               <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
                 <h4 className="font-bold text-primary mb-4 flex items-center gap-2">
                   <Settings size={16} />
-                  Parâmetros ANEEL
+                  Parâmetros do Sistema
                 </h4>
                 <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
+                      Potência do Transformador (kVA)
+                    </label>
+                    <input 
+                      type="number" 
+                      step="10" 
+                      min="0" 
+                      value={transformadorKVA} 
+                      onChange={(e) => setTransformadorKVA(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/20"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">Usado para limites de segurança</p>
+                  </div>
                   <div>
                     <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
                       Fator de Potência Mínimo (Meta)
