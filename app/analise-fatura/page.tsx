@@ -62,6 +62,16 @@ interface DimensionamentoStats {
   alertaTransformador: boolean;
 }
 
+interface SimplifiedAnalysis {
+  status: 'critical' | 'warning' | 'ok';
+  statusTitle: string;
+  statusColor: 'red' | 'yellow' | 'green';
+  statusMessage: string;
+  actionPlan: string[];
+  monthlySavings: number;
+  mainRecommendation: string;
+}
+
 // ============================================================================
 // FUNÇÕES UTILITÁRIAS
 // ============================================================================
@@ -76,10 +86,8 @@ const parseBrazilianNumber = (val: any): number => {
   const lastDot = str.lastIndexOf('.');
   
   if (lastComma > lastDot) {
-    // Formato brasileiro: 1.234,56 ou 1234,56
     str = str.replace(/\./g, '').replace(',', '.');
   } else if (lastDot > lastComma) {
-    // Formato americano: 1,234.56 ou 1234.56
     str = str.replace(/,/g, '');
   }
   
@@ -94,7 +102,7 @@ const calcularFP = (kw: number, kvar: number): number => {
 
 const calcularCorrecaoNecessaria = (kw: number, fpAtual: number, fpDesejado: number): number => {
   if (kw <= 0) return 0;
-  const fpCalculo = Math.max(0.01, Math.abs(fpAtual)); // Evita Infinity no tan()
+  const fpCalculo = Math.max(0.01, Math.abs(fpAtual));
   const phiAtual = Math.acos(Math.min(1, fpCalculo));
   const phiDesejado = Math.acos(Math.min(1, Math.max(0, fpDesejado)));
   const kvarNecessario = kw * (Math.tan(phiAtual) - Math.tan(phiDesejado));
@@ -111,8 +119,6 @@ const calcularMultaANEEL = (
     if (reg.fp >= fpMinimo || reg.tipoReativo !== 'indutivo') return total;
     
     let fatorAjuste = 0;
-    // Regra ANEEL: Se a energia ativa for nula (ou muito próxima de zero) e houver reativo, 
-    // o fator (0.92/FP - 1) assume o valor 1.
     if (reg.kw <= 0.01) {
       fatorAjuste = 1;
     } else {
@@ -186,9 +192,7 @@ const analisarDimensionamento = (
   const mediaKvarCritico = kvarCriticos.length > 0 
     ? kvarCriticos.reduce((a, b) => a + b, 0) / kvarCriticos.length 
     : 0;
-  
-  // Usar o percentil 85 para evitar superdimensionamento por picos muito isolados
-  const percentil85KvarCritico = getPercentile(kvarCriticos, 85);
+  const percentil90KvarCritico = getPercentile(kvarCriticos, 90);
   const maxKvarCritico = Math.max(...kvarCriticos, 0);
   
   const variancia = periodosCriticos.length > 0
@@ -215,9 +219,8 @@ const analisarDimensionamento = (
   }
   
   let bancoSugeridoFixo = Math.ceil(mediaKvarCritico / 5) * 5;
-  let bancoSugeridoAutomatico = Math.ceil(percentil85KvarCritico / 5) * 5;
+  let bancoSugeridoAutomatico = Math.ceil(percentil90KvarCritico / 5) * 5;
 
-  // Limite de segurança baseado no transformador (max 40% do trafo)
   const limiteTrafo = transformadorKVA > 0 ? transformadorKVA * 0.4 : Infinity;
   const alertaTransformador = bancoSugeridoAutomatico > limiteTrafo;
 
@@ -239,7 +242,7 @@ const analisarDimensionamento = (
     periodosCriticos: periodosCriticos.length,
     percentualCritico: (periodosCriticos.length / data.length) * 100,
     mediaKvarCritico,
-    percentil90KvarCritico: percentil85KvarCritico, // Mantendo o nome da prop para compatibilidade
+    percentil90KvarCritico,
     maxKvarCritico,
     bancoSugeridoFixo,
     bancoSugeridoAutomatico,
@@ -266,6 +269,188 @@ const gerarEstagios = (totalKvar: number): number[] => {
   }
   
   return estagios.sort((a, b) => a - b);
+};
+
+const getSimplifiedAnalysis = (
+  stats: AnalysisStats, 
+  dimensionamento: DimensionamentoStats, 
+  targetFP: number
+): SimplifiedAnalysis => {
+  let status: 'critical' | 'warning' | 'ok' = 'ok';
+  let statusTitle = 'Sistema OK';
+  let statusColor: 'red' | 'yellow' | 'green' = 'green';
+  let statusMessage = 'Seu fator de potência está dentro do regulamentar. Continue monitorando.';
+  let actionPlan: string[] = [];
+  let monthlySavings = 0;
+  let mainRecommendation = '';
+
+  if (stats.fpMedio < targetFP - 0.03) {
+    status = 'critical';
+    statusTitle = 'Crítico!';
+    statusColor = 'red';
+    statusMessage = `Seu FP médio (${stats.fpMedio.toFixed(2)}) está muito abaixo do limite (${targetFP}). Multas estão sendo aplicadas.`;
+    actionPlan = [
+      `Correção Urgente: Instale um banco de capacitores automático de ${dimensionamento.bancoSugeridoAutomatico} kVAr.`,
+      `Ação Imediata: Verifique se os capacitores manuais existentes estão funcionando e acionados.`,
+      `Longo Prazo: Realize um estudo detalhado para otimizar a correção.`
+    ];
+    monthlySavings = stats.multaEstimada;
+    mainRecommendation = `Recomendamos a instalação de um controlador automático com ${gerarEstagios(dimensionamento.bancoSugeridoAutomatico).length} estágios, totalizando ${dimensionamento.bancoSugeridoAutomatico} kVAr, para atender a demanda do seu perfil de carga (${dimensionamento.coeficienteVariacao > 0.6 ? 'que é muito variável' : 'que é estável'}).`;
+  } 
+  else if (stats.fpMedio < targetFP) {
+    status = 'warning';
+    statusTitle = 'Atenção!';
+    statusColor = 'yellow';
+    statusMessage = `Seu FP médio (${stats.fpMedio.toFixed(2)}) está próximo do limite (${targetFP}) e registros de multa foram identificados.`;
+    actionPlan = [
+      `Ação Recomendada: Instale um banco de capacitores de ${dimensionamento.bancoSugeridoAutomatico} kVAr para garantir a conformidade.`,
+      `Monitoramento: Acompanhe a evolução do FP nos horários de pico.`,
+      `Revisão: Verifique se não há capacitores danificados ou desligados.`
+    ];
+    monthlySavings = stats.multaEstimada;
+    mainRecommendation = `Sugerimos a instalação de ${dimensionamento.bancoSugeridoAutomatico} kVAr em ${dimensionamento.tipoRecomendado === 'fixo' ? 'um banco fixo' : 'um banco automático'} para corrigir os períodos críticos e evitar novas multas.`;
+  } 
+  else {
+    status = 'ok';
+    statusTitle = 'Excelente!';
+    statusColor = 'green';
+    statusMessage = `Seu FP médio (${stats.fpMedio.toFixed(2)}) está acima do regulamentar (${targetFP}). Nenhuma multa foi calculada neste período.`;
+    actionPlan = [
+      `Manutenção: Continue com a operação atual e realize manutenções periódicas nos capacitores.`,
+      `Monitoramento: Continue monitorando para evitar futuras penalidades.`,
+      `Eficiência: Considere outras melhorias, como a redução de reativos indutivos na fonte.`
+    ];
+    monthlySavings = 0;
+    mainRecommendation = `Sua instalação está dentro da conformidade. Continue com o plano de manutenção preventiva e monitoramento contínuo.`;
+  }
+
+  return {
+    status,
+    statusTitle,
+    statusColor,
+    statusMessage,
+    actionPlan,
+    monthlySavings,
+    mainRecommendation,
+  };
+};
+
+// ============================================================================
+// COMPONENTE DE RESULTADO SIMPLIFICADO
+// ============================================================================
+const ResultadoSimplificado = ({ 
+  stats, 
+  dimensionamento, 
+  targetFP 
+}: { 
+  stats: AnalysisStats; 
+  dimensionamento: DimensionamentoStats; 
+  targetFP: number;
+}) => {
+  const simplified = getSimplifiedAnalysis(stats, dimensionamento, targetFP);
+  
+  const statusColors = {
+    red: 'bg-red-50 border-red-200 text-red-800',
+    yellow: 'bg-yellow-50 border-yellow-200 text-yellow-800',
+    green: 'bg-green-50 border-green-200 text-green-800',
+  };
+  
+  const badgeColors = {
+    red: 'bg-red-100 text-red-700',
+    yellow: 'bg-yellow-100 text-yellow-700',
+    green: 'bg-green-100 text-green-700',
+  };
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.05 }}
+      className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden"
+    >
+      <div className={cn("p-8 border-b", statusColors[simplified.statusColor])}>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h2 className="text-2xl font-bold flex items-center gap-2">
+              {simplified.statusTitle}
+              {simplified.statusColor === 'green' && <CheckCircle2 className="text-green-600" size={24} />}
+              {simplified.statusColor === 'yellow' && <AlertTriangle className="text-yellow-600" size={24} />}
+              {simplified.statusColor === 'red' && <AlertTriangle className="text-red-600" size={24} />}
+            </h2>
+            <p className="text-slate-600 max-w-2xl mt-1">{simplified.statusMessage}</p>
+          </div>
+          <div className={cn("px-4 py-2 rounded-full text-sm font-bold", badgeColors[simplified.statusColor])}>
+            FP Médio: {stats.fpMedio.toFixed(3)}
+          </div>
+        </div>
+      </div>
+
+      <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 space-y-6">
+          <div>
+            <h3 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
+              <ArrowRight size={18} className="text-secondary" />
+              Seu Plano de Ação
+            </h3>
+            <div className="space-y-4">
+              {simplified.actionPlan.map((action, idx) => (
+                <div key={idx} className="flex items-start gap-3 p-4 bg-slate-50 rounded-xl">
+                  <div className="w-6 h-6 rounded-full bg-secondary/20 text-secondary flex items-center justify-center text-xs font-bold shrink-0">
+                    {idx + 1}
+                  </div>
+                  <p className="text-slate-700">{action}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          <div>
+            <h3 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
+              <TrendingUp size={18} className="text-secondary" />
+              Resultados Esperados
+            </h3>
+            <div className="bg-gradient-to-r from-secondary/10 to-transparent p-5 rounded-2xl">
+              <p className="text-2xl font-bold text-primary mb-2">
+                Ganho Financeiro: <span className="text-green-600">R$ {simplified.monthlySavings.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}/mês</span>
+              </p>
+              <p className="text-sm text-slate-500">
+                *Estimativa baseada na eliminação da multa por FP Baixo.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 p-6 rounded-2xl">
+          <h3 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
+            <Cpu size={18} className="text-secondary" />
+            Nossa Recomendação
+          </h3>
+          <p className="text-slate-600 mb-6 leading-relaxed">
+            {simplified.mainRecommendation}
+          </p>
+          <div className="border-t border-slate-200 pt-4 mt-2">
+            <h4 className="font-semibold text-primary mb-2">Especificação Técnica Simplificada</h4>
+            <ul className="space-y-2 text-sm text-slate-600">
+              <li className="flex justify-between">
+                <span>Potência para correção:</span>
+                <span className="font-bold text-primary">{dimensionamento.bancoSugeridoAutomatico} kVAr</span>
+              </li>
+              <li className="flex justify-between">
+                <span>Tipo de equipamento:</span>
+                <span className="font-bold text-primary capitalize">{dimensionamento.tipoRecomendado}</span>
+              </li>
+              <li className="flex justify-between">
+                <span>Perfil da carga:</span>
+                <span className="font-bold text-primary">
+                  {dimensionamento.coeficienteVariacao < 0.3 ? 'Constante' : dimensionamento.coeficienteVariacao < 0.6 ? 'Moderada' : 'Variável'}
+                </span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
 };
 
 // ============================================================================
@@ -301,7 +486,6 @@ export default function AnaliseFaturaPage() {
       });
       
       if (headerIndex === -1) {
-        // Fallback 1: Procura qualquer linha que pareça um cabeçalho de CSV válido (tem Data e pelo menos 3 colunas)
         headerIndex = lines.findIndex(line => {
           const lower = line.toLowerCase();
           const parts = line.split(/[,;]/);
@@ -310,7 +494,6 @@ export default function AnaliseFaturaPage() {
       }
       
       if (headerIndex === -1) {
-        // Fallback 2: Assume que a primeira linha com ; ou , é o cabeçalho, desde que não seja a linha de metadados
         headerIndex = lines.findIndex(line => 
           (line.includes(';') || line.includes(',')) && 
           !line.toLowerCase().includes('leitora') && 
@@ -741,7 +924,12 @@ export default function AnaliseFaturaPage() {
             </motion.div>
           </div>
 
-          {/* ANÁLISE DE DIMENSIONAMENTO */}
+          {/* RESULTADO SIMPLIFICADO (PAINEL EXECUTIVO) */}
+          {stats && dimensionamento && (
+            <ResultadoSimplificado stats={stats} dimensionamento={dimensionamento} targetFP={targetFP} />
+          )}
+
+          {/* ANÁLISE DE DIMENSIONAMENTO TÉCNICA */}
           {dimensionamento && (
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
@@ -902,6 +1090,17 @@ export default function AnaliseFaturaPage() {
                   </div>
                 </div>
               </div>
+
+              {/* ALERTA DE TRANSFORMADOR */}
+              {dimensionamento.alertaTransformador && (
+                <div className="mt-4 bg-red-50 border border-red-200 p-4 rounded-xl">
+                  <div className="flex items-center gap-2 text-red-700">
+                    <AlertTriangle size={18} />
+                    <span className="text-sm font-bold">ATENÇÃO:</span>
+                    <span className="text-sm">O banco sugerido foi limitado a 40% da capacidade do transformador ({transformadorKVA} kVA) por segurança. Consulte um engenheiro eletricista.</span>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
 
