@@ -246,14 +246,35 @@ export default function AnaliseFaturaPage() {
       const content = event.target?.result as string;
       
       const lines = content.split('\n');
-      const headerIndex = lines.findIndex(line => 
-        line.toLowerCase().includes('data') && 
-        (line.includes(';') || line.includes(','))
-      );
+      let headerIndex = lines.findIndex(line => {
+        const lower = line.toLowerCase();
+        const hasData = lower.includes('data') || lower.includes('date');
+        const hasTime = lower.includes('hora') || lower.includes('time') || lower.includes('horário');
+        const hasEnergy = lower.includes('kw') || lower.includes('kvar') || lower.includes('ativa') || lower.includes('reativa') || lower.includes('consumo') || lower.includes('demanda');
+        return hasData && (hasTime || hasEnergy) && (line.includes(';') || line.includes(','));
+      });
+      
+      if (headerIndex === -1) {
+        // Fallback 1: Procura qualquer linha que pareça um cabeçalho de CSV válido (tem Data e pelo menos 3 colunas)
+        headerIndex = lines.findIndex(line => {
+          const lower = line.toLowerCase();
+          const parts = line.split(/[,;]/);
+          return lower.includes('data') && parts.length >= 3 && !lower.includes('leitora') && !lower.includes('modelo');
+        });
+      }
+      
+      if (headerIndex === -1) {
+        // Fallback 2: Assume que a primeira linha com ; ou , é o cabeçalho, desde que não seja a linha de metadados
+        headerIndex = lines.findIndex(line => 
+          (line.includes(';') || line.includes(',')) && 
+          !line.toLowerCase().includes('leitora') && 
+          !line.toLowerCase().includes('modelo')
+        );
+      }
       
       if (headerIndex === -1) {
         setLoading(false);
-        Swal.fire('Erro', 'Não foi possível encontrar o cabeçalho "Data" no arquivo.', 'error');
+        Swal.fire('Erro', 'Não foi possível encontrar o cabeçalho com "Data" e "Hora" (ou kW/kVAr) no arquivo.', 'error');
         return;
       }
 
@@ -281,8 +302,8 @@ export default function AnaliseFaturaPage() {
                 return foundKey ? normalizedRow[foundKey] : '0';
               };
 
-              const kw = parseBrazilianNumber(getVal(['kw fornecido', 'ativa(kw)', 'kw', 'ativa', 'demanda ativa', 'consumo ativo', 'potencia ativa']));
-              let kvar = parseBrazilianNumber(getVal(['kvar indutivo', 'kvar capacitivo', 'reativa(kvar)', 'kvar', 'reativa', 'consumo reativo', 'potencia reativa']));
+              const kw = parseBrazilianNumber(getVal(['kw fornecido', 'ativa(kw)', 'kw', 'ativa', 'demanda ativa', 'consumo ativo', 'potencia ativa', 'canal 1', 'ch1', 'ch 1']));
+              let kvar = parseBrazilianNumber(getVal(['kvar indutivo', 'kvar capacitivo', 'reativa(kvar)', 'kvar', 'reativa', 'consumo reativo', 'potencia reativa', 'canal 2', 'ch2', 'ch 2']));
               
               const tipoReativo: 'indutivo' | 'capacitivo' | 'neutro' = 
                 kvar > 0.01 ? 'indutivo' : kvar < -0.01 ? 'capacitivo' : 'neutro';
