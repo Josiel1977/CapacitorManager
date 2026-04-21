@@ -57,8 +57,25 @@ export default function ManutencaoPage() {
   async function fetchDadosManutencao() {
     setLoading(true);
     try {
-      // Buscar capacitores com seus bancos e medições
-      const { data: capacitoresData, error } = await supabase
+      // Buscar todos os bancos primeiro
+      const { data: bancosData, error: bancosError } = await supabase
+        .from('bancos_capacitores')
+        .select('id, nome_banco, cliente_id')
+        .eq('ativo', true);
+
+      if (bancosError) throw bancosError;
+
+      // Criar mapa de bancos
+      const bancosMap = new Map();
+      bancosData?.forEach(banco => {
+        bancosMap.set(banco.id, {
+          nome: banco.nome_banco,
+          cliente_id: banco.cliente_id
+        });
+      });
+
+      // Buscar capacitores
+      const { data: capacitoresData, error: capacitoresError } = await supabase
         .from('capacitores')
         .select(`
           id,
@@ -66,30 +83,37 @@ export default function ManutencaoPage() {
           potencia_kvar,
           tensao_nominal_v,
           data_instalacao,
-          banco_id,
-          bancos_capacitores (
-            id,
-            nome_banco,
-            cliente_id
-          ),
-          medicoes (
-            id,
-            desvio_percentual,
-            status_validacao,
-            data_medicao,
-            created_at
-          )
+          banco_id
         `)
         .eq('ativo', true);
 
-      if (error) throw error;
-      if (!capacitoresData || capacitoresData.length === 0) {
-        setCapacitores([]);
-        setLoading(false);
-        return;
-      }
+      if (capacitoresError) throw capacitoresError;
 
-      // Buscar nomes dos clientes separadamente
+      // Buscar todas as medições
+      const { data: medicoesData, error: medicoesError } = await supabase
+        .from('medicoes')
+        .select(`
+          id,
+          capacitor_id,
+          desvio_percentual,
+          status_validacao,
+          data_medicao,
+          created_at
+        `)
+        .order('created_at', { ascending: false });
+
+      if (medicoesError) throw medicoesError;
+
+      // Agrupar medições por capacitor
+      const medicoesPorCapacitor = new Map();
+      medicoesData?.forEach(med => {
+        if (!medicoesPorCapacitor.has(med.capacitor_id)) {
+          medicoesPorCapacitor.set(med.capacitor_id, []);
+        }
+        medicoesPorCapacitor.get(med.capacitor_id).push(med);
+      });
+
+      // Buscar nomes dos clientes
       const { data: clientesData } = await supabase
         .from('clientes')
         .select('id, nome')
@@ -100,8 +124,8 @@ export default function ManutencaoPage() {
 
       const processedData: CapacitorManutencao[] = [];
 
-      for (const cap of capacitoresData) {
-        const medicoes = cap.medicoes || [];
+      for (const cap of capacitoresData || []) {
+        const medicoes = medicoesPorCapacitor.get(cap.id) || [];
         if (medicoes.length === 0) continue;
 
         // Ordenar medições por data (mais recente primeiro)
@@ -144,9 +168,10 @@ export default function ManutencaoPage() {
           urgente = true;
         }
 
-        const banco = cap.bancos_capacitores;
-        const clienteId = banco?.cliente_id;
+        const bancoInfo = bancosMap.get(cap.banco_id);
+        const clienteId = bancoInfo?.cliente_id;
         const clienteNome = clientesMap.get(clienteId) || 'N/A';
+        const bancoNome = bancoInfo?.nome || 'N/A';
         
         // Aplicar filtro por cliente
         if (clienteFiltro !== 'todos' && clienteId !== clienteFiltro) {
@@ -156,7 +181,7 @@ export default function ManutencaoPage() {
         processedData.push({
           id: cap.id,
           codigo: cap.codigo_identificacao || 'N/A',
-          banco: banco?.nome_banco || 'N/A',
+          banco: bancoNome,
           cliente: clienteNome,
           cliente_id: clienteId || '',
           potencia_kvar: cap.potencia_kvar || 0,
