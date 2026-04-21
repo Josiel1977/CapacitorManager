@@ -6,7 +6,7 @@ import {
   Play, Info, CheckCircle2, AlertTriangle, XCircle, 
   Zap, Activity, TrendingUp, Calendar, Clock, 
   DollarSign, Shield, Wrench, ArrowRight, Mail,
-  CheckCircle, AlertCircle, Lock, Star, Edit3
+  CheckCircle, AlertCircle, Lock, Star, Edit3, RefreshCw
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
