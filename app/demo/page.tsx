@@ -6,28 +6,31 @@ import {
   Play, Info, CheckCircle2, AlertTriangle, XCircle, 
   Zap, Activity, TrendingUp, Calendar, Clock, 
   DollarSign, Shield, Wrench, ArrowRight, Mail,
-  CheckCircle, AlertCircle, Lock, Star
+  CheckCircle, AlertCircle, Lock, Star, Edit3
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 
-// Dados de exemplo para demonstração
-const DEMO_DATA = {
-  cliente: "Indústria ABC Ltda",
-  banco: "Banco Principal - Sala de Máquinas",
-  capacitor: {
-    codigo: "CAP-DEMO-001",
-    potencia_kvar: 30,
-    tensao_nominal_v: 480,
-    capacitancia_nominal_uf: 138,
-    data_instalacao: "15/03/2022"
-  }
+// Dados padrão para demonstração
+const DEFAULT_CAPACITOR = {
+  codigo: "CAP-DEMO-001",
+  potencia_kvar: 30,
+  tensao_nominal_v: 480,
+  capacitancia_nominal_uf: 138,
 };
 
 export default function DemoPage() {
   const [tipoTeste, setTipoTeste] = useState<'corrente' | 'capacitancia'>('corrente');
   const [valorMedido, setValorMedido] = useState('');
   const [tensaoMedida, setTensaoMedida] = useState('480');
+  
+  // ✅ Estado para os parâmetros editáveis do capacitor
+  const [capacitorParams, setCapacitorParams] = useState({
+    potencia_kvar: DEFAULT_CAPACITOR.potencia_kvar,
+    tensao_nominal_v: DEFAULT_CAPACITOR.tensao_nominal_v,
+    capacitancia_nominal_uf: DEFAULT_CAPACITOR.capacitancia_nominal_uf,
+  });
+  
   const [resultado, setResultado] = useState<null | {
     desvio: number;
     status: 'aprovado' | 'atencao' | 'reprovado';
@@ -48,6 +51,7 @@ export default function DemoPage() {
     const stored = sessionStorage.getItem('demo_testes');
     const count = stored ? parseInt(stored) : 0;
     setTestesRealizados(count);
+    // ✅ Bloqueia quando atingir 2 ou mais (3ª tentativa)
     setBloqueado(count >= 2);
   }, []);
 
@@ -55,6 +59,7 @@ export default function DemoPage() {
     const novoContador = testesRealizados + 1;
     setTestesRealizados(novoContador);
     sessionStorage.setItem('demo_testes', novoContador.toString());
+    // ✅ Bloqueia ao completar 2 testes (3ª tentativa)
     if (novoContador >= 2) {
       setBloqueado(true);
     }
@@ -66,7 +71,7 @@ export default function DemoPage() {
       return;
     }
 
-    // ✅ Verificar se já atingiu o limite
+    // ✅ Verificar se já atingiu o limite (2 testes já feitos)
     if (testesRealizados >= 2) {
       setBloqueado(true);
       Swal.fire({
@@ -76,7 +81,13 @@ export default function DemoPage() {
             <p>Você já realizou os <strong>2 testes gratuitos</strong> disponíveis.</p>
             <div class="mt-4 p-3 bg-primary/10 rounded-lg">
               <p class="font-bold text-primary">🎯 Desbloqueie o acesso completo!</p>
-              <p class="text-sm text-slate-500 mt-1">Faça quantos testes quiser e tenha acesso a todos os recursos.</p>
+              <p class="text-sm text-slate-500 mt-1">Com a versão completa você pode:</p>
+              <ul class="text-left text-xs mt-2 space-y-1">
+                <li>✓ Fazer quantos testes quiser</li>
+                <li>✓ Cadastrar seus próprios capacitores</li>
+                <li>✓ Gerar relatórios profissionais</li>
+                <li>✓ Acompanhar histórico de medições</li>
+              </ul>
             </div>
           </div>
         `,
@@ -107,10 +118,12 @@ export default function DemoPage() {
           setLoading(false);
           return;
         }
-        valorTeorico = (DEMO_DATA.capacitor.potencia_kvar * 1000) / (Math.sqrt(3) * tensao);
+        // ✅ Usa os parâmetros editáveis do capacitor
+        valorTeorico = (capacitorParams.potencia_kvar * 1000) / (Math.sqrt(3) * tensao);
         desvio = ((valorNumerico - valorTeorico) / valorTeorico) * 100;
       } else {
-        valorTeorico = DEMO_DATA.capacitor.capacitancia_nominal_uf * 1.5;
+        // ✅ Usa os parâmetros editáveis do capacitor
+        valorTeorico = capacitorParams.capacitancia_nominal_uf * 1.5;
         desvio = ((valorNumerico - valorTeorico) / valorTeorico) * 100;
       }
       
@@ -164,11 +177,21 @@ export default function DemoPage() {
     
     setResultado(null);
     setValorMedido('');
-    setTensaoMedida('480');
+    setTensaoMedida(capacitorParams.tensao_nominal_v.toString());
+  }
+
+  function resetarParametros() {
+    setCapacitorParams({
+      potencia_kvar: DEFAULT_CAPACITOR.potencia_kvar,
+      tensao_nominal_v: DEFAULT_CAPACITOR.tensao_nominal_v,
+      capacitancia_nominal_uf: DEFAULT_CAPACITOR.capacitancia_nominal_uf,
+    });
+    setTensaoMedida(DEFAULT_CAPACITOR.tensao_nominal_v.toString());
+    Swal.fire('Parâmetros resetados!', 'Valores padrão restaurados.', 'success');
   }
 
   // ============================================
-  // FUNÇÃO PARA SOLICITAR DEMONSTRAÇÃO (sem e-mail)
+  // FUNÇÃO PARA SOLICITAR DEMONSTRAÇÃO
   // ============================================
   async function handleSolicitarDemo() {
     const result = await Swal.fire({
@@ -265,6 +288,9 @@ export default function DemoPage() {
     }
   }
 
+  // Testes restantes
+  const testesRestantes = 2 - testesRealizados;
+
   return (
     <div className="space-y-8 pb-12">
       {/* Hero */}
@@ -285,7 +311,12 @@ export default function DemoPage() {
             Experimente o <span className="text-secondary">CapacitorManager</span>
           </h1>
           <p className="text-lg text-white/80 md:text-xl max-w-2xl">
-            Teste a validação de capacitores em tempo real. {2 - testesRealizados} teste(s) restante(s).
+            Teste a validação de capacitores em tempo real. 
+            {!bloqueado ? (
+              <strong className="text-secondary"> {testesRestantes} teste(s) restante(s)</strong>
+            ) : (
+              <strong className="text-secondary"> Testes concluídos! Solicite acesso completo.</strong>
+            )}
           </p>
         </div>
       </motion.section>
@@ -306,15 +337,71 @@ export default function DemoPage() {
               </div>
             </div>
             
-            {/* Dados do capacitor de exemplo */}
+            {/* ✅ Dados do capacitor EDITÁVEIS */}
             <div className="bg-slate-50 p-4 rounded-xl mb-6">
-              <p className="text-sm text-slate-500 mb-2">📋 Capacitor de demonstração:</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                <div><span className="text-slate-500">Código:</span> <strong>{DEMO_DATA.capacitor.codigo}</strong></div>
-                <div><span className="text-slate-500">Potência:</span> <strong>{DEMO_DATA.capacitor.potencia_kvar} kVAr</strong></div>
-                <div><span className="text-slate-500">Tensão Nominal:</span> <strong>{DEMO_DATA.capacitor.tensao_nominal_v}V</strong></div>
-                <div><span className="text-slate-500">Capacitância:</span> <strong>{DEMO_DATA.capacitor.capacitancia_nominal_uf} µF</strong></div>
+              <div className="flex justify-between items-center mb-3">
+                <p className="text-sm font-medium text-slate-700">📋 Dados do Capacitor para Teste:</p>
+                <button 
+                  onClick={resetarParametros}
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                  disabled={bloqueado}
+                >
+                  <RefreshCw size={12} />
+                  Resetar
+                </button>
               </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500 block">Código</label>
+                  <input 
+                    type="text" 
+                    value={DEFAULT_CAPACITOR.codigo} 
+                    disabled
+                    className="w-full text-sm font-bold text-primary bg-slate-200 rounded px-2 py-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block">Potência (kVAr)</label>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    value={capacitorParams.potencia_kvar}
+                    onChange={(e) => setCapacitorParams({...capacitorParams, potencia_kvar: parseFloat(e.target.value)})}
+                    disabled={bloqueado}
+                    className="w-full text-sm border rounded px-2 py-1 focus:border-primary disabled:bg-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block">Tensão Nominal (V)</label>
+                  <input 
+                    type="number" 
+                    step="1"
+                    value={capacitorParams.tensao_nominal_v}
+                    onChange={(e) => {
+                      setCapacitorParams({...capacitorParams, tensao_nominal_v: parseFloat(e.target.value)});
+                      setTensaoMedida(e.target.value);
+                    }}
+                    disabled={bloqueado}
+                    className="w-full text-sm border rounded px-2 py-1 focus:border-primary disabled:bg-slate-100"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-xs text-slate-500 block">Capacitância (µF)</label>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    value={capacitorParams.capacitancia_nominal_uf}
+                    onChange={(e) => setCapacitorParams({...capacitorParams, capacitancia_nominal_uf: parseFloat(e.target.value)})}
+                    disabled={bloqueado}
+                    className="w-full text-sm border rounded px-2 py-1 focus:border-primary disabled:bg-slate-100"
+                  />
+                </div>
+              </div>
+              {!bloqueado && (
+                <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
+                  <Edit3 size={10} /> Você pode editar os valores para testar com seus dados reais!
+                </p>
+              )}
             </div>
 
             {!bloqueado ? (
@@ -337,7 +424,7 @@ export default function DemoPage() {
                             : "border-slate-200 text-slate-600 hover:bg-slate-50"
                         )}
                       >
-                         Teste por Corrente (Campo)
+                        ⚡ Teste por Corrente (Campo)
                       </button>
                       <button
                         onClick={() => {
@@ -352,7 +439,7 @@ export default function DemoPage() {
                             : "border-slate-200 text-slate-600 hover:bg-slate-50"
                         )}
                       >
-                         Teste por Capacitância (Bancada)
+                        🔋 Teste por Capacitância (Bancada)
                       </button>
                     </div>
                   </div>
@@ -395,7 +482,7 @@ export default function DemoPage() {
                         onChange={(e) => setValorMedido(e.target.value)}
                       />
                       <p className="mt-1 text-xs text-slate-400">
-                        ⚠️ Para ligação delta, o valor teórico é Cfase × 1.5 = {(DEMO_DATA.capacitor.capacitancia_nominal_uf * 1.5).toFixed(2)} µF
+                        ⚠️ Para ligação delta, o valor teórico é Cfase × 1.5 = {(capacitorParams.capacitancia_nominal_uf * 1.5).toFixed(2)} µF
                       </p>
                     </div>
                   )}
@@ -497,7 +584,7 @@ export default function DemoPage() {
             )}
           </div>
 
-          {/* Call to Action - aparece sempre, mas com texto diferente se bloqueado */}
+          {/* Call to Action */}
           <div className="bg-gradient-to-r from-primary/5 to-secondary/5 p-6 rounded-2xl text-center">
             <p className="text-slate-600 mb-3">
               {bloqueado ? 'Já sabe como funciona?' : 'Gostou do que viu?'}
@@ -517,7 +604,7 @@ export default function DemoPage() {
           </div>
         </div>
 
-        {/* Painel de informações - mantido igual */}
+        {/* Painel de informações */}
         <div className="space-y-6">
           <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
             <h3 className="font-bold text-primary mb-4 flex items-center gap-2">
@@ -526,11 +613,11 @@ export default function DemoPage() {
             </h3>
             <div className="space-y-4 text-sm">
               {[
-                { step: 1, text: "Selecione o tipo de teste (Corrente ou Capacitância)" },
-                { step: 2, text: "Informe o valor medido em campo ou bancada" },
-                { step: 3, text: "O sistema calcula automaticamente o desvio percentual" },
-                { step: 4, text: "Classificação baseada na norma IEC 60831-1/2" },
-                { step: 5, text: "Recomendação de ação (monitorar ou substituir)" }
+                { step: 1, text: "Edite os parâmetros do capacitor (opcional)" },
+                { step: 2, text: "Selecione o tipo de teste (Corrente ou Capacitância)" },
+                { step: 3, text: "Informe o valor medido em campo ou bancada" },
+                { step: 4, text: "O sistema calcula automaticamente o desvio percentual" },
+                { step: 5, text: "Classificação baseada na norma IEC 60831-1/2" }
               ].map((item) => (
                 <div key={item.step} className="flex gap-3">
                   <div className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
@@ -561,7 +648,7 @@ export default function DemoPage() {
           </div>
 
           <div className="rounded-2xl bg-primary/5 p-6 border border-primary/20">
-            <h3 className="font-bold text-primary mb-2"> Versão Completa</h3>
+            <h3 className="font-bold text-primary mb-2">🚀 Versão Completa</h3>
             <ul className="text-sm space-y-2 text-slate-600">
               <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Gestão completa de clientes</li>
               <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Bancos de capacitores ilimitados</li>
@@ -569,6 +656,7 @@ export default function DemoPage() {
               <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Manutenção preditiva com IA</li>
               <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Relatórios profissionais</li>
               <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Dashboard com indicadores</li>
+              <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Testes ilimitados</li>
             </ul>
           </div>
         </div>
