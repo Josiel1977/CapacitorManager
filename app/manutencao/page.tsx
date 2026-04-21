@@ -17,18 +17,14 @@ interface CapacitorManutencao {
   banco: string;
   cliente: string;
   potencia_kvar: number;
+  tensao_nominal_v: number;
   data_instalacao: string;
-  ultima_medicao: {
-    data: string;
-    desvio: number;
-    status: string;
-  };
+  ultimo_desvio: number;
+  ultimo_status: string;
+  ultima_data: string;
   tendencia: 'degradando' | 'estavel' | 'melhorando';
-  previsao_substituicao: {
-    meses: number;
-    data: string;
-    urgente: boolean;
-  };
+  previsao_meses: number;
+  previsao_urgente: boolean;
   medicoes_count: number;
 }
 
@@ -36,49 +32,78 @@ export default function ManutencaoPage() {
   const [capacitores, setCapacitores] = useState<CapacitorManutencao[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'todos' | 'urgente' | 'atencao'>('todos');
+  const [clientes, setClientes] = useState<any[]>([]);
+  const [clienteFiltro, setClienteFiltro] = useState<string>('todos');
 
   useEffect(() => {
+    fetchClientes();
     fetchDadosManutencao();
   }, []);
+
+  async function fetchClientes() {
+    try {
+      const { data } = await supabase
+        .from('clientes')
+        .select('id, nome')
+        .eq('ativo', true)
+        .order('nome');
+      setClientes(data || []);
+    } catch (error) {
+      console.error('Erro ao buscar clientes:', error);
+    }
+  }
 
   async function fetchDadosManutencao() {
     setLoading(true);
     try {
-      // Buscar capacitores com suas medições
+      // Buscar capacitores com seus bancos e medições
       const { data: capacitoresData, error } = await supabase
         .from('capacitores')
         .select(`
-          *,
+          id,
+          codigo_identificacao,
+          potencia_kvar,
+          tensao_nominal_v,
+          data_instalacao,
+          banco_id,
           bancos_capacitores (
             id,
             nome_banco,
+            cliente_id,
             clientes (id, nome)
           ),
           medicoes (
             id,
-            data_medicao,
-            desvio_percent,
+            desvio_percentual,
             status_validacao,
+            data_medicao,
             created_at
           )
         `)
         .eq('ativo', true);
 
       if (error) throw error;
+      if (!capacitoresData || capacitoresData.length === 0) {
+        setCapacitores([]);
+        setLoading(false);
+        return;
+      }
 
       const processedData: CapacitorManutencao[] = [];
 
-      for (const cap of capacitoresData || []) {
+      for (const cap of capacitoresData) {
         const medicoes = cap.medicoes || [];
         if (medicoes.length === 0) continue;
 
-        // Ordenar medições por data
-        const medicoesOrdenadas = [...medicoes].sort((a, b) => 
-          new Date(b.data_medicao || b.created_at).getTime() - new Date(a.data_medicao || a.created_at).getTime()
-        );
+        // Ordenar medições por data (mais recente primeiro)
+        const medicoesOrdenadas = [...medicoes].sort((a, b) => {
+          const dateA = a.data_medicao || a.created_at;
+          const dateB = b.data_medicao || b.created_at;
+          return new Date(dateB).getTime() - new Date(dateA).getTime();
+        });
 
         const ultimaMedicao = medicoesOrdenadas[0];
-        const desvio = Math.abs(ultimaMedicao.desvio_percent || 0);
+        const desvio = Math.abs(ultimaMedicao.desvio_percentual || 0);
         
         // Determinar status
         let status = 'ok';
@@ -88,37 +113,50 @@ export default function ManutencaoPage() {
         // Calcular tendência
         let tendencia: 'degradando' | 'estavel' | 'melhorando' = 'estavel';
         if (medicoesOrdenadas.length >= 2) {
-          const primeiro = Math.abs(medicoesOrdenadas[medicoesOrdenadas.length - 1].desvio_percent || 0);
-          const ultimo = desvio;
-          if (ultimo > primeiro * 1.05) tendencia = 'degradando';
-          else if (ultimo < primeiro * 0.95) tendencia = 'melhorando';
+          const ultima = medicoesOrdenadas[0];
+          const primeira = medicoesOrdenadas[medicoesOrdenadas.length - 1];
+          const desvioUltimo = Math.abs(ultima.desvio_percentual || 0);
+          const desvioPrimeiro = Math.abs(primeira.desvio_percentual || 0);
+          
+          if (desvioUltimo > desvioPrimeiro * 1.05) tendencia = 'degradando';
+          else if (desvioUltimo < desvioPrimeiro * 0.95) tendencia = 'melhorando';
         }
         
         // Calcular previsão de substituição
         const desvioRestante = 15 - desvio;
-        const degradacaoMensal = 0.5; // Taxa padrão de degradação
-        const mesesRestantes = desvioRestante > 0 ? desvioRestante / degradacaoMensal : 0;
-        const dataPrevisao = new Date();
-        dataPrevisao.setMonth(dataPrevisao.getMonth() + mesesRestantes);
+        const taxaDegradacao = 0.5; // Taxa padrão de 0.5% por mês
+        let mesesRestantes = 0;
+        let urgente = false;
         
+        if (desvioRestante > 0 && taxaDegradacao > 0) {
+          mesesRestantes = desvioRestante / taxaDegradacao;
+          urgente = mesesRestantes <= 3;
+        } else if (desvioRestante <= 0) {
+          urgente = true;
+        }
+
+        // Aplicar filtro por cliente se necessário
+        const clienteNome = cap.bancos_capacitores?.clientes?.nome || 'N/A';
+        const clienteId = cap.bancos_capacitores?.cliente_id;
+        
+        if (clienteFiltro !== 'todos' && clienteId !== clienteFiltro) {
+          continue;
+        }
+
         processedData.push({
           id: cap.id,
-          codigo: cap.codigo_identificacao,
+          codigo: cap.codigo_identificacao || 'N/A',
           banco: cap.bancos_capacitores?.nome_banco || 'N/A',
-          cliente: cap.bancos_capacitores?.clientes?.nome || 'N/A',
+          cliente: clienteNome,
           potencia_kvar: cap.potencia_kvar || 0,
+          tensao_nominal_v: cap.tensao_nominal_v || 0,
           data_instalacao: cap.data_instalacao || new Date().toISOString(),
-          ultima_medicao: {
-            data: ultimaMedicao.data_medicao || ultimaMedicao.created_at,
-            desvio: ultimaMedicao.desvio_percent || 0,
-            status: status
-          },
+          ultimo_desvio: ultimaMedicao.desvio_percentual || 0,
+          ultimo_status: status,
+          ultima_data: ultimaMedicao.data_medicao || ultimaMedicao.created_at,
           tendencia,
-          previsao_substituicao: {
-            meses: mesesRestantes,
-            data: dataPrevisao.toLocaleDateString('pt-BR'),
-            urgente: mesesRestantes <= 3
-          },
+          previsao_meses: mesesRestantes,
+          previsao_urgente: urgente,
           medicoes_count: medicoes.length
         });
       }
@@ -126,21 +164,27 @@ export default function ManutencaoPage() {
       setCapacitores(processedData);
     } catch (error) {
       console.error('Erro ao buscar dados:', error);
-      Swal.fire('Erro', 'Não foi possível carregar os dados', 'error');
+      Swal.fire({
+        title: 'Erro',
+        text: 'Não foi possível carregar os dados. Verifique sua conexão.',
+        icon: 'error',
+        confirmButtonColor: '#0a2b3c'
+      });
     } finally {
       setLoading(false);
     }
   }
 
+  // Filtrar capacitores
   const filteredCapacitores = capacitores.filter(cap => {
-    if (filter === 'urgente') return cap.previsao_substituicao.urgente;
-    if (filter === 'atencao') return cap.ultima_medicao.status === 'warning';
+    if (filter === 'urgente') return cap.previsao_urgente;
+    if (filter === 'atencao') return cap.ultimo_status === 'warning';
     return true;
   });
 
-  const urgentes = capacitores.filter(c => c.previsao_substituicao.urgente).length;
-  const atencao = capacitores.filter(c => c.ultima_medicao.status === 'warning').length;
-  const saudaveis = capacitores.filter(c => c.ultima_medicao.status === 'ok' && !c.previsao_substituicao.urgente).length;
+  const urgentes = capacitores.filter(c => c.previsao_urgente).length;
+  const atencao = capacitores.filter(c => c.ultimo_status === 'warning').length;
+  const saudaveis = capacitores.filter(c => c.ultimo_status === 'ok' && !c.previsao_urgente).length;
 
   function handleGerarRelatorio() {
     Swal.fire({
@@ -168,10 +212,10 @@ export default function ManutencaoPage() {
     return (
       <div className="space-y-8 pb-12">
         <div className="h-40 animate-pulse rounded-3xl bg-slate-100" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
-          <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
-          <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="h-32 animate-pulse rounded-2xl bg-slate-100" />
+          ))}
         </div>
         <div className="h-96 animate-pulse rounded-2xl bg-slate-100" />
       </div>
@@ -202,6 +246,55 @@ export default function ManutencaoPage() {
           </p>
         </div>
       </motion.section>
+
+      {/* Filtros */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">Filtrar por Cliente</label>
+          <select 
+            className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2 outline-none focus:border-primary"
+            value={clienteFiltro}
+            onChange={(e) => {
+              setClienteFiltro(e.target.value);
+              fetchDadosManutencao();
+            }}
+          >
+            <option value="todos">📋 Todos os clientes</option>
+            {clientes.map(c => (
+              <option key={c.id} value={c.id}>🏢 {c.nome}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex gap-2 items-end">
+          <button
+            onClick={() => setFilter('todos')}
+            className={cn(
+              "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+              filter === 'todos' ? "bg-primary text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            )}
+          >
+            Todos ({capacitores.length})
+          </button>
+          <button
+            onClick={() => setFilter('urgente')}
+            className={cn(
+              "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+              filter === 'urgente' ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            )}
+          >
+            Urgentes ({urgentes})
+          </button>
+          <button
+            onClick={() => setFilter('atencao')}
+            className={cn(
+              "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+              filter === 'atencao' ? "bg-amber-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            )}
+          >
+            Atenção ({atencao})
+          </button>
+        </div>
+      </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -250,53 +343,22 @@ export default function ManutencaoPage() {
         </div>
       </div>
 
-      {/* Filtros e Ações */}
-      <div className="flex flex-col sm:flex-row justify-between gap-4">
-        <div className="flex gap-2">
-          <button
-            onClick={() => setFilter('todos')}
-            className={cn(
-              "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-              filter === 'todos' ? "bg-primary text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            )}
-          >
-            Todos
-          </button>
-          <button
-            onClick={() => setFilter('urgente')}
-            className={cn(
-              "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-              filter === 'urgente' ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            )}
-          >
-            Urgentes ({urgentes})
-          </button>
-          <button
-            onClick={() => setFilter('atencao')}
-            className={cn(
-              "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-              filter === 'atencao' ? "bg-amber-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            )}
-          >
-            Atenção ({atencao})
-          </button>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={fetchDadosManutencao}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-          >
-            <RefreshCw size={16} />
-            Atualizar
-          </button>
-          <button
-            onClick={handleGerarRelatorio}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary/90"
-          >
-            <FileText size={16} />
-            Relatório
-          </button>
-        </div>
+      {/* Ações */}
+      <div className="flex justify-end gap-2">
+        <button
+          onClick={fetchDadosManutencao}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+        >
+          <RefreshCw size={16} />
+          Atualizar
+        </button>
+        <button
+          onClick={handleGerarRelatorio}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary/90"
+        >
+          <FileText size={16} />
+          Relatório
+        </button>
       </div>
 
       {/* Tabela de Capacitores */}
@@ -316,73 +378,75 @@ export default function ManutencaoPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredCapacitores.map((cap) => (
-                <tr key={cap.id} className="text-sm hover:bg-slate-50 transition-colors">
-                  <td className="px-5 py-3 font-bold text-primary">{cap.codigo}</td>
-                  <td className="px-5 py-3">
-                    <div className="font-medium">{cap.cliente}</div>
-                    <div className="text-xs text-slate-400">{cap.banco}</div>
-                  </td>
-                  <td className="px-5 py-3">{cap.potencia_kvar} kVAr</td>
-                  <td className="px-5 py-3 text-slate-500 text-xs">
-                    {new Date(cap.ultima_medicao.data).toLocaleDateString('pt-BR')}
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className={cn(
-                      "font-bold",
-                      cap.ultima_medicao.desvio > 0 ? "text-red-500" : "text-green-500"
-                    )}>
-                      {cap.ultima_medicao.desvio > 0 ? '+' : ''}{cap.ultima_medicao.desvio.toFixed(2)}%
-                    </span>
-                  </td>
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-1">
-                      {cap.tendencia === 'degradando' && <TrendingDown size={14} className="text-red-500" />}
-                      {cap.tendencia === 'melhorando' && <TrendingUp size={14} className="text-green-500" />}
-                      {cap.tendencia === 'estavel' && <Activity size={14} className="text-slate-400" />}
-                      <span className={cn(
-                        "text-xs",
-                        cap.tendencia === 'degradando' ? "text-red-600" : 
-                        cap.tendencia === 'melhorando' ? "text-green-600" : "text-slate-500"
-                      )}>
-                        {cap.tendencia === 'degradando' ? "Degradando" : 
-                         cap.tendencia === 'melhorando' ? "Melhorando" : "Estável"}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3">
-                    {cap.previsao_substituicao.urgente ? (
-                      <span className="text-red-600 font-medium text-xs">
-                        Urgente! {cap.previsao_substituicao.meses.toFixed(0)} meses
-                      </span>
-                    ) : cap.previsao_substituicao.meses > 0 ? (
-                      <span className="text-slate-500 text-xs">
-                        {cap.previsao_substituicao.meses.toFixed(0)} meses
-                      </span>
-                    ) : (
-                      <span className="text-green-600 text-xs">Saudável</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className={cn(
-                      "px-2 py-1 text-xs font-bold rounded-full",
-                      cap.previsao_substituicao.urgente ? "bg-red-100 text-red-700" :
-                      cap.ultima_medicao.status === 'warning' ? "bg-amber-100 text-amber-700" :
-                      "bg-green-100 text-green-700"
-                    )}>
-                      {cap.previsao_substituicao.urgente ? "CRÍTICO" :
-                       cap.ultima_medicao.status === 'warning' ? "ATENÇÃO" : "OK"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {filteredCapacitores.length === 0 && (
+              {filteredCapacitores.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-5 py-12 text-center text-slate-400">
                     <Wrench size={32} className="mx-auto mb-2 opacity-50" />
-                    Nenhum capacitor encontrado
+                    <p>Nenhum capacitor encontrado</p>
+                    <p className="text-xs mt-1">Cadastre medições para começar a análise</p>
                   </td>
                 </tr>
+              ) : (
+                filteredCapacitores.map((cap) => (
+                  <tr key={cap.id} className="text-sm hover:bg-slate-50 transition-colors">
+                    <td className="px-5 py-3 font-bold text-primary">{cap.codigo}</td>
+                    <td className="px-5 py-3">
+                      <div className="font-medium">{cap.cliente}</div>
+                      <div className="text-xs text-slate-400">{cap.banco}</div>
+                    </td>
+                    <td className="px-5 py-3">{cap.potencia_kvar} kVAr</td>
+                    <td className="px-5 py-3 text-slate-500 text-xs">
+                      {new Date(cap.ultima_data).toLocaleDateString('pt-BR')}
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={cn(
+                        "font-bold",
+                        cap.ultimo_desvio > 0 ? "text-red-500" : "text-green-500"
+                      )}>
+                        {cap.ultimo_desvio > 0 ? '+' : ''}{cap.ultimo_desvio.toFixed(2)}%
+                      </span>
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-1">
+                        {cap.tendencia === 'degradando' && <TrendingDown size={14} className="text-red-500" />}
+                        {cap.tendencia === 'melhorando' && <TrendingUp size={14} className="text-green-500" />}
+                        {cap.tendencia === 'estavel' && <Activity size={14} className="text-slate-400" />}
+                        <span className={cn(
+                          "text-xs",
+                          cap.tendencia === 'degradando' ? "text-red-600" : 
+                          cap.tendencia === 'melhorando' ? "text-green-600" : "text-slate-500"
+                        )}>
+                          {cap.tendencia === 'degradando' ? "Degradando" : 
+                           cap.tendencia === 'melhorando' ? "Melhorando" : "Estável"}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3">
+                      {cap.previsao_urgente ? (
+                        <span className="text-red-600 font-medium text-xs">
+                          Urgente! {cap.previsao_meses.toFixed(0)} meses
+                        </span>
+                      ) : cap.previsao_meses > 0 ? (
+                        <span className="text-slate-500 text-xs">
+                          {cap.previsao_meses.toFixed(0)} meses
+                        </span>
+                      ) : (
+                        <span className="text-green-600 text-xs">Saudável</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={cn(
+                        "px-2 py-1 text-xs font-bold rounded-full",
+                        cap.previsao_urgente ? "bg-red-100 text-red-700" :
+                        cap.ultimo_status === 'warning' ? "bg-amber-100 text-amber-700" :
+                        "bg-green-100 text-green-700"
+                      )}>
+                        {cap.previsao_urgente ? "CRÍTICO" :
+                         cap.ultimo_status === 'warning' ? "ATENÇÃO" : "OK"}
+                      </span>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
