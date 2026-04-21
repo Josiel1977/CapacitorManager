@@ -6,7 +6,7 @@ import {
   Wrench, TrendingUp, TrendingDown, Activity, AlertTriangle, 
   CheckCircle2, XCircle, Calendar, Clock, Zap, Droplets,
   DollarSign, RefreshCw, Eye, FileText, Download, Shield, Filter,
-  BatteryWarning, Gauge, Building, Banknote, PieChart
+  BatteryWarning, Gauge, Building, Banknote, PieChart, Database
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Swal from 'sweetalert2';
@@ -400,8 +400,6 @@ export default function ManutencaoPage() {
     .sort((a, b) => b.perda_kvar - a.perda_kvar)
     .slice(0, 5);
 
-  const clienteSelecionadoObj = clientes.find(c => c.id === clienteFiltro);
-
   if (loading) {
     return (
       <div className="space-y-8 pb-12">
@@ -601,11 +599,11 @@ export default function ManutencaoPage() {
                         )}>
                           {banco.deficiencia > 20 ? "Crítico" : banco.deficiencia > 10 ? "Atenção" : "Normal"}
                         </span>
-                      </td>
+                       </td>
                       <td className="px-4 py-2 text-green-600">{banco.aprovados}</td>
                       <td className="px-4 py-2 text-amber-600">{banco.atencao}</td>
                       <td className="px-4 py-2 text-red-600">{banco.reprovados}</td>
-                    </tr>
+                     </tr>
                   ))}
                 </tbody>
               </table>
