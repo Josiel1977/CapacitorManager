@@ -79,60 +79,7 @@ export default function DemoPage() {
     }, 500);
   }
 
-  function handleSolicitarDemo() {
-    Swal.fire({
-      title: 'Solicitar Demonstração Completa',
-      html: `
-        <form id="demo-form" class="text-left">
-          <div class="mb-3">
-            <label class="block text-sm font-medium mb-1">Nome *</label>
-            <input type="text" id="nome" class="w-full border rounded-lg p-2" placeholder="Seu nome">
-          </div>
-          <div class="mb-3">
-            <label class="block text-sm font-medium mb-1">E-mail *</label>
-            <input type="email" id="email" class="w-full border rounded-lg p-2" placeholder="seu@email.com">
-          </div>
-          <div class="mb-3">
-            <label class="block text-sm font-medium mb-1">Empresa</label>
-            <input type="text" id="empresa" class="w-full border rounded-lg p-2" placeholder="Nome da empresa">
-          </div>
-          <div class="mb-3">
-            <label class="block text-sm font-medium mb-1">Telefone</label>
-            <input type="tel" id="telefone" class="w-full border rounded-lg p-2" placeholder="(00) 00000-0000">
-          </div>
-        </form>
-      `,
-      showCancelButton: true,
-      confirmButtonText: 'Enviar solicitação',
-      cancelButtonText: 'Cancelar',
-      confirmButtonColor: '#0a2b3c',
-      cancelButtonColor: '#e74c3c',
-      preConfirm: () => {
-        const nome = (document.getElementById('nome') as HTMLInputElement).value;
-        const email = (document.getElementById('email') as HTMLInputElement).value;
-        const empresa = (document.getElementById('empresa') as HTMLInputElement).value;
-        const telefone = (document.getElementById('telefone') as HTMLInputElement).value;
-        
-        if (!nome || !email) {
-          Swal.showValidationMessage('Preencha nome e e-mail');
-          return false;
-        }
-        
-        // Aqui você pode enviar para seu backend
-        console.log('Lead:', { nome, email, empresa, telefone });
-        return { nome, email, empresa, telefone };
-      }
-    }).then((result) => {
-      if (result.isConfirmed) {
-        Swal.fire({
-          title: 'Solicitação enviada!',
-          text: 'Entraremos em contato em até 24h úteis.',
-          icon: 'success',
-          confirmButtonColor: '#0a2b3c'
-        });
-      }
-    });
-  }
+  handleSolicitarDemo
 
   return (
     <div className="space-y-8 pb-12">
