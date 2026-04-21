@@ -224,7 +224,7 @@ export default function ContatoPage() {
                 </div>
                 <div>
                   <p className="text-xs text-slate-500">E-mail</p>
-                  <p className="text-sm font-medium">contato@capacitormanager.com</p>
+                  <p className="text-sm font-medium">contato@jmeletroservice.com</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -233,7 +233,7 @@ export default function ContatoPage() {
                 </div>
                 <div>
                   <p className="text-xs text-slate-500">WhatsApp</p>
-                  <p className="text-sm font-medium">(11) 99999-9999</p>
+                  <p className="text-sm font-medium">(91) 98485-5557</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
