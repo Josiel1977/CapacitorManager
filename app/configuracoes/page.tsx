@@ -1,18 +1,16 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
 import { supabase } from '@/lib/supabase';
 import { 
-  Database, Copy, Check, AlertCircle, RefreshCw, Trash2, RotateCcw, 
-  TrendingUp, TrendingDown, Gauge, Calendar, Clock, Zap, 
-  FileText, Download, Settings, BarChart3, Activity, Cpu,
-  Shield, ShieldCheck, ShieldAlert, AlertTriangle, CheckCircle,
-  Wrench, Droplets, Thermometer, Waves, Radio, Microscope, DollarSign,
-  Save, X
+  Database, Settings, Wrench, Trash2, RotateCcw, Save, RefreshCw,
+  Shield, ShieldCheck, ShieldAlert, AlertTriangle, CheckCircle2, XCircle,
+  TrendingUp, TrendingDown, Activity, Droplets, DollarSign, Zap,
+  CheckCircle, AlertCircle, Clock, Calendar, Gauge, Cpu
 } from 'lucide-react';
 import Swal from 'sweetalert2';
-import { motion } from 'motion/react';
-import { cn, parseNumber } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 // ============================================================================
 // TIPOS
@@ -45,7 +43,7 @@ interface CapacitorAlerta {
 }
 
 // ============================================================================
-// FUNÇÕES DE VALIDAÇÃO
+// FUNÇÕES DE VALIDAÇÃO (mesmo padrão do Dashboard)
 // ============================================================================
 function getStatusValidacao(desvio: number, tolerancias: ToleranciasConfig): string {
     const desvioAbs = Math.abs(desvio);
@@ -248,13 +246,11 @@ export default function ConfiguracoesPage() {
           ),
           medicoes (
             id,
-            created_at,
-            tipo_teste,
-            tensao_medida_v,
-            corrente_medida_a,
-            capacitancia_medida_uf,
-            desvio_percentual,
-            status_validacao
+            data_medicao,
+            valor_medido,
+            valor_nominal,
+            tipo_medicao,
+            desvio_percent
           )
         `)
         .eq('ativo', true);
@@ -268,13 +264,13 @@ export default function ConfiguracoesPage() {
         total++;
         
         const medicoesOrdenadas = cap.medicoes?.sort((a: any, b: any) => 
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          new Date(b.data_medicao).getTime() - new Date(a.data_medicao).getTime()
         ) || [];
         
         const ultimaMedicao = medicoesOrdenadas[0];
         if (!ultimaMedicao) continue;
 
-        const desvio = ultimaMedicao.desvio_percentual || 0;
+        const desvio = ultimaMedicao.desvio_percent || 0;
         const status = getStatusManutencao(desvio, tolerancias);
         const tendencia = calcularTendenciaManutencao(medicoesOrdenadas);
         const previsao = calcularPrevisaoSubstituicao(
@@ -284,16 +280,13 @@ export default function ConfiguracoesPage() {
         );
 
         if (status !== 'ok') {
-          const valorMedido = ultimaMedicao.tipo_teste === 'corrente' ? ultimaMedicao.corrente_medida_a : ultimaMedicao.capacitancia_medida_uf;
-          const valorNominal = ultimaMedicao.tipo_teste === 'corrente' ? cap.potencia_kvar : cap.capacitancia_nominal_uf;
-
           alertas.push({
             id: cap.id,
             codigo: cap.codigo_identificacao,
             banco: cap.bancos_capacitores?.nome_banco || 'N/A',
             cliente: cap.bancos_capacitores?.clientes?.nome || 'N/A',
-            valor_medido: valorMedido || 0,
-            valor_nominal: valorNominal || 0,
+            valor_medido: ultimaMedicao.valor_medido,
+            valor_nominal: ultimaMedicao.valor_nominal,
             desvio_percent: desvio,
             status,
             tendencia,
@@ -416,20 +409,56 @@ export default function ConfiguracoesPage() {
 
   const aprovados = totalCapacitores - alertasCapacitores.filter(a => a.status === 'critical').length - alertasCapacitores.filter(a => a.status === 'warning').length;
 
+  // Variants para animações (mesmo padrão do Dashboard)
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
+      }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { y: 20, opacity: 0 },
+    visible: { y: 0, opacity: 1 }
+  };
+
   // ============================================================================
   // RENDER
   // ============================================================================
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-3xl font-bold text-primary">Configurações do Sistema</h1>
-        <p className="text-slate-500">Gerencie normas técnicas, parâmetros de manutenção e conexões</p>
-      </header>
+    <div className="space-y-8 pb-12">
+      {/* Hero Section - mesmo estilo do Dashboard */}
+      <motion.section 
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative overflow-hidden rounded-3xl bg-primary p-8 text-white shadow-xl md:p-12"
+      >
+        <div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
+        <div className="absolute -bottom-20 -left-20 h-96 w-96 rounded-full bg-secondary/10 blur-3xl" />
+        
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="rounded-xl bg-white/10 p-2">
+              <Settings size={24} className="text-secondary" />
+            </div>
+            <span className="text-sm font-medium text-white/70">Painel de Controle</span>
+          </div>
+          <h1 className="mb-4 text-4xl font-bold leading-tight md:text-5xl">
+            Configurações do <span className="text-secondary">Sistema</span>
+          </h1>
+          <p className="text-lg text-white/80 md:text-xl max-w-2xl">
+            Gerencie normas técnicas, parâmetros de manutenção preditiva e conexões do sistema.
+          </p>
+        </div>
+      </motion.section>
 
       {/* TABS */}
       <div className="flex gap-2 border-b border-slate-200 overflow-x-auto no-scrollbar">
         <TabButton active={activeTab === 'tolerancias'} onClick={() => setActiveTab('tolerancias')}>
-          <Settings size={18} />
+          <Shield size={18} />
           Normas e Tolerâncias
         </TabButton>
         <TabButton active={activeTab === 'manutencao'} onClick={() => setActiveTab('manutencao')}>
@@ -447,7 +476,12 @@ export default function ConfiguracoesPage() {
       </div>
 
       {/* CONTEÚDO DAS TABS */}
-      <div className="min-h-[500px]">
+      <motion.div
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        className="min-h-[500px]"
+      >
         {activeTab === 'tolerancias' && (
           <ToleranciasTab 
             tolerancias={tolerancias}
@@ -455,6 +489,7 @@ export default function ConfiguracoesPage() {
             onSave={saveTolerancias}
             onReset={resetTolerancias}
             saving={savingTolerancias}
+            variants={itemVariants}
           />
         )}
 
@@ -466,6 +501,7 @@ export default function ConfiguracoesPage() {
             loading={loadingAlertas}
             tolerancias={tolerancias}
             onRefresh={fetchAlertasCapacitores}
+            variants={itemVariants}
           />
         )}
 
@@ -473,6 +509,7 @@ export default function ConfiguracoesPage() {
           <ConexaoTab 
             connectionStatus={connectionStatus}
             onTest={testConnection}
+            variants={itemVariants}
           />
         )}
 
@@ -481,9 +518,10 @@ export default function ConfiguracoesPage() {
             trashItems={trashItems}
             onRestore={restoreItem}
             onDelete={permanentDelete}
+            variants={itemVariants}
           />
         )}
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -497,7 +535,7 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
     <button 
       onClick={onClick}
       className={cn(
-        "pb-3 text-sm font-medium transition-all px-4 flex items-center gap-2 border-b-2",
+        "pb-3 text-sm font-medium transition-all px-5 flex items-center gap-2 border-b-2",
         active ? "border-primary text-primary" : "border-transparent text-slate-400 hover:text-slate-600"
       )}
     >
@@ -506,20 +544,25 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   );
 }
 
-function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving }: any) {
+function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving, variants }: any) {
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
+    <motion.div variants={variants} className="space-y-6">
+      <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
         <div className="mb-6 flex items-center gap-3">
-          <Shield className="text-secondary" size={24} />
-          <h2 className="text-lg font-bold text-primary">Configuração de Normas Técnicas</h2>
+          <div className="rounded-xl bg-primary/10 p-2 text-primary">
+            <ShieldCheck size={24} />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-primary">Configuração de Normas Técnicas</h2>
+            <p className="text-sm text-slate-500">Baseado na IEC 60831-1/2 para bancos de capacitores</p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           {/* Tolerâncias de Aprovação */}
           <div className="space-y-4">
             <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-              <ShieldCheck size={14} />
+              <CheckCircle2 size={14} />
               Tolerâncias de Aprovação (%)
             </h3>
             <div className="grid grid-cols-2 gap-4">
@@ -529,7 +572,7 @@ function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving }
                   type="number" 
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                   value={tolerancias.tolerancia_min_aprovado}
-                  onChange={(e) => setTolerancias({...tolerancias, tolerancia_min_aprovado: parseNumber(e.target.value)})}
+                  onChange={(e) => setTolerancias({...tolerancias, tolerancia_min_aprovado: parseFloat(e.target.value)})}
                 />
               </div>
               <div>
@@ -538,7 +581,7 @@ function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving }
                   type="number" 
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                   value={tolerancias.tolerancia_max_aprovado}
-                  onChange={(e) => setTolerancias({...tolerancias, tolerancia_max_aprovado: parseNumber(e.target.value)})}
+                  onChange={(e) => setTolerancias({...tolerancias, tolerancia_max_aprovado: parseFloat(e.target.value)})}
                 />
               </div>
             </div>
@@ -547,7 +590,7 @@ function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving }
           {/* Tolerâncias de Atenção */}
           <div className="space-y-4">
             <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-              <ShieldAlert size={14} />
+              <AlertTriangle size={14} />
               Tolerâncias de Atenção (%)
             </h3>
             <div className="grid grid-cols-2 gap-4">
@@ -557,7 +600,7 @@ function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving }
                   type="number" 
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                   value={tolerancias.tolerancia_min_atencao}
-                  onChange={(e) => setTolerancias({...tolerancias, tolerancia_min_atencao: parseNumber(e.target.value)})}
+                  onChange={(e) => setTolerancias({...tolerancias, tolerancia_min_atencao: parseFloat(e.target.value)})}
                 />
               </div>
               <div>
@@ -566,7 +609,7 @@ function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving }
                   type="number" 
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                   value={tolerancias.tolerancia_max_atencao}
-                  onChange={(e) => setTolerancias({...tolerancias, tolerancia_max_atencao: parseNumber(e.target.value)})}
+                  onChange={(e) => setTolerancias({...tolerancias, tolerancia_max_atencao: parseFloat(e.target.value)})}
                 />
               </div>
             </div>
@@ -585,7 +628,7 @@ function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving }
                   type="number" 
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   value={tolerancias.limite_corrente_min}
-                  onChange={(e) => setTolerancias({...tolerancias, limite_corrente_min: parseNumber(e.target.value)})}
+                  onChange={(e) => setTolerancias({...tolerancias, limite_corrente_min: parseFloat(e.target.value)})}
                 />
               </div>
               <div>
@@ -594,7 +637,7 @@ function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving }
                   type="number" 
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   value={tolerancias.limite_corrente_max}
-                  onChange={(e) => setTolerancias({...tolerancias, limite_corrente_max: parseNumber(e.target.value)})}
+                  onChange={(e) => setTolerancias({...tolerancias, limite_corrente_max: parseFloat(e.target.value)})}
                 />
               </div>
               <div>
@@ -603,7 +646,7 @@ function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving }
                   type="number" 
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   value={tolerancias.temperatura_max}
-                  onChange={(e) => setTolerancias({...tolerancias, temperatura_max: parseNumber(e.target.value)})}
+                  onChange={(e) => setTolerancias({...tolerancias, temperatura_max: parseFloat(e.target.value)})}
                 />
               </div>
               <div>
@@ -613,7 +656,7 @@ function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving }
                   step="0.5"
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   value={tolerancias.degradacao_anual_percent}
-                  onChange={(e) => setTolerancias({...tolerancias, degradacao_anual_percent: parseNumber(e.target.value)})}
+                  onChange={(e) => setTolerancias({...tolerancias, degradacao_anual_percent: parseFloat(e.target.value)})}
                 />
               </div>
             </div>
@@ -631,36 +674,43 @@ function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving }
         </div>
 
         <div className="mt-8 flex justify-end gap-4">
-          <button onClick={onReset} className="flex items-center gap-2 rounded-lg border border-slate-200 px-6 py-2 font-medium text-slate-600 transition-all hover:bg-slate-50">
+          <button 
+            onClick={onReset} 
+            className="flex items-center gap-2 rounded-lg border border-slate-200 px-6 py-2 font-medium text-slate-600 transition-all hover:bg-slate-50"
+          >
             <RotateCcw size={18} />
             Resetar Padrões
           </button>
-          <button onClick={onSave} disabled={saving} className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2 font-medium text-white transition-all hover:bg-primary/90 disabled:opacity-50">
+          <button 
+            onClick={onSave} 
+            disabled={saving} 
+            className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2 font-medium text-white transition-all hover:bg-primary/90 disabled:opacity-50"
+          >
             {saving ? <RefreshCw className="animate-spin" size={18} /> : <Save size={18} />}
             Salvar Configurações
           </button>
         </div>
       </div>
 
-      <div className="rounded-xl bg-slate-50 p-6 border border-slate-200">
-        <h3 className="mb-3 font-bold text-primary">📋 Sobre as Normas de Validação</h3>
+      <div className="rounded-2xl bg-slate-50 p-6 border border-slate-200">
+        <h3 className="mb-3 font-semibold text-primary">📋 Sobre as Normas de Validação</h3>
         <div className="space-y-3 text-sm text-slate-600">
           <p>De acordo com a norma <strong>IEC 60831-1/2</strong>, as tolerâncias de capacitância permitidas são geralmente:</p>
           <ul className="list-disc pl-5 space-y-1">
-            <li><strong>-5% a +10%:</strong> Faixa padrão para unidades capacitivas (APROVADO)</li>
-            <li><strong>-10% a +15%:</strong> Faixa de atenção (monitorar)</li>
-            <li><strong>Fora destes limites:</strong> REPROVADO (substituir)</li>
+            <li><strong className="text-green-600">-5% a +10%:</strong> Faixa padrão para unidades capacitivas (APROVADO)</li>
+            <li><strong className="text-amber-600">-10% a +15%:</strong> Faixa de atenção (monitorar)</li>
+            <li><strong className="text-red-600">Fora destes limites:</strong> REPROVADO (substituir)</li>
           </ul>
           <p className="mt-3 text-xs font-medium text-slate-400">
             * As tolerâncias configuradas aqui serão aplicadas automaticamente em todos os novos testes realizados no sistema.
           </p>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
-function ManutencaoPreditivaTab({ alertas, totalCapacitores, aprovados, loading, tolerancias, onRefresh }: any) {
+function ManutencaoPreditivaTab({ alertas, totalCapacitores, aprovados, loading, tolerancias, onRefresh, variants }: any) {
   const criticos = alertas.filter((a: any) => a.status === 'critical');
   const atencao = alertas.filter((a: any) => a.status === 'warning');
 
@@ -701,60 +751,60 @@ function ManutencaoPreditivaTab({ alertas, totalCapacitores, aprovados, loading,
   }
 
   return (
-    <div className="space-y-6">
-      {/* Cards de Resumo */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+    <motion.div variants={variants} className="space-y-6">
+      {/* Cards de Resumo - mesmo estilo do Dashboard */}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
+        <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
           <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-red-50 rounded-lg text-red-600">
-              <AlertTriangle size={20} />
+            <div className="rounded-xl bg-red-50 p-2 text-red-600">
+              <AlertTriangle size={22} />
             </div>
-            <span className="text-sm font-medium text-slate-500">Críticos</span>
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Críticos</span>
           </div>
-          <p className="text-3xl font-bold text-red-600">{criticos.length}</p>
+          <p className="text-3xl font-black text-red-600">{criticos.length}</p>
           <p className="text-xs text-red-500 mt-1">Substituir imediatamente</p>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+        <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
           <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-yellow-50 rounded-lg text-yellow-600">
-              <AlertCircle size={20} />
+            <div className="rounded-xl bg-amber-50 p-2 text-amber-600">
+              <AlertCircle size={22} />
             </div>
-            <span className="text-sm font-medium text-slate-500">Atenção</span>
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Atenção</span>
           </div>
-          <p className="text-3xl font-bold text-yellow-600">{atencao.length}</p>
-          <p className="text-xs text-yellow-500 mt-1">Monitorar mensalmente</p>
+          <p className="text-3xl font-black text-amber-600">{atencao.length}</p>
+          <p className="text-xs text-amber-500 mt-1">Monitorar mensalmente</p>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+        <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
           <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-green-50 rounded-lg text-green-600">
-              <CheckCircle size={20} />
+            <div className="rounded-xl bg-green-50 p-2 text-green-600">
+              <CheckCircle2 size={22} />
             </div>
-            <span className="text-sm font-medium text-slate-500">Aprovados</span>
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Aprovados</span>
           </div>
-          <p className="text-3xl font-bold text-green-600">{aprovados}</p>
+          <p className="text-3xl font-black text-green-600">{aprovados}</p>
           <p className="text-xs text-green-500 mt-1">Dentro da especificação</p>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+        <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
           <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-primary/10 rounded-lg text-primary">
-              <Droplets size={20} />
+            <div className="rounded-xl bg-primary/10 p-2 text-primary">
+              <Droplets size={22} />
             </div>
-            <span className="text-sm font-medium text-slate-500">Total Analisado</span>
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Analisado</span>
           </div>
-          <p className="text-3xl font-bold text-primary">{totalCapacitores}</p>
+          <p className="text-3xl font-black text-primary">{totalCapacitores}</p>
           <p className="text-xs text-slate-400 mt-1">Capacitores monitorados</p>
         </div>
       </div>
 
       {/* Tabela de Alertas */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="rounded-2xl bg-white shadow-sm border border-slate-100 overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex justify-between items-center">
           <div className="flex items-center gap-2">
             <Wrench size={20} className="text-secondary" />
-            <h2 className="text-lg font-bold text-primary">Recomendações de Manutenção</h2>
+            <h2 className="text-lg font-semibold text-primary">Recomendações de Manutenção</h2>
           </div>
           <button 
             onClick={onRefresh} 
@@ -768,11 +818,11 @@ function ManutencaoPreditivaTab({ alertas, totalCapacitores, aprovados, loading,
         {loading ? (
           <div className="p-12 text-center text-slate-400">
             <RefreshCw className="animate-spin mx-auto mb-4" size={32} />
-            Carregando dados...
+            <p>Carregando dados...</p>
           </div>
         ) : alertas.length === 0 ? (
           <div className="p-12 text-center text-slate-400">
-            <CheckCircle size={48} className="mx-auto mb-4 text-green-500" />
+            <CheckCircle2 size={48} className="mx-auto mb-4 text-green-500" />
             <p className="font-medium">Todos os capacitores estão dentro das especificações!</p>
             <p className="text-sm mt-1">Nenhuma ação de manutenção necessária no momento.</p>
           </div>
@@ -788,7 +838,7 @@ function ManutencaoPreditivaTab({ alertas, totalCapacitores, aprovados, loading,
                   <th className="px-5 py-3">Tendência</th>
                   <th className="px-5 py-3">Previsão</th>
                   <th className="px-5 py-3 text-center">Ação</th>
-                </tr>
+                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {alertas.map((cap: any) => (
@@ -835,46 +885,46 @@ function ManutencaoPreditivaTab({ alertas, totalCapacitores, aprovados, loading,
 
       {/* Estimativa de Custo */}
       {criticos.length > 0 && (
-        <div className="bg-gradient-to-r from-primary/5 to-secondary/5 p-6 rounded-xl border border-primary/20">
-          <h4 className="font-bold text-primary mb-4 flex items-center gap-2">
+        <div className="bg-gradient-to-r from-primary/5 to-secondary/5 p-6 rounded-2xl border border-primary/20">
+          <h4 className="font-semibold text-primary mb-4 flex items-center gap-2">
             <DollarSign size={18} />
             Estimativa de Investimento
           </h4>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white p-4 rounded-lg">
+            <div className="bg-white p-4 rounded-xl">
               <p className="text-xs text-slate-500">Substituição Urgente</p>
-              <p className="text-2xl font-bold text-red-600">R$ {criticos.length * 250}</p>
+              <p className="text-2xl font-black text-red-600">R$ {criticos.length * 250}</p>
               <p className="text-xs text-slate-400">{criticos.length} capacitores</p>
             </div>
-            <div className="bg-white p-4 rounded-lg">
+            <div className="bg-white p-4 rounded-xl">
               <p className="text-xs text-slate-500">Economia mensal estimada</p>
-              <p className="text-2xl font-bold text-green-600">R$ 2.188</p>
+              <p className="text-2xl font-black text-green-600">R$ 2.188</p>
               <p className="text-xs text-slate-400">Com eliminação da multa</p>
             </div>
-            <div className="bg-white p-4 rounded-lg">
+            <div className="bg-white p-4 rounded-xl">
               <p className="text-xs text-slate-500">Payback estimado</p>
-              <p className="text-2xl font-bold text-primary">~{Math.ceil((criticos.length * 250) / 2188)} meses</p>
+              <p className="text-2xl font-black text-primary">~{Math.ceil((criticos.length * 250) / 2188)} meses</p>
               <p className="text-xs text-slate-400">Retorno do investimento</p>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
-function ConexaoTab({ connectionStatus, onTest }: any) {
+function ConexaoTab({ connectionStatus, onTest, variants }: any) {
   return (
-    <div className="flex flex-col items-center justify-center py-12">
+    <motion.div variants={variants} className="flex flex-col items-center justify-center py-16">
       <div className={cn(
-        "mb-6 rounded-full p-6 transition-all duration-500",
+        "mb-6 rounded-full p-8 transition-all duration-500",
         connectionStatus === 'success' ? "bg-green-100 text-green-600" : 
         connectionStatus === 'error' ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-400"
       )}>
-        <Database size={48} className={cn(connectionStatus === 'testing' && "animate-pulse")} />
+        <Database size={56} className={cn(connectionStatus === 'testing' && "animate-pulse")} />
       </div>
       
-      <h2 className="text-xl font-bold text-primary">
+      <h2 className="text-2xl font-bold text-primary">
         {connectionStatus === 'idle' && "Verificar Conexão"}
         {connectionStatus === 'testing' && "Testando Conexão..."}
         {connectionStatus === 'success' && "Conectado com Sucesso!"}
@@ -890,18 +940,18 @@ function ConexaoTab({ connectionStatus, onTest }: any) {
       <button 
         onClick={onTest} 
         disabled={connectionStatus === 'testing'} 
-        className="mt-6 flex items-center gap-2 rounded-lg bg-primary px-6 py-2 font-medium text-white transition-all hover:bg-primary/90 disabled:opacity-50"
+        className="mt-8 flex items-center gap-2 rounded-lg bg-primary px-8 py-3 font-medium text-white transition-all hover:bg-primary/90 disabled:opacity-50"
       >
         <RefreshCw size={18} className={cn(connectionStatus === 'testing' && "animate-spin")} />
         Testar Agora
       </button>
-    </div>
+    </motion.div>
   );
 }
 
-function LixeiraTab({ trashItems, onRestore, onDelete }: any) {
+function LixeiraTab({ trashItems, onRestore, onDelete, variants }: any) {
   return (
-    <div className="space-y-8">
+    <motion.div variants={variants} className="space-y-8">
       <TrashSection 
         title="Clientes Excluídos" 
         items={trashItems.clientes} 
@@ -940,7 +990,7 @@ function LixeiraTab({ trashItems, onRestore, onDelete }: any) {
           </div>
         )}
       />
-    </div>
+    </motion.div>
   );
 }
 
@@ -950,19 +1000,19 @@ function TrashSection({ title, items, onRestore, onDelete, renderItem }: any) {
       <h3 className="text-sm font-black uppercase tracking-widest text-slate-400">{title} ({items.length})</h3>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
         {items.map((item: any) => (
-          <div key={item.id} className="flex items-center gap-3 rounded-xl bg-white p-4 shadow-sm border border-slate-100">
+          <div key={item.id} className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-sm border border-slate-100">
             {renderItem(item)}
             <div className="flex gap-1">
               <button 
                 onClick={() => onRestore(item.id)} 
-                className="rounded p-1.5 text-green-600 hover:bg-green-50 transition-colors" 
+                className="rounded-lg p-2 text-green-600 hover:bg-green-50 transition-colors" 
                 title="Restaurar"
               >
                 <RotateCcw size={16} />
               </button>
               <button 
                 onClick={() => onDelete(item.id)} 
-                className="rounded p-1.5 text-red-600 hover:bg-red-50 transition-colors" 
+                className="rounded-lg p-2 text-red-600 hover:bg-red-50 transition-colors" 
                 title="Excluir Permanentemente"
               >
                 <Trash2 size={16} />
@@ -971,8 +1021,9 @@ function TrashSection({ title, items, onRestore, onDelete, renderItem }: any) {
           </div>
         ))}
         {items.length === 0 && (
-          <div className="col-span-full py-8 text-center text-slate-300 border-2 border-dashed border-slate-100 rounded-xl">
-            Nenhum item na lixeira
+          <div className="col-span-full py-12 text-center text-slate-300 border-2 border-dashed border-slate-100 rounded-2xl">
+            <Trash2 size={32} className="mx-auto mb-2 opacity-50" />
+            <p className="text-sm">Nenhum item na lixeira</p>
           </div>
         )}
       </div>
@@ -991,7 +1042,7 @@ function StatusBadge({ status }: { status: string }) {
   const Icon = config.icon;
 
   return (
-    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium", config.color)}>
+    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold", config.color)}>
       <Icon size={12} />
       {config.label}
     </span>
