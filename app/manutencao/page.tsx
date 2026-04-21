@@ -5,15 +5,17 @@ import { motion } from 'motion/react';
 import { 
   Wrench, TrendingUp, TrendingDown, Activity, AlertTriangle, 
   CheckCircle2, XCircle, Calendar, Clock, Zap, Droplets,
-  DollarSign, RefreshCw, Eye, FileText, Download, Shield, Filter
+  DollarSign, RefreshCw, Eye, FileText, Download, Shield, Filter,
+  BatteryWarning, Gauge
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 
 // ============================================
-// FUNÇÕES DE CÁLCULO (MESMAS DO RELATÓRIO)
+// FUNÇÕES DE CÁLCULO
 // ============================================
+
 function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
     if (!tensaoNominal || tensaoNominal === 0) return 0;
     return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
@@ -30,7 +32,7 @@ function getStatusValidacao(desvio: number): string {
     return 'reprovado';
 }
 
-// Função para calcular tendência de degradação (MESMA DO RELATÓRIO)
+// Função para calcular tendência de degradação
 function calcularTendenciaCapacitor(medicoes: any[]) {
     if (medicoes.length < 2) return null;
     
@@ -62,6 +64,35 @@ function calcularTendenciaCapacitor(medicoes: any[]) {
     };
 }
 
+// ============================================
+// FUNÇÕES DE CÁLCULO DE INEFICIÊNCIA
+// ============================================
+
+interface IneficienciaCalculada {
+  nome: string;
+  total_nominal_kvar: number;
+  total_efetivo_kvar: number;
+  total_perda_kvar: number;
+  eficiencia_media_percent: number;
+  custo_mensal_perda: number;
+  capacitores_afetados: number;
+}
+
+// Calcular potência efetiva baseada no desvio
+function calcularPotenciaEfetiva(potenciaNominal: number, desvioPercentual: number): number {
+  // Capacitores com desvio perdem eficiência proporcionalmente
+  const eficiencia = Math.max(0, 100 - Math.abs(desvioPercentual));
+  return (potenciaNominal * eficiencia) / 100;
+}
+
+// Calcular custo estimado da ineficiência (R$/mês)
+function calcularCustoIneficiencia(perdaKvar: number, tarifaReferencia: number = 0.95): number {
+  // Perda em kVAr * 8h/dia * 30 dias * tarifa
+  const horasDia = 8;
+  const diasMes = 30;
+  return perdaKvar * horasDia * diasMes * tarifaReferencia;
+}
+
 interface CapacitorManutencao {
   id: string;
   codigo: string;
@@ -79,6 +110,9 @@ interface CapacitorManutencao {
   previsao_data: string | null;
   medicoes_count: number;
   variacao: string;
+  potencia_efetiva: number;
+  perda_kvar: number;
+  eficiencia: number;
 }
 
 export default function ManutencaoPage() {
@@ -87,6 +121,8 @@ export default function ManutencaoPage() {
   const [filter, setFilter] = useState<'todos' | 'urgente' | 'atencao'>('todos');
   const [clientes, setClientes] = useState<any[]>([]);
   const [clienteFiltro, setClienteFiltro] = useState<string>('todos');
+  const [ineficienciaTotal, setIneficienciaTotal] = useState<IneficienciaCalculada | null>(null);
+  const [ineficienciaCliente, setIneficienciaCliente] = useState<IneficienciaCalculada | null>(null);
 
   useEffect(() => {
     fetchClientes();
@@ -191,20 +227,25 @@ export default function ManutencaoPage() {
         if (medicoes.length === 0) continue;
 
         const ultimaMedicao = medicoes[medicoes.length - 1];
-        const primeiraMedicao = medicoes[0];
         const capacitor = ultimaMedicao.capacitores;
         
         if (!capacitor) continue;
 
-        const desvio = Math.abs(ultimaMedicao.desvio_percentual || 0);
+        const desvio = ultimaMedicao.desvio_percentual || 0;
+        const desvioAbs = Math.abs(desvio);
         
-        // Determinar status (mesmo do relatório)
+        // Determinar status
         let status = 'ok';
-        if (desvio > 15) status = 'critical';
-        else if (desvio > 10) status = 'warning';
+        if (desvioAbs > 15) status = 'critical';
+        else if (desvioAbs > 10) status = 'warning';
         
-        // Calcular tendência usando a mesma função do relatório
+        // Calcular tendência
         const tendenciaData = calcularTendenciaCapacitor(medicoes);
+        
+        // Calcular potência efetiva e perda
+        const potenciaEfetiva = calcularPotenciaEfetiva(capacitor.potencia_kvar || 0, desvio);
+        const perdaKvar = (capacitor.potencia_kvar || 0) - potenciaEfetiva;
+        const eficiencia = (potenciaEfetiva / (capacitor.potencia_kvar || 1)) * 100;
         
         const clienteNome = ultimaMedicao.bancos_capacitores?.clientes?.nome || 'N/A';
         const clienteId = ultimaMedicao.bancos_capacitores?.cliente_id;
@@ -224,18 +265,81 @@ export default function ManutencaoPage() {
           potencia_kvar: capacitor.potencia_kvar || 0,
           tensao_nominal_v: capacitor.tensao_nominal_v || 0,
           capacitancia_nominal_uf: capacitor.capacitancia_nominal_uf || 0,
-          ultimo_desvio: ultimaMedicao.desvio_percentual || 0,
+          ultimo_desvio: desvio,
           ultimo_status: status,
           ultima_data: ultimaMedicao.created_at,
           tendencia: (tendenciaData?.tendencia as 'piorando' | 'melhorando' | 'estavel') || 'estavel',
           previsao_meses: tendenciaData?.previsao?.meses || null,
           previsao_data: tendenciaData?.previsao?.data || null,
           medicoes_count: medicoes.length,
-          variacao: tendenciaData?.variacao || '0'
+          variacao: tendenciaData?.variacao || '0',
+          potencia_efetiva: potenciaEfetiva,
+          perda_kvar: perdaKvar,
+          eficiencia: eficiencia
         });
       }
 
       setCapacitores(processedData);
+
+      // ============================================
+      // CALCULAR INEFICIÊNCIA TOTAL
+      // ============================================
+      
+      // Ineficiência total (todos os clientes)
+      let totalNominal = 0;
+      let totalEfetivo = 0;
+      let capacitoresAfetados = 0;
+      
+      processedData.forEach(cap => {
+        totalNominal += cap.potencia_kvar;
+        totalEfetivo += cap.potencia_efetiva;
+        if (cap.perda_kvar > 0.5) capacitoresAfetados++;
+      });
+      
+      const perdaTotal = totalNominal - totalEfetivo;
+      const eficienciaMedia = totalNominal > 0 ? (totalEfetivo / totalNominal) * 100 : 0;
+      
+      setIneficienciaTotal({
+        nome: 'GERAL',
+        total_nominal_kvar: totalNominal,
+        total_efetivo_kvar: totalEfetivo,
+        total_perda_kvar: perdaTotal,
+        eficiencia_media_percent: eficienciaMedia,
+        custo_mensal_perda: calcularCustoIneficiencia(perdaTotal),
+        capacitores_afetados: capacitoresAfetados
+      });
+
+      // Ineficiência por cliente (se houver filtro)
+      if (clienteFiltro !== 'todos') {
+        const clienteSelecionado = clientes.find(c => c.id === clienteFiltro);
+        const capacitoresCliente = processedData.filter(cap => cap.cliente_id === clienteFiltro);
+        
+        let totalNominalCliente = 0;
+        let totalEfetivoCliente = 0;
+        let capacitoresAfetadosCliente = 0;
+        
+        capacitoresCliente.forEach(cap => {
+          totalNominalCliente += cap.potencia_kvar;
+          totalEfetivoCliente += cap.potencia_efetiva;
+          if (cap.perda_kvar > 0.5) capacitoresAfetadosCliente++;
+        });
+        
+        const perdaTotalCliente = totalNominalCliente - totalEfetivoCliente;
+        const eficienciaMediaCliente = totalNominalCliente > 0 ? (totalEfetivoCliente / totalNominalCliente) * 100 : 0;
+        
+        setIneficienciaCliente({
+          nome: clienteSelecionado?.nome || 'Cliente',
+          total_nominal_kvar: totalNominalCliente,
+          total_efetivo_kvar: totalEfetivoCliente,
+          total_perda_kvar: perdaTotalCliente,
+          eficiencia_media_percent: eficienciaMediaCliente,
+          custo_mensal_perda: calcularCustoIneficiencia(perdaTotalCliente),
+          capacitores_afetados: capacitoresAfetadosCliente
+        });
+      } else {
+        setIneficienciaCliente(null);
+      }
+      
     } catch (error) {
       console.error('Erro ao buscar dados:', error);
       Swal.fire({
@@ -254,7 +358,7 @@ export default function ManutencaoPage() {
     fetchDadosManutencao();
   }, [clienteFiltro]);
 
-  // Filtrar capacitores
+  // Filtrar capacitores por status
   const filteredCapacitores = capacitores.filter(cap => {
     if (filter === 'urgente') return cap.previsao_meses !== null && parseFloat(cap.previsao_meses) <= 3;
     if (filter === 'atencao') return cap.ultimo_status === 'warning';
@@ -265,7 +369,21 @@ export default function ManutencaoPage() {
   const atencao = capacitores.filter(c => c.ultimo_status === 'warning').length;
   const saudaveis = capacitores.filter(c => c.ultimo_status === 'ok' && (c.previsao_meses === null || parseFloat(c.previsao_meses) > 3)).length;
 
+  // Top 5 capacitores com maior perda de eficiência
+  const topPerdaEficiencia = [...capacitores]
+    .sort((a, b) => b.perda_kvar - a.perda_kvar)
+    .slice(0, 5);
+
   function handleGerarRelatorio() {
+    const ineficienciaTexto = ineficienciaTotal ? `
+      <div class="mt-4 p-3 bg-red-50 rounded-lg">
+        <p class="text-xs font-bold text-red-700">⚠️ INEFICIÊNCIA DO SISTEMA:</p>
+        <p class="text-sm">Perda total de potência: <strong>${ineficienciaTotal.total_perda_kvar.toFixed(1)} kVAr</strong></p>
+        <p class="text-sm">Custo mensal estimado: <strong>${ineficienciaTotal.custo_mensal_perda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong></p>
+        <p class="text-xs text-slate-500 mt-1">* Baseado em 8h/dia e tarifa de R$ 0,95/kVAr</p>
+      </div>
+    ` : '';
+
     Swal.fire({
       title: 'Relatório de Manutenção',
       html: `
@@ -278,6 +396,7 @@ export default function ManutencaoPage() {
           </ul>
           <p><strong>💰 Estimativa de Investimento:</strong></p>
           <p>R$ ${urgentes * 250} em substituições urgentes</p>
+          ${ineficienciaTexto}
           <hr class="my-3">
           <p class="text-xs text-slate-500">Relatório gerado em ${new Date().toLocaleDateString('pt-BR')}</p>
         </div>
@@ -419,6 +538,165 @@ export default function ManutencaoPage() {
         </div>
       </div>
 
+      {/* Cards de Ineficiência */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Ineficiência Total do Sistema */}
+        {ineficienciaTotal && ineficienciaTotal.total_nominal_kvar > 0 && (
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-100 rounded-lg text-red-600">
+                  <BatteryWarning size={22} />
+                </div>
+                <h3 className="font-bold text-primary">Ineficiência Total</h3>
+              </div>
+              <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded-full">
+                Perda: {ineficienciaTotal.total_perda_kvar.toFixed(1)} kVAr
+              </span>
+            </div>
+            
+            <div className="space-y-3">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Potência Nominal Total:</span>
+                <span className="font-bold">{ineficienciaTotal.total_nominal_kvar.toFixed(1)} kVAr</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Potência Efetiva Real:</span>
+                <span className="font-bold text-amber-600">{ineficienciaTotal.total_efetivo_kvar.toFixed(1)} kVAr</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Perda de Capacidade:</span>
+                <span className="font-bold text-red-600">-{ineficienciaTotal.total_perda_kvar.toFixed(1)} kVAr</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Eficiência Média:</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-red-500 rounded-full"
+                      style={{ width: `${ineficienciaTotal.eficiencia_media_percent}%` }}
+                    />
+                  </div>
+                  <span className={cn(
+                    "font-bold",
+                    ineficienciaTotal.eficiencia_media_percent > 80 ? "text-green-600" : "text-red-600"
+                  )}>
+                    {ineficienciaTotal.eficiencia_media_percent.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+              <div className="mt-3 pt-3 border-t border-slate-100">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">💰 Custo Mensal Estimado:</span>
+                  <span className="font-bold text-red-600">
+                    {ineficienciaTotal.custo_mensal_perda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  * Baseado em 8h/dia de operação e tarifa de R$ 0,95/kVAr
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Ineficiência por Cliente (quando filtrado) */}
+        {ineficienciaCliente && ineficienciaCliente.total_nominal_kvar > 0 && (
+          <div className="bg-gradient-to-r from-primary/5 to-secondary/5 rounded-2xl p-6 border border-primary/20">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                <TrendingDown size={22} />
+              </div>
+              <h3 className="font-bold text-primary">Ineficiência do Cliente</h3>
+            </div>
+            
+            <div className="space-y-3">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Potência Instalada:</span>
+                <span className="font-bold">{ineficienciaCliente.total_nominal_kvar.toFixed(1)} kVAr</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Potência Disponível:</span>
+                <span className="font-bold text-amber-600">{ineficienciaCliente.total_efetivo_kvar.toFixed(1)} kVAr</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">kVAr Perdidos:</span>
+                <span className="font-bold text-red-600">{ineficienciaCliente.total_perda_kvar.toFixed(1)} kVAr</span>
+              </div>
+              <div className="mt-2 p-3 bg-amber-50 rounded-lg">
+                <p className="text-xs text-amber-700">
+                  ⚠️ Para recuperar essa potência perdida, seria necessário instalar 
+                  aproximadamente <strong>{Math.ceil(ineficienciaCliente.total_perda_kvar / 10)}</strong> capacitores 
+                  de 10 kVAr.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Tabela de Capacitores com Maior Ineficiência */}
+      {topPerdaEficiencia.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-5 border-b border-slate-100">
+            <h3 className="font-bold text-primary flex items-center gap-2">
+              <AlertTriangle size={18} className="text-amber-500" />
+              Top 5 Capacitores com Maior Perda de Eficiência
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 text-xs font-medium text-slate-500">
+                <tr>
+                  <th className="px-5 py-3">Capacitor</th>
+                  <th className="px-5 py-3">Cliente</th>
+                  <th className="px-5 py-3">Potência Nominal</th>
+                  <th className="px-5 py-3">Potência Efetiva</th>
+                  <th className="px-5 py-3">Perda</th>
+                  <th className="px-5 py-3">Eficiência</th>
+                  <th className="px-5 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {topPerdaEficiencia.map((cap) => (
+                  <tr key={cap.id} className="text-sm hover:bg-slate-50">
+                    <td className="px-5 py-3 font-bold text-primary">{cap.codigo}</td>
+                    <td className="px-5 py-3">{cap.cliente}</td>
+                    <td className="px-5 py-3">{cap.potencia_kvar.toFixed(1)} kVAr</td>
+                    <td className="px-5 py-3 text-amber-600">{cap.potencia_efetiva.toFixed(1)} kVAr</td>
+                    <td className="px-5 py-3 text-red-600">-{cap.perda_kvar.toFixed(1)} kVAr</td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-red-500 rounded-full"
+                            style={{ width: `${cap.eficiencia}%` }}
+                          />
+                        </div>
+                        <span className="text-xs">
+                          {cap.eficiencia.toFixed(0)}%
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={cn(
+                        "px-2 py-1 text-xs font-bold rounded-full",
+                        cap.previsao_meses && parseFloat(cap.previsao_meses) <= 3 ? "bg-red-100 text-red-700" :
+                        cap.ultimo_status === 'warning' ? "bg-amber-100 text-amber-700" :
+                        "bg-green-100 text-green-700"
+                      )}>
+                        {cap.previsao_meses && parseFloat(cap.previsao_meses) <= 3 ? "CRÍTICO" :
+                         cap.ultimo_status === 'warning' ? "ATENÇÃO" : "OK"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Ações */}
       <div className="flex justify-end gap-2">
         <button
@@ -446,8 +724,8 @@ export default function ManutencaoPage() {
                 <th className="px-5 py-4">Código</th>
                 <th className="px-5 py-4">Cliente / Banco</th>
                 <th className="px-5 py-4">Potência</th>
-                <th className="px-5 py-4">Última Medição</th>
                 <th className="px-5 py-4">Desvio</th>
+                <th className="px-5 py-4">Eficiência</th>
                 <th className="px-5 py-4">Tendência</th>
                 <th className="px-5 py-4">Previsão</th>
                 <th className="px-5 py-4">Status</th>
@@ -460,8 +738,8 @@ export default function ManutencaoPage() {
                     <Wrench size={32} className="mx-auto mb-2 opacity-50" />
                     <p>Nenhum capacitor encontrado</p>
                     <p className="text-xs mt-1">Cadastre medições para começar a análise</p>
-                   </td>
-                 </tr>
+                    </td>
+                  </tr>
               ) : (
                 filteredCapacitores.map((cap) => (
                   <tr key={cap.id} className="text-sm hover:bg-slate-50 transition-colors">
@@ -471,9 +749,6 @@ export default function ManutencaoPage() {
                       <div className="text-xs text-slate-400">{cap.banco}</div>
                     </td>
                     <td className="px-5 py-3">{cap.potencia_kvar} kVAr</td>
-                    <td className="px-5 py-3 text-slate-500 text-xs">
-                      {new Date(cap.ultima_data).toLocaleDateString('pt-BR')}
-                    </td>
                     <td className="px-5 py-3">
                       <span className={cn(
                         "font-bold",
@@ -481,6 +756,20 @@ export default function ManutencaoPage() {
                       )}>
                         {cap.ultimo_desvio > 0 ? '+' : ''}{cap.ultimo_desvio.toFixed(2)}%
                       </span>
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div 
+                            className={cn(
+                              "h-full rounded-full",
+                              cap.eficiencia > 80 ? "bg-green-500" : cap.eficiencia > 60 ? "bg-amber-500" : "bg-red-500"
+                            )}
+                            style={{ width: `${cap.eficiencia}%` }}
+                          />
+                        </div>
+                        <span className="text-xs">{cap.eficiencia.toFixed(0)}%</span>
+                      </div>
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-1">
