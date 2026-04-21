@@ -1,14 +1,15 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Plus, Search, Edit2, Trash2, X, Save, Zap, Filter, ChevronDown, Eye, ArrowLeft } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, X, Save, Zap, Filter, ChevronDown, Eye, ArrowLeft, Loader2 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseNumber, cn } from '@/lib/utils';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function CapacitoresPage() {
+// Componente que usa useSearchParams (precisa de Suspense)
+function CapacitoresContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const bancoIdFromUrl = searchParams.get('banco_id');
@@ -60,7 +61,6 @@ export default function CapacitoresPage() {
     try {
       setLoading(true);
       
-      // Buscar bancos para o filtro
       const { data: bancosData, error: bancosError } = await supabase
         .from('bancos_capacitores')
         .select('*, clientes(id, nome)')
@@ -69,13 +69,11 @@ export default function CapacitoresPage() {
       
       if (bancosError) throw bancosError;
 
-      // Buscar todos os capacitores ativos
       let query = supabase
         .from('capacitores')
         .select('*, bancos_capacitores(*, clientes(id, nome))')
         .eq('ativo', true);
 
-      // Aplicar filtro de banco se selecionado
       if (bancoFiltro !== 'todos') {
         query = query.eq('banco_id', bancoFiltro);
       }
@@ -84,7 +82,6 @@ export default function CapacitoresPage() {
 
       if (capacitoresError) throw capacitoresError;
 
-      // Buscar clientes para o formulário
       const { data: clientesData } = await supabase
         .from('clientes')
         .select('id, nome')
@@ -102,7 +99,6 @@ export default function CapacitoresPage() {
     }
   }
 
-  // Filtrar capacitores por busca
   const filteredCapacitores = capacitores.filter(cap => {
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
@@ -113,11 +109,9 @@ export default function CapacitoresPage() {
     return true;
   });
 
-  // Estatísticas dos capacitores filtrados
   const stats = {
     total: filteredCapacitores.length,
     totalPotencia: filteredCapacitores.reduce((acc, cap) => acc + (parseFloat(cap.potencia_kvar) || 0), 0),
-    tensoes: [...new Set(filteredCapacitores.map(cap => cap.tensao_nominal_v))].filter(Boolean),
   };
 
   function handleOpenModal(capacitor: any = null) {
@@ -182,7 +176,6 @@ export default function CapacitoresPage() {
           .insert([{ ...data, ativo: true }]);
         if (error) throw error;
         
-        // Após adicionar capacitor, recalcular potência do banco
         await recalcularPotenciaBanco(formData.banco_id);
         Swal.fire('Sucesso', 'Capacitor cadastrado com sucesso!', 'success');
       }
@@ -228,7 +221,6 @@ export default function CapacitoresPage() {
           .eq('id', id);
         if (error) throw error;
         
-        // Recalcular potência do banco após remover capacitor
         await recalcularPotenciaBanco(bancoId);
         
         Swal.fire('Desativado!', 'Capacitor removido com sucesso.', 'success');
@@ -243,24 +235,29 @@ export default function CapacitoresPage() {
     router.push('/bancos');
   }
 
-  // Obter nome do banco selecionado
   const bancoSelecionado = bancos.find(b => b.id === bancoFiltro);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <div className="flex items-center gap-3 mb-2">
-            {bancoIdFromUrl && (
-              <button 
-                onClick={handleVoltarParaBancos}
-                className="flex items-center gap-1 text-primary hover:underline text-sm"
-              >
-                <ArrowLeft size={16} />
-                Voltar para Bancos
-              </button>
-            )}
-          </div>
+          {bancoIdFromUrl && (
+            <button 
+              onClick={handleVoltarParaBancos}
+              className="flex items-center gap-1 text-primary hover:underline text-sm mb-2"
+            >
+              <ArrowLeft size={16} />
+              Voltar para Bancos
+            </button>
+          )}
           <h1 className="text-3xl font-bold text-primary">Capacitores</h1>
           <p className="text-slate-500">Gerencie os capacitores dos bancos</p>
         </div>
@@ -289,7 +286,7 @@ export default function CapacitoresPage() {
               </div>
               <div className="text-center">
                 <p className="text-xs text-slate-500">Potência Total</p>
-                <p className="text-lg font-bold text-primary">{bancoSelecionadoInfo.potencia_calculada || 0} kVAr</p>
+                <p className="text-lg font-bold text-primary">{bancoSelecionadoInfo.potencia_total_kvar || 0} kVAr</p>
               </div>
             </div>
           </div>
@@ -349,126 +346,85 @@ export default function CapacitoresPage() {
         </div>
       </div>
 
-      {/* Indicador de filtro ativo */}
-      {bancoFiltro !== 'todos' && bancoSelecionado && (
-        <div className="flex items-center gap-2 text-sm bg-primary/10 text-primary rounded-lg px-3 py-2">
-          <Filter size={14} />
-          <span>Filtrando por: <strong>{bancoSelecionado.nome_banco}</strong></span>
-          <button 
-            onClick={() => {
-              setBancoFiltro('todos');
-              setBancoSelecionadoInfo(null);
-              fetchData();
-            }}
-            className="ml-auto text-xs hover:underline"
-          >
-            Limpar filtro
-          </button>
-        </div>
-      )}
-
       {/* Grid de Capacitores */}
-      {loading ? (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-56 animate-pulse rounded-xl bg-slate-100" />
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {filteredCapacitores.map((capacitor) => (
-            <motion.div 
-              key={capacitor.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="group relative rounded-xl bg-white p-6 shadow-sm border border-slate-100 transition-all hover:shadow-md"
-            >
-              <div className="mb-4 flex items-start justify-between">
-                <div className="rounded-lg bg-primary/10 p-2 text-primary">
-                  <Zap size={24} />
-                </div>
-                <div className="flex gap-1">
-                  <button 
-                    onClick={() => handleOpenModal(capacitor)}
-                    className="rounded p-1.5 text-blue-600 hover:bg-blue-50 transition-colors"
-                    title="Editar"
-                  >
-                    <Edit2 size={16} />
-                  </button>
-                  <button 
-                    onClick={() => handleDelete(capacitor.id, capacitor.banco_id)}
-                    className="rounded p-1.5 text-red-600 hover:bg-red-50 transition-colors"
-                    title="Excluir"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {filteredCapacitores.map((capacitor) => (
+          <motion.div 
+            key={capacitor.id}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="group relative rounded-xl bg-white p-6 shadow-sm border border-slate-100 transition-all hover:shadow-md"
+          >
+            <div className="mb-4 flex items-start justify-between">
+              <div className="rounded-lg bg-primary/10 p-2 text-primary">
+                <Zap size={24} />
               </div>
-              <h3 className="text-lg font-bold text-primary">{capacitor.codigo_identificacao}</h3>
-              <p className="mb-3 text-sm text-secondary">
-                {capacitor.bancos_capacitores?.nome_banco}
-              </p>
-              <p className="text-xs text-slate-500 mb-3">
-                Cliente: {capacitor.bancos_capacitores?.clientes?.nome}
-              </p>
-              
-              <div className="space-y-2 text-sm text-slate-600">
-                <div className="flex justify-between">
-                  <span>⚡ Potência:</span>
-                  <span className="font-medium">{capacitor.potencia_kvar} kVAr</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>🔋 Tensão:</span>
-                  <span className="font-medium">{capacitor.tensao_nominal_v} V</span>
-                </div>
-                {capacitor.capacitancia_nominal_uf && (
-                  <div className="flex justify-between">
-                    <span>📏 Capacitância:</span>
-                    <span className="font-medium">{capacitor.capacitancia_nominal_uf} µF</span>
-                  </div>
-                )}
-                {capacitor.data_instalacao && (
-                  <div className="flex justify-between">
-                    <span>📅 Instalação:</span>
-                    <span className="font-medium">{new Date(capacitor.data_instalacao).toLocaleDateString('pt-BR')}</span>
-                  </div>
-                )}
+              <div className="flex gap-1">
+                <button 
+                  onClick={() => handleOpenModal(capacitor)}
+                  className="rounded p-1.5 text-blue-600 hover:bg-blue-50 transition-colors"
+                  title="Editar"
+                >
+                  <Edit2 size={16} />
+                </button>
+                <button 
+                  onClick={() => handleDelete(capacitor.id, capacitor.banco_id)}
+                  className="rounded p-1.5 text-red-600 hover:bg-red-50 transition-colors"
+                  title="Excluir"
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
+            </div>
+            <h3 className="text-lg font-bold text-primary">{capacitor.codigo_identificacao}</h3>
+            <p className="mb-3 text-sm text-secondary">
+              {capacitor.bancos_capacitores?.nome_banco}
+            </p>
+            <p className="text-xs text-slate-500 mb-3">
+              Cliente: {capacitor.bancos_capacitores?.clientes?.nome}
+            </p>
+            
+            <div className="space-y-2 text-sm text-slate-600">
+              <div className="flex justify-between">
+                <span>⚡ Potência:</span>
+                <span className="font-medium">{capacitor.potencia_kvar} kVAr</span>
+              </div>
+              <div className="flex justify-between">
+                <span>🔋 Tensão:</span>
+                <span className="font-medium">{capacitor.tensao_nominal_v} V</span>
+              </div>
+              {capacitor.capacitancia_nominal_uf && (
+                <div className="flex justify-between">
+                  <span>📏 Capacitância:</span>
+                  <span className="font-medium">{capacitor.capacitancia_nominal_uf} µF</span>
+                </div>
+              )}
+            </div>
 
-              <button 
-                onClick={() => router.push(`/medicoes?capacitor_id=${capacitor.id}`)}
-                className="mt-5 w-full text-center text-xs text-primary hover:underline"
-              >
-                Ver medições →
-              </button>
-            </motion.div>
-          ))}
-        </div>
-      )}
+            <button 
+              onClick={() => router.push(`/medicoes?capacitor_id=${capacitor.id}`)}
+              className="mt-5 w-full text-center text-xs text-primary hover:underline"
+            >
+              Ver medições →
+            </button>
+          </motion.div>
+        ))}
+      </div>
 
       {filteredCapacitores.length === 0 && !loading && (
         <div className="py-12 text-center text-slate-400 bg-white rounded-xl border border-slate-100">
           <Zap size={48} className="mx-auto mb-3 opacity-50" />
           <p>Nenhum capacitor encontrado</p>
-          {bancoFiltro !== 'todos' ? (
-            <button 
-              onClick={() => handleOpenModal()}
-              className="mt-2 text-primary hover:underline"
-            >
-              + Adicionar capacitor a este banco
-            </button>
-          ) : (
-            <button 
-              onClick={() => handleOpenModal()}
-              className="mt-2 text-primary hover:underline"
-            >
-              + Cadastrar primeiro capacitor
-            </button>
-          )}
+          <button 
+            onClick={() => handleOpenModal()}
+            className="mt-2 text-primary hover:underline"
+          >
+            + Cadastrar primeiro capacitor
+          </button>
         </div>
       )}
 
-      {/* Modal - Formulário */}
+      {/* Modal */}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -626,5 +582,19 @@ export default function CapacitoresPage() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+// Componente principal com Suspense
+export default function CapacitoresPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <span className="ml-2 text-slate-500">Carregando...</span>
+      </div>
+    }>
+      <CapacitoresContent />
+    </Suspense>
   );
 }
