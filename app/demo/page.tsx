@@ -43,18 +43,15 @@ export default function DemoPage() {
 
     setLoading(true);
     
-    // Simular processamento
     setTimeout(() => {
       let valorTeorico = 0;
       let desvio = 0;
       
       if (tipoTeste === 'corrente') {
-        // Corrente Teórica = (Potência × 1000) / (√3 × Tensão)
         valorTeorico = (DEMO_DATA.capacitor.potencia_kvar * 1000) / (Math.sqrt(3) * DEMO_DATA.capacitor.tensao_nominal_v);
         const correnteMedida = parseFloat(valorMedido);
         desvio = ((correnteMedida - valorTeorico) / valorTeorico) * 100;
       } else {
-        // Capacitância Teórica = Capacitância Nominal × 1.5
         valorTeorico = DEMO_DATA.capacitor.capacitancia_nominal_uf * 1.5;
         const capacitanciaMedida = parseFloat(valorMedido);
         desvio = ((capacitanciaMedida - valorTeorico) / valorTeorico) * 100;
@@ -79,7 +76,99 @@ export default function DemoPage() {
     }, 500);
   }
 
-  handleSolicitarDemo
+  // ============================================
+  // FUNÇÃO CORRIGIDA – Envia os dados para a API
+  // ============================================
+  async function handleSolicitarDemo() {
+    const result = await Swal.fire({
+      title: 'Solicitar Demonstração Completa',
+      html: `
+        <form id="demo-form" class="text-left">
+          <div class="mb-3">
+            <label class="block text-sm font-medium mb-1">Nome *</label>
+            <input type="text" id="nome" class="w-full border rounded-lg p-2" placeholder="Seu nome">
+          </div>
+          <div class="mb-3">
+            <label class="block text-sm font-medium mb-1">E-mail *</label>
+            <input type="email" id="email" class="w-full border rounded-lg p-2" placeholder="seu@email.com">
+          </div>
+          <div class="mb-3">
+            <label class="block text-sm font-medium mb-1">Empresa</label>
+            <input type="text" id="empresa" class="w-full border rounded-lg p-2" placeholder="Nome da empresa">
+          </div>
+          <div class="mb-3">
+            <label class="block text-sm font-medium mb-1">Telefone</label>
+            <input type="tel" id="telefone" class="w-full border rounded-lg p-2" placeholder="(00) 00000-0000">
+          </div>
+          <div class="mb-3">
+            <label class="block text-sm font-medium mb-1">Plano de Interesse</label>
+            <select id="plano" class="w-full border rounded-lg p-2">
+              <option value="essencial">Plano Essencial - R$ 297/mês</option>
+              <option value="pro">Plano Pro - R$ 597/mês</option>
+              <option value="enterprise">Enterprise - Sob Consulta</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="block text-sm font-medium mb-1">Mensagem (opcional)</label>
+            <textarea id="mensagem" rows="2" class="w-full border rounded-lg p-2" placeholder="Alguma observação?"></textarea>
+          </div>
+        </form>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Enviar solicitação',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#0a2b3c',
+      cancelButtonColor: '#e74c3c',
+      preConfirm: async () => {
+        const nome = (document.getElementById('nome') as HTMLInputElement).value;
+        const email = (document.getElementById('email') as HTMLInputElement).value;
+        const empresa = (document.getElementById('empresa') as HTMLInputElement).value;
+        const telefone = (document.getElementById('telefone') as HTMLInputElement).value;
+        const plano_interesse = (document.getElementById('plano') as HTMLSelectElement).value;
+        const mensagem = (document.getElementById('mensagem') as HTMLTextAreaElement).value;
+        
+        if (!nome || !email) {
+          Swal.showValidationMessage('Preencha nome e e-mail');
+          return false;
+        }
+
+        try {
+          const response = await fetch('/api/lead', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              nome, 
+              email, 
+              telefone, 
+              empresa, 
+              plano_interesse,
+              mensagem,
+              origem: 'Demo Page'
+            })
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Erro ao enviar solicitação');
+          }
+
+          return { nome, email, empresa, telefone };
+        } catch (error: any) {
+          Swal.showValidationMessage(`Erro: ${error.message}`);
+          return false;
+        }
+      }
+    });
+
+    if (result.isConfirmed) {
+      Swal.fire({
+        title: 'Solicitação enviada!',
+        text: 'Entraremos em contato em até 24h úteis.',
+        icon: 'success',
+        confirmButtonColor: '#0a2b3c'
+      });
+    }
+  }
 
   return (
     <div className="space-y-8 pb-12">
