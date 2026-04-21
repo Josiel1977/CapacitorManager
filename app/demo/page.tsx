@@ -27,13 +27,17 @@ const DEMO_DATA = {
 export default function DemoPage() {
   const [tipoTeste, setTipoTeste] = useState<'corrente' | 'capacitancia'>('corrente');
   const [valorMedido, setValorMedido] = useState('');
+  const [tensaoMedida, setTensaoMedida] = useState('480'); // Campo para tensão (apenas para teste de corrente)
   const [resultado, setResultado] = useState<null | {
     desvio: number;
     status: 'aprovado' | 'atencao' | 'reprovado';
     mensagem: string;
     valorTeorico: number;
+    valorMedido: number;
+    tipo: string;
   }>(null);
   const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
 
   function calcularDemonstracao() {
     if (!valorMedido || parseFloat(valorMedido) === 0) {
@@ -46,15 +50,22 @@ export default function DemoPage() {
     setTimeout(() => {
       let valorTeorico = 0;
       let desvio = 0;
+      let valorNumerico = parseFloat(valorMedido);
       
       if (tipoTeste === 'corrente') {
-        valorTeorico = (DEMO_DATA.capacitor.potencia_kvar * 1000) / (Math.sqrt(3) * DEMO_DATA.capacitor.tensao_nominal_v);
-        const correnteMedida = parseFloat(valorMedido);
-        desvio = ((correnteMedida - valorTeorico) / valorTeorico) * 100;
+        // Teste de Corrente - usa a tensão informada
+        const tensao = parseFloat(tensaoMedida);
+        if (isNaN(tensao) || tensao === 0) {
+          Swal.fire('Atenção', 'Informe um valor válido para a tensão', 'warning');
+          setLoading(false);
+          return;
+        }
+        valorTeorico = (DEMO_DATA.capacitor.potencia_kvar * 1000) / (Math.sqrt(3) * tensao);
+        desvio = ((valorNumerico - valorTeorico) / valorTeorico) * 100;
       } else {
+        // Teste de Capacitância
         valorTeorico = DEMO_DATA.capacitor.capacitancia_nominal_uf * 1.5;
-        const capacitanciaMedida = parseFloat(valorMedido);
-        desvio = ((capacitanciaMedida - valorTeorico) / valorTeorico) * 100;
+        desvio = ((valorNumerico - valorTeorico) / valorTeorico) * 100;
       }
       
       let status: 'aprovado' | 'atencao' | 'reprovado';
@@ -71,13 +82,26 @@ export default function DemoPage() {
         mensagem = '❌ Capacitor reprovado! Substituição imediata recomendada para evitar multas por baixo fator de potência.';
       }
       
-      setResultado({ desvio, status, mensagem, valorTeorico });
+      setResultado({ 
+        desvio, 
+        status, 
+        mensagem, 
+        valorTeorico,
+        valorMedido: valorNumerico,
+        tipo: tipoTeste
+      });
       setLoading(false);
     }, 500);
   }
 
+  function handleNovoTeste() {
+    setResultado(null);
+    setValorMedido('');
+    setTensaoMedida('480');
+  }
+
   // ============================================
-  // FUNÇÃO CORRIGIDA – Envia os dados para a API
+  // FUNÇÃO PARA SOLICITAR DEMONSTRAÇÃO (salva no Supabase)
   // ============================================
   async function handleSolicitarDemo() {
     const result = await Swal.fire({
@@ -132,6 +156,8 @@ export default function DemoPage() {
           return false;
         }
 
+        setSending(true);
+
         try {
           const response = await fetch('/api/lead', {
             method: 'POST',
@@ -156,6 +182,8 @@ export default function DemoPage() {
         } catch (error: any) {
           Swal.showValidationMessage(`Erro: ${error.message}`);
           return false;
+        } finally {
+          setSending(false);
         }
       }
     });
@@ -207,8 +235,8 @@ export default function DemoPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <div><span className="text-slate-500">Código:</span> <strong>{DEMO_DATA.capacitor.codigo}</strong></div>
                 <div><span className="text-slate-500">Potência:</span> <strong>{DEMO_DATA.capacitor.potencia_kvar} kVAr</strong></div>
-                <div><span className="text-slate-500">Tensão:</span> <strong>{DEMO_DATA.capacitor.tensao_nominal_v}V</strong></div>
-                <div><span className="text-slate-500">Instalação:</span> <strong>{DEMO_DATA.capacitor.data_instalacao}</strong></div>
+                <div><span className="text-slate-500">Tensão Nominal:</span> <strong>{DEMO_DATA.capacitor.tensao_nominal_v}V</strong></div>
+                <div><span className="text-slate-500">Capacitância:</span> <strong>{DEMO_DATA.capacitor.capacitancia_nominal_uf} µF</strong></div>
               </div>
             </div>
 
@@ -218,7 +246,11 @@ export default function DemoPage() {
                 <label className="mb-1 block text-sm font-medium text-slate-700">Tipo de Teste</label>
                 <div className="flex gap-3">
                   <button
-                    onClick={() => setTipoTeste('corrente')}
+                    onClick={() => {
+                      setTipoTeste('corrente');
+                      setResultado(null);
+                      setValorMedido('');
+                    }}
                     className={cn(
                       "flex-1 py-2 rounded-lg border transition-colors",
                       tipoTeste === 'corrente' 
@@ -226,10 +258,14 @@ export default function DemoPage() {
                         : "border-slate-200 text-slate-600 hover:bg-slate-50"
                     )}
                   >
-                    ⚡ Corrente (A)
+                    ⚡ Teste por Corrente (Campo)
                   </button>
                   <button
-                    onClick={() => setTipoTeste('capacitancia')}
+                    onClick={() => {
+                      setTipoTeste('capacitancia');
+                      setResultado(null);
+                      setValorMedido('');
+                    }}
                     className={cn(
                       "flex-1 py-2 rounded-lg border transition-colors",
                       tipoTeste === 'capacitancia' 
@@ -237,24 +273,53 @@ export default function DemoPage() {
                         : "border-slate-200 text-slate-600 hover:bg-slate-50"
                     )}
                   >
-                    🔋 Capacitância (µF)
+                    🔋 Teste por Capacitância (Bancada)
                   </button>
                 </div>
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">
-                  Valor Medido ({tipoTeste === 'corrente' ? 'Amperes (A)' : 'Microfarads (µF)'})
-                </label>
-                <input 
-                  type="number" 
-                  step="0.1"
-                  placeholder={tipoTeste === 'corrente' ? "Ex: 38.5" : "Ex: 145.2"}
-                  className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
-                  value={valorMedido}
-                  onChange={(e) => setValorMedido(e.target.value)}
-                />
-              </div>
+              {tipoTeste === 'corrente' ? (
+                <>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Tensão Medida (V)</label>
+                    <input 
+                      type="number" 
+                      step="0.1"
+                      placeholder="Ex: 480"
+                      className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
+                      value={tensaoMedida}
+                      onChange={(e) => setTensaoMedida(e.target.value)}
+                    />
+                    <p className="text-xs text-slate-400 mt-1">💡 Tensão real no momento da medição</p>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Corrente Medida (A)</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      placeholder="Ex: 38.5"
+                      className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
+                      value={valorMedido}
+                      onChange={(e) => setValorMedido(e.target.value)}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Capacitância Medida entre Fases (µF)</label>
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    placeholder="Ex: 145.2"
+                    className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
+                    value={valorMedido}
+                    onChange={(e) => setValorMedido(e.target.value)}
+                  />
+                  <p className="mt-1 text-xs text-slate-400">
+                    ⚠️ Para ligação delta, o valor teórico é Cfase × 1.5 = {(DEMO_DATA.capacitor.capacitancia_nominal_uf * 1.5).toFixed(2)} µF
+                  </p>
+                </div>
+              )}
 
               <button 
                 onClick={calcularDemonstracao}
@@ -281,27 +346,39 @@ export default function DemoPage() {
                   resultado.status === 'atencao' ? "border-amber-200 bg-amber-50" : "border-red-200 bg-red-50"
                 )}
               >
-                <h3 className={cn(
-                  "font-bold text-lg flex items-center gap-2",
-                  resultado.status === 'aprovado' ? "text-green-700" :
-                  resultado.status === 'atencao' ? "text-amber-700" : "text-red-700"
-                )}>
-                  {resultado.status === 'aprovado' && <CheckCircle2 size={20} />}
-                  {resultado.status === 'atencao' && <AlertTriangle size={20} />}
-                  {resultado.status === 'reprovado' && <XCircle size={20} />}
-                  {resultado.status === 'aprovado' ? 'Aprovado' : resultado.status === 'atencao' ? 'Atenção' : 'Reprovado'}
-                </h3>
+                <div className="flex justify-between items-start">
+                  <h3 className={cn(
+                    "font-bold text-lg flex items-center gap-2",
+                    resultado.status === 'aprovado' ? "text-green-700" :
+                    resultado.status === 'atencao' ? "text-amber-700" : "text-red-700"
+                  )}>
+                    {resultado.status === 'aprovado' && <CheckCircle2 size={20} />}
+                    {resultado.status === 'atencao' && <AlertTriangle size={20} />}
+                    {resultado.status === 'reprovado' && <XCircle size={20} />}
+                    {resultado.status === 'aprovado' ? 'Aprovado' : resultado.status === 'atencao' ? 'Atenção' : 'Reprovado'}
+                  </h3>
+                  <button 
+                    onClick={handleNovoTeste}
+                    className="text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    Novo teste →
+                  </button>
+                </div>
                 
                 <div className="grid grid-cols-2 gap-4 mt-3 text-sm">
                   <div>
                     <span className="text-slate-500">Valor Teórico:</span>
-                    <strong className="block">{resultado.valorTeorico.toFixed(2)} {tipoTeste === 'corrente' ? 'A' : 'µF'}</strong>
+                    <strong className="block text-primary">
+                      {resultado.valorTeorico.toFixed(2)} {resultado.tipo === 'corrente' ? 'A' : 'µF'}
+                    </strong>
                   </div>
                   <div>
                     <span className="text-slate-500">Valor Medido:</span>
-                    <strong className="block">{parseFloat(valorMedido).toFixed(2)} {tipoTeste === 'corrente' ? 'A' : 'µF'}</strong>
+                    <strong className="block text-primary">
+                      {resultado.valorMedido.toFixed(2)} {resultado.tipo === 'corrente' ? 'A' : 'µF'}
+                    </strong>
                   </div>
-                  <div>
+                  <div className="col-span-2">
                     <span className="text-slate-500">Desvio:</span>
                     <strong className={cn(
                       "block",
@@ -309,10 +386,6 @@ export default function DemoPage() {
                     )}>
                       {resultado.desvio > 0 ? '+' : ''}{resultado.desvio.toFixed(2)}%
                     </strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Norma:</span>
-                    <strong className="block">IEC 60831-1/2</strong>
                   </div>
                 </div>
                 <p className="mt-3 text-sm">{resultado.mensagem}</p>
@@ -325,10 +398,15 @@ export default function DemoPage() {
             <p className="text-slate-600 mb-3">Gostou do que viu?</p>
             <button 
               onClick={handleSolicitarDemo}
-              className="bg-primary text-white px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+              disabled={sending}
+              className="bg-primary text-white px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors inline-flex items-center gap-2 disabled:opacity-50"
             >
+              {sending ? (
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <ArrowRight size={18} />
+              )}
               Solicitar Demonstração Completa
-              <ArrowRight size={18} />
             </button>
           </div>
         </div>
@@ -342,10 +420,11 @@ export default function DemoPage() {
             </h3>
             <div className="space-y-4 text-sm">
               {[
-                { step: 1, text: "Informe o valor medido do capacitor" },
-                { step: 2, text: "O sistema calcula automaticamente o desvio percentual" },
-                { step: 3, text: "Classificação baseada na norma IEC 60831-1/2" },
-                { step: 4, text: "Recomendação de ação (monitorar ou substituir)" }
+                { step: 1, text: "Selecione o tipo de teste (Corrente ou Capacitância)" },
+                { step: 2, text: "Informe o valor medido em campo ou bancada" },
+                { step: 3, text: "O sistema calcula automaticamente o desvio percentual" },
+                { step: 4, text: "Classificação baseada na norma IEC 60831-1/2" },
+                { step: 5, text: "Recomendação de ação (monitorar ou substituir)" }
               ].map((item) => (
                 <div key={item.step} className="flex gap-3">
                   <div className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
