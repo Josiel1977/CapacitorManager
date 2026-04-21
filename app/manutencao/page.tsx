@@ -6,7 +6,8 @@ import {
   Wrench, TrendingUp, TrendingDown, Activity, AlertTriangle, 
   CheckCircle2, XCircle, Calendar, Clock, Zap, Droplets,
   DollarSign, RefreshCw, Eye, FileText, Download, Shield, Filter,
-  BatteryWarning, Gauge, Building, Banknote, PieChart, Database
+  BatteryWarning, Gauge, Building, Banknote, PieChart, Database,
+  ClipboardList, AlertOctagon
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Swal from 'sweetalert2';
@@ -64,26 +65,7 @@ function calcularTendenciaCapacitor(medicoes: any[]) {
     };
 }
 
-function calcularPotenciaEfetivaPorStatus(potenciaNominal: number, statusValidacao: string): number {
-    switch (statusValidacao) {
-        case 'aprovado':
-            return potenciaNominal;
-        case 'atencao':
-            return potenciaNominal * 0.7;
-        case 'reprovado':
-            return 0;
-        default:
-            return potenciaNominal;
-    }
-}
-
-function calcularCustoIneficiencia(perdaKvar: number, tarifaReferencia: number = 0.95): number {
-  const horasDia = 8;
-  const diasMes = 30;
-  return perdaKvar * horasDia * diasMes * tarifaReferencia;
-}
-
-interface CapacitorManutencao {
+interface CapacitorInfo {
   id: string;
   codigo: string;
   banco: string;
@@ -93,47 +75,39 @@ interface CapacitorManutencao {
   potencia_kvar: number;
   tensao_nominal_v: number;
   capacitancia_nominal_uf: number;
-  ultimo_desvio: number;
   status_validacao: string;
+  ultimo_desvio: number;
   ultima_data: string;
-  tendencia: 'piorando' | 'melhorando' | 'estavel';
-  previsao_meses: string | null;
-  previsao_data: string | null;
-  medicoes_count: number;
-  variacao: string;
-  potencia_efetiva: number;
-  perda_kvar: number;
-  eficiencia: number;
+  tem_medicao: boolean;
+  data_ultima_medicao?: string;
 }
 
 interface ClienteResumo {
   id: string;
   nome: string;
   total_kvar_instalado: number;
-  total_kvar_efetivo: number;
-  deficiencia_kvar: number;
-  eficiencia_percentual: number;
-  custo_mensal_perda: number;
+  total_testado_kvar: number;
   aprovados: number;
   atencao: number;
   reprovados: number;
+  sem_medicao: number;
   bancos: {
     id: string;
     nome: string;
     kvar_instalado: number;
-    kvar_efetivo: number;
-    deficiencia: number;
     aprovados: number;
     atencao: number;
     reprovados: number;
+    sem_medicao: number;
   }[];
+  capacitores_sem_medicao: CapacitorInfo[];
 }
 
 export default function ManutencaoPage() {
   const router = useRouter();
-  const [capacitores, setCapacitores] = useState<CapacitorManutencao[]>([]);
+  const [capacitores, setCapacitores] = useState<CapacitorInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'todos' | 'reprovado' | 'atencao'>('todos');
+  const [filter, setFilter] = useState<'todos' | 'reprovado' | 'atencao' | 'sem_medicao'>('todos');
   const [clientes, setClientes] = useState<any[]>([]);
   const [clienteFiltro, setClienteFiltro] = useState<string>('todos');
   const [resumoClientes, setResumoClientes] = useState<ClienteResumo[]>([]);
@@ -174,8 +148,8 @@ export default function ManutencaoPage() {
         });
       });
 
-      // Buscar todos os capacitores com suas medições
-      const { data: capacitoresData } = await supabase
+      // Buscar TODOS os capacitores
+      const { data: todosCapacitores } = await supabase
         .from('capacitores')
         .select(`
           id,
@@ -183,25 +157,33 @@ export default function ManutencaoPage() {
           potencia_kvar,
           tensao_nominal_v,
           capacitancia_nominal_uf,
-          banco_id,
-          medicoes (
-            id,
-            desvio_percentual,
-            status_validacao,
-            data_medicao,
-            created_at,
-            tipo_teste,
-            corrente_medida_a,
-            capacitancia_medida_uf
-          )
+          banco_id
         `)
         .eq('ativo', true);
 
-      if (!capacitoresData || capacitoresData.length === 0) {
-        setCapacitores([]);
-        setLoading(false);
-        return;
-      }
+      // Buscar medições (última de cada capacitor)
+      const { data: medicoesData } = await supabase
+        .from('medicoes')
+        .select(`
+          id,
+          capacitor_id,
+          desvio_percentual,
+          status_validacao,
+          data_medicao,
+          created_at,
+          tipo_teste,
+          corrente_medida_a,
+          capacitancia_medida_uf
+        `)
+        .order('created_at', { ascending: false });
+
+      // Agrupar medições por capacitor (pegar a mais recente)
+      const ultimasMedicoes = new Map();
+      medicoesData?.forEach(med => {
+        if (!ultimasMedicoes.has(med.capacitor_id)) {
+          ultimasMedicoes.set(med.capacitor_id, med);
+        }
+      });
 
       // Buscar nomes dos clientes
       const { data: clientesData } = await supabase
@@ -212,41 +194,38 @@ export default function ManutencaoPage() {
       const clientesMap = new Map();
       clientesData?.forEach(c => clientesMap.set(c.id, c.nome));
 
-      const processedData: CapacitorManutencao[] = [];
+      const processedData: CapacitorInfo[] = [];
 
-      for (const cap of capacitoresData) {
-        const medicoes = cap.medicoes || [];
-        if (medicoes.length === 0) continue;
-
-        const medicoesOrdenadas = [...medicoes].sort((a, b) => {
-          const dateA = a.data_medicao || a.created_at;
-          const dateB = b.data_medicao || b.created_at;
-          return new Date(dateB).getTime() - new Date(dateA).getTime();
-        });
-
-        const ultimaMedicao = medicoesOrdenadas[0];
-        let desvio = ultimaMedicao.desvio_percentual || 0;
-        let status = ultimaMedicao.status_validacao || 'atencao';
+      for (const cap of todosCapacitores || []) {
+        const ultimaMedicao = ultimasMedicoes.get(cap.id);
+        const temMedicao = !!ultimaMedicao;
         
-        if (ultimaMedicao.tipo_teste === 'corrente' && ultimaMedicao.corrente_medida_a && cap.tensao_nominal_v && cap.potencia_kvar) {
-          const correnteTeorica = calcularCorrenteTeorica(cap.potencia_kvar, cap.tensao_nominal_v);
-          if (correnteTeorica > 0) {
-            desvio = ((ultimaMedicao.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
-            status = getStatusValidacao(desvio);
-          }
-        } else if (ultimaMedicao.tipo_teste === 'capacitancia' && ultimaMedicao.capacitancia_medida_uf && cap.capacitancia_nominal_uf) {
-          const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(cap.capacitancia_nominal_uf);
-          if (capacitanciaTeorica > 0) {
-            desvio = ((ultimaMedicao.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
-            status = getStatusValidacao(desvio);
+        let desvio = 0;
+        let status = 'sem_medicao';
+        
+        if (temMedicao) {
+          desvio = ultimaMedicao.desvio_percentual || 0;
+          
+          if (ultimaMedicao.tipo_teste === 'corrente' && ultimaMedicao.corrente_medida_a && cap.tensao_nominal_v && cap.potencia_kvar) {
+            const correnteTeorica = calcularCorrenteTeorica(cap.potencia_kvar, cap.tensao_nominal_v);
+            if (correnteTeorica > 0) {
+              desvio = ((ultimaMedicao.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
+              status = getStatusValidacao(desvio);
+            } else {
+              status = ultimaMedicao.status_validacao || 'atencao';
+            }
+          } else if (ultimaMedicao.tipo_teste === 'capacitancia' && ultimaMedicao.capacitancia_medida_uf && cap.capacitancia_nominal_uf) {
+            const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(cap.capacitancia_nominal_uf);
+            if (capacitanciaTeorica > 0) {
+              desvio = ((ultimaMedicao.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
+              status = getStatusValidacao(desvio);
+            } else {
+              status = ultimaMedicao.status_validacao || 'atencao';
+            }
+          } else {
+            status = ultimaMedicao.status_validacao || 'atencao';
           }
         }
-        
-        const tendenciaData = calcularTendenciaCapacitor(medicoesOrdenadas);
-        
-        const potenciaEfetiva = calcularPotenciaEfetivaPorStatus(cap.potencia_kvar || 0, status);
-        const perdaKvar = (cap.potencia_kvar || 0) - potenciaEfetiva;
-        const eficiencia = (potenciaEfetiva / (cap.potencia_kvar || 1)) * 100;
         
         const bancoInfo = bancosMap.get(cap.banco_id);
         const clienteId = bancoInfo?.cliente_id;
@@ -262,17 +241,11 @@ export default function ManutencaoPage() {
           potencia_kvar: cap.potencia_kvar || 0,
           tensao_nominal_v: cap.tensao_nominal_v || 0,
           capacitancia_nominal_uf: cap.capacitancia_nominal_uf || 0,
-          ultimo_desvio: desvio,
           status_validacao: status,
-          ultima_data: ultimaMedicao.created_at,
-          tendencia: (tendenciaData?.tendencia as 'piorando' | 'melhorando' | 'estavel') || 'estavel',
-          previsao_meses: tendenciaData?.previsao?.meses || null,
-          previsao_data: tendenciaData?.previsao?.data || null,
-          medicoes_count: medicoes.length,
-          variacao: tendenciaData?.variacao || '0',
-          potencia_efetiva: potenciaEfetiva,
-          perda_kvar: perdaKvar,
-          eficiencia: eficiencia
+          ultimo_desvio: desvio,
+          ultima_data: ultimaMedicao?.created_at || '',
+          tem_medicao: temMedicao,
+          data_ultima_medicao: ultimaMedicao?.created_at
         });
       }
 
@@ -287,26 +260,31 @@ export default function ManutencaoPage() {
             id: cap.cliente_id,
             nome: cap.cliente,
             total_kvar_instalado: 0,
-            total_kvar_efetivo: 0,
-            deficiencia_kvar: 0,
-            eficiencia_percentual: 0,
-            custo_mensal_perda: 0,
+            total_testado_kvar: 0,
             aprovados: 0,
             atencao: 0,
             reprovados: 0,
-            bancos: []
+            sem_medicao: 0,
+            bancos: [],
+            capacitores_sem_medicao: []
           });
         }
 
         const resumo = clientesResumo.get(cap.cliente_id)!;
         resumo.total_kvar_instalado += cap.potencia_kvar;
-        resumo.total_kvar_efetivo += cap.potencia_efetiva;
         
-        if (cap.status_validacao === 'aprovado') resumo.aprovados++;
-        else if (cap.status_validacao === 'atencao') resumo.atencao++;
-        else if (cap.status_validacao === 'reprovado') resumo.reprovados++;
+        if (cap.tem_medicao) {
+          resumo.total_testado_kvar += cap.potencia_kvar;
+          if (cap.status_validacao === 'aprovado') resumo.aprovados++;
+          else if (cap.status_validacao === 'atencao') resumo.atencao++;
+          else if (cap.status_validacao === 'reprovado') resumo.reprovados++;
+        } else {
+          resumo.sem_medicao++;
+          resumo.capacitores_sem_medicao.push(cap);
+        }
       }
 
+      // Adicionar bancos ao resumo
       for (const [clienteId, resumo] of clientesResumo) {
         const bancosDoCliente = new Map();
         for (const cap of processedData.filter(c => c.cliente_id === clienteId)) {
@@ -315,28 +293,26 @@ export default function ManutencaoPage() {
               id: cap.banco_id,
               nome: cap.banco,
               kvar_instalado: 0,
-              kvar_efetivo: 0,
-              deficiencia: 0,
               aprovados: 0,
               atencao: 0,
-              reprovados: 0
+              reprovados: 0,
+              sem_medicao: 0
             });
           }
           const bancoResumo = bancosDoCliente.get(cap.banco_id);
           bancoResumo.kvar_instalado += cap.potencia_kvar;
-          bancoResumo.kvar_efetivo += cap.potencia_efetiva;
-          bancoResumo.deficiencia = bancoResumo.kvar_instalado - bancoResumo.kvar_efetivo;
           
-          if (cap.status_validacao === 'aprovado') bancoResumo.aprovados++;
-          else if (cap.status_validacao === 'atencao') bancoResumo.atencao++;
-          else if (cap.status_validacao === 'reprovado') bancoResumo.reprovados++;
+          if (!cap.tem_medicao) {
+            bancoResumo.sem_medicao++;
+          } else if (cap.status_validacao === 'aprovado') {
+            bancoResumo.aprovados++;
+          } else if (cap.status_validacao === 'atencao') {
+            bancoResumo.atencao++;
+          } else if (cap.status_validacao === 'reprovado') {
+            bancoResumo.reprovados++;
+          }
         }
         resumo.bancos = Array.from(bancosDoCliente.values());
-        resumo.deficiencia_kvar = resumo.total_kvar_instalado - resumo.total_kvar_efetivo;
-        resumo.eficiencia_percentual = resumo.total_kvar_instalado > 0 
-          ? (resumo.total_kvar_efetivo / resumo.total_kvar_instalado) * 100 
-          : 100;
-        resumo.custo_mensal_perda = calcularCustoIneficiencia(resumo.deficiencia_kvar);
       }
 
       const resumoArray = Array.from(clientesResumo.values()).filter(r => r.total_kvar_instalado > 0);
@@ -366,21 +342,19 @@ export default function ManutencaoPage() {
     fetchDadosManutencao();
   }, [clienteFiltro]);
 
+  // Filtrar capacitores
   const filteredCapacitores = capacitores.filter(cap => {
     if (clienteFiltro !== 'todos' && cap.cliente_id !== clienteFiltro) return false;
     if (filter === 'reprovado') return cap.status_validacao === 'reprovado';
     if (filter === 'atencao') return cap.status_validacao === 'atencao';
+    if (filter === 'sem_medicao') return !cap.tem_medicao;
     return true;
   });
 
   const reprovados = capacitores.filter(c => c.status_validacao === 'reprovado').length;
   const atencao = capacitores.filter(c => c.status_validacao === 'atencao').length;
   const aprovados = capacitores.filter(c => c.status_validacao === 'aprovado').length;
-
-  const topPerdaEficiencia = [...capacitores]
-    .filter(c => (clienteFiltro === 'todos' || c.cliente_id === clienteFiltro) && c.status_validacao !== 'aprovado')
-    .sort((a, b) => b.perda_kvar - a.perda_kvar)
-    .slice(0, 5);
+  const semMedicao = capacitores.filter(c => !c.tem_medicao).length;
 
   if (loading) {
     return (
@@ -419,6 +393,35 @@ export default function ManutencaoPage() {
         </div>
       </motion.section>
 
+      {/* Cards de Alerta - Capacitores sem teste */}
+      {semMedicao > 0 && (
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gradient-to-r from-amber-50 to-amber-100 rounded-2xl p-6 border border-amber-200"
+        >
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 bg-amber-500 rounded-lg text-white">
+              <AlertOctagon size={22} />
+            </div>
+            <div>
+              <h3 className="font-bold text-amber-800 text-lg">⚠️ Capacitores Aguardando Teste</h3>
+              <p className="text-sm text-amber-700">
+                Existem {semMedicao} capacitores que ainda não foram testados.
+                Realize os testes para obter análise completa.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setFilter('sem_medicao')}
+            className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors"
+          >
+            <ClipboardList size={16} />
+            Ver capacitores pendentes ({semMedicao})
+          </button>
+        </motion.div>
+      )}
+
       {/* Resumo por Cliente */}
       {resumoClientes.length > 0 && clienteFiltro === 'todos' && (
         <div className="space-y-4">
@@ -437,13 +440,11 @@ export default function ManutencaoPage() {
               >
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-bold text-primary text-lg">{cliente.nome}</h3>
-                  <div className={cn(
-                    "px-2 py-1 rounded-full text-xs font-bold",
-                    cliente.eficiencia_percentual >= 80 ? "bg-green-100 text-green-700" :
-                    cliente.eficiencia_percentual >= 50 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
-                  )}>
-                    {cliente.eficiencia_percentual.toFixed(1)}% eficiência
-                  </div>
+                  {cliente.sem_medicao > 0 && (
+                    <span className="px-2 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
+                      {cliente.sem_medicao} pendentes
+                    </span>
+                  )}
                 </div>
                 
                 <div className="space-y-3">
@@ -452,31 +453,32 @@ export default function ManutencaoPage() {
                     <span className="font-bold text-primary text-xl">{cliente.total_kvar_instalado.toFixed(1)} kVAr</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-slate-500 text-sm">kVAr Efetivo:</span>
-                    <span className="font-bold text-amber-600">{cliente.total_kvar_efetivo.toFixed(1)} kVAr</span>
+                    <span className="text-slate-500 text-sm">kVAr Testados:</span>
+                    <span className="font-bold text-amber-600">{cliente.total_testado_kvar.toFixed(1)} kVAr</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-slate-500 text-sm">Deficiência:</span>
-                    <span className="font-bold text-red-600">-{cliente.deficiencia_kvar.toFixed(1)} kVAr</span>
-                  </div>
-                  <div className="pt-2">
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div 
-                        className={cn(
-                          "h-full rounded-full",
-                          cliente.eficiencia_percentual >= 80 ? "bg-green-500" :
-                          cliente.eficiencia_percentual >= 50 ? "bg-amber-500" : "bg-red-500"
-                        )}
-                        style={{ width: `${cliente.eficiencia_percentual}%` }}
-                      />
+                    <span className="text-slate-500 text-sm">Cobertura:</span>
+                    <div className="flex items-center gap-2">
+                      <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-green-500 rounded-full"
+                          style={{ width: `${(cliente.total_testado_kvar / cliente.total_kvar_instalado) * 100}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-medium">
+                        {((cliente.total_testado_kvar / cliente.total_kvar_instalado) * 100).toFixed(0)}%
+                      </span>
                     </div>
                   </div>
                 </div>
                 
-                <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between text-xs">
-                  <span className="text-green-600">✅ {cliente.aprovados} aprovados</span>
-                  <span className="text-amber-600">⚠️ {cliente.atencao} atenção</span>
-                  <span className="text-red-600">❌ {cliente.reprovados} reprovados</span>
+                <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between text-xs flex-wrap gap-2">
+                  <span className="text-green-600">✅ {cliente.aprovados}</span>
+                  <span className="text-amber-600">⚠️ {cliente.atencao}</span>
+                  <span className="text-red-600">❌ {cliente.reprovados}</span>
+                  {cliente.sem_medicao > 0 && (
+                    <span className="text-slate-400">📋 {cliente.sem_medicao} p/ testar</span>
+                  )}
                 </div>
               </motion.div>
             ))}
@@ -513,46 +515,69 @@ export default function ManutencaoPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div className="bg-white rounded-xl p-4 text-center">
               <p className="text-xs text-slate-500">kVAr Instalado</p>
               <p className="text-2xl font-bold text-primary">{clienteSelecionadoResumo.total_kvar_instalado.toFixed(1)} kVAr</p>
             </div>
             <div className="bg-white rounded-xl p-4 text-center">
-              <p className="text-xs text-slate-500">kVAr Efetivo</p>
-              <p className="text-2xl font-bold text-amber-600">{clienteSelecionadoResumo.total_kvar_efetivo.toFixed(1)} kVAr</p>
+              <p className="text-xs text-slate-500">kVAr Testados</p>
+              <p className="text-2xl font-bold text-amber-600">{clienteSelecionadoResumo.total_testado_kvar.toFixed(1)} kVAr</p>
             </div>
             <div className="bg-white rounded-xl p-4 text-center">
-              <p className="text-xs text-slate-500">Deficiência</p>
-              <p className="text-2xl font-bold text-red-600">-{clienteSelecionadoResumo.deficiencia_kvar.toFixed(1)} kVAr</p>
+              <p className="text-xs text-slate-500">Cobertura</p>
+              <p className="text-2xl font-bold text-green-600">
+                {((clienteSelecionadoResumo.total_testado_kvar / clienteSelecionadoResumo.total_kvar_instalado) * 100).toFixed(0)}%
+              </p>
             </div>
             <div className="bg-white rounded-xl p-4 text-center">
-              <p className="text-xs text-slate-500">Custo Mensal</p>
-              <p className="text-2xl font-bold text-red-600">{clienteSelecionadoResumo.custo_mensal_perda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-            </div>
-            <div className="bg-white rounded-xl p-4 text-center">
-              <p className="text-xs text-slate-500">Eficiência</p>
-              <p className="text-2xl font-bold text-primary">{clienteSelecionadoResumo.eficiencia_percentual.toFixed(1)}%</p>
+              <p className="text-xs text-slate-500">Pendentes</p>
+              <p className="text-2xl font-bold text-amber-600">{clienteSelecionadoResumo.sem_medicao}</p>
             </div>
           </div>
 
-          <div className="mb-6">
-            <div className="flex justify-between text-sm mb-1">
-              <span>Eficiência do Sistema</span>
-              <span className="font-bold">{clienteSelecionadoResumo.eficiencia_percentual.toFixed(1)}%</span>
+          {/* Lista de Capacitores Pendentes */}
+          {clienteSelecionadoResumo.capacitores_sem_medicao.length > 0 && (
+            <div className="mb-6">
+              <h3 className="font-bold text-amber-700 mb-3 flex items-center gap-2">
+                <ClipboardList size={16} />
+                Capacitores que precisam ser testados ({clienteSelecionadoResumo.capacitores_sem_medicao.length})
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-amber-50 text-xs font-medium text-amber-700">
+                    <tr>
+                      <th className="px-4 py-2">Código</th>
+                      <th className="px-4 py-2">Banco</th>
+                      <th className="px-4 py-2">Potência</th>
+                      <th className="px-4 py-2">Tensão</th>
+                      <th className="px-4 py-2">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {clienteSelecionadoResumo.capacitores_sem_medicao.map((cap) => (
+                      <tr key={cap.id} className="text-sm hover:bg-amber-50/30">
+                        <td className="px-4 py-2 font-bold text-primary">{cap.codigo}</td>
+                        <td className="px-4 py-2">{cap.banco}</td>
+                        <td className="px-4 py-2">{cap.potencia_kvar} kVAr</td>
+                        <td className="px-4 py-2">{cap.tensao_nominal_v} V</td>
+                        <td className="px-4 py-2">
+                          <button
+                            onClick={() => router.push(`/testes?capacitor_id=${cap.id}`)}
+                            className="px-3 py-1 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 transition-colors"
+                          >
+                            Realizar Teste
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <div className="h-3 bg-slate-200 rounded-full overflow-hidden">
-              <div 
-                className={cn(
-                  "h-full rounded-full transition-all duration-500",
-                  clienteSelecionadoResumo.eficiencia_percentual >= 80 ? "bg-green-500" :
-                  clienteSelecionadoResumo.eficiencia_percentual >= 50 ? "bg-amber-500" : "bg-red-500"
-                )}
-                style={{ width: `${clienteSelecionadoResumo.eficiencia_percentual}%` }}
-              />
-            </div>
-          </div>
+          )}
 
+          {/* Detalhamento por Banco */}
           <div>
             <h3 className="font-bold text-primary mb-3 flex items-center gap-2">
               <Database size={16} />
@@ -564,12 +589,11 @@ export default function ManutencaoPage() {
                   <tr>
                     <th className="px-4 py-2">Banco</th>
                     <th className="px-4 py-2">kVAr Instalado</th>
-                    <th className="px-4 py-2">kVAr Efetivo</th>
-                    <th className="px-4 py-2">Deficiência</th>
-                    <th className="px-4 py-2">Status</th>
                     <th className="px-4 py-2">Aprovados</th>
                     <th className="px-4 py-2">Atenção</th>
                     <th className="px-4 py-2">Reprovados</th>
+                    <th className="px-4 py-2">Pendentes</th>
+                    <th className="px-4 py-2">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -577,24 +601,33 @@ export default function ManutencaoPage() {
                     <tr key={banco.id} className="text-sm">
                       <td className="px-4 py-2 font-medium">{banco.nome}</td>
                       <td className="px-4 py-2">{banco.kvar_instalado.toFixed(1)} kVAr</td>
-                      <td className="px-4 py-2 text-amber-600">{banco.kvar_efetivo.toFixed(1)} kVAr</td>
-                      <td className="px-4 py-2 text-red-600">-{banco.deficiencia.toFixed(1)} kVAr</td>
-                      <td className="px-4 py-2">
-                        <span className={cn(
-                          "px-2 py-0.5 text-xs rounded-full",
-                          banco.deficiencia > 20 ? "bg-red-100 text-red-700" :
-                          banco.deficiencia > 10 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
-                        )}>
-                          {banco.deficiencia > 20 ? "Crítico" : banco.deficiencia > 10 ? "Atenção" : "Normal"}
-                        </span>
-                      </td>
                       <td className="px-4 py-2 text-green-600">{banco.aprovados}</td>
                       <td className="px-4 py-2 text-amber-600">{banco.atencao}</td>
                       <td className="px-4 py-2 text-red-600">{banco.reprovados}</td>
+                      <td className="px-4 py-2 text-amber-600">{banco.sem_medicao}</td>
+                      <td className="px-4 py-2">
+                        {banco.sem_medicao > 0 ? (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700">
+                            Testes Pendentes
+                          </span>
+                        ) : banco.reprovados > 0 ? (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700">
+                            Crítico
+                          </span>
+                        ) : banco.atencao > 0 ? (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700">
+                            Atenção
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">
+                            Normal
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+               </table>
             </div>
           </div>
         </motion.div>
@@ -644,6 +677,17 @@ export default function ManutencaoPage() {
             >
               Atenção ({atencao})
             </button>
+            {semMedicao > 0 && (
+              <button
+                onClick={() => setFilter('sem_medicao')}
+                className={cn(
+                  "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                  filter === 'sem_medicao' ? "bg-amber-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                )}
+              >
+                Pendentes ({semMedicao})
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -685,69 +729,86 @@ export default function ManutencaoPage() {
 
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
           <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-primary/10 rounded-lg text-primary">
-              <PieChart size={22} />
+            <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
+              <ClipboardList size={22} />
             </div>
-            <span className="text-xs font-medium text-slate-500 uppercase">Total</span>
+            <span className="text-xs font-medium text-slate-500 uppercase">Pendentes</span>
           </div>
-          <p className="text-3xl font-bold text-primary">{capacitores.filter(c => clienteFiltro === 'todos' || c.cliente_id === clienteFiltro).length}</p>
-          <p className="text-xs text-slate-400 mt-1">Capacitores monitorados</p>
+          <p className="text-3xl font-bold text-amber-600">{semMedicao}</p>
+          <p className="text-xs text-amber-500 mt-1">Aguardando teste</p>
         </div>
       </div>
 
-      {/* Tabela de Capacitores com Problema */}
-      {topPerdaEficiencia.length > 0 && (
+      {/* Tabela de Capacitores Filtrados */}
+      {filteredCapacitores.length > 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="p-5 border-b border-slate-100">
-            <h3 className="font-bold text-primary flex items-center gap-2">
-              <AlertTriangle size={18} className="text-amber-500" />
-              Capacitores que Necessitam Atenção
-            </h3>
-            <p className="text-xs text-slate-400 mt-1">Baseado nas validações técnicas (Reprovados e em Atenção)</p>
-          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-slate-50 text-xs font-medium text-slate-500">
                 <tr>
                   <th className="px-5 py-3">Código</th>
-                  <th className="px-5 py-3">Cliente</th>
+                  <th className="px-5 py-3">Cliente / Banco</th>
                   <th className="px-5 py-3">Potência</th>
                   <th className="px-5 py-3">Desvio</th>
                   <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3">Perda</th>
                   <th className="px-5 py-3">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {topPerdaEficiencia.map((cap) => (
+                {filteredCapacitores.map((cap) => (
                   <tr key={cap.id} className="text-sm hover:bg-slate-50">
                     <td className="px-5 py-3 font-bold text-primary">{cap.codigo}</td>
-                    <td className="px-5 py-3">{cap.cliente}</td>
+                    <td className="px-5 py-3">
+                      <div className="font-medium">{cap.cliente}</div>
+                      <div className="text-xs text-slate-400">{cap.banco}</div>
+                    </td>
                     <td className="px-5 py-3">{cap.potencia_kvar.toFixed(1)} kVAr</td>
                     <td className="px-5 py-3">
-                      <span className={cn(
-                        "font-bold",
-                        cap.ultimo_desvio > 0 ? "text-red-500" : "text-green-500"
-                      )}>
-                        {cap.ultimo_desvio > 0 ? '+' : ''}{cap.ultimo_desvio.toFixed(2)}%
-                      </span>
-                    </td>
-                    <td className="px-5 py-3">
-                      <span className={cn(
-                        "px-2 py-1 text-xs font-bold rounded-full",
-                        cap.status_validacao === 'reprovado' ? "bg-red-100 text-red-700" :
-                        cap.status_validacao === 'atencao' ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
-                      )}>
-                        {cap.status_validacao === 'reprovado' ? "REPROVADO" :
-                         cap.status_validacao === 'atencao' ? "ATENÇÃO" : "APROVADO"}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3 text-red-600">-{cap.perda_kvar.toFixed(1)} kVAr</td>
-                    <td className="px-5 py-3">
-                      {cap.status_validacao === 'reprovado' ? (
-                        <span className="text-red-600 font-medium text-xs">Substituir</span>
+                      {cap.tem_medicao ? (
+                        <span className={cn(
+                          "font-bold",
+                          cap.ultimo_desvio > 0 ? "text-red-500" : "text-green-500"
+                        )}>
+                          {cap.ultimo_desvio > 0 ? '+' : ''}{cap.ultimo_desvio.toFixed(2)}%
+                        </span>
                       ) : (
-                        <span className="text-amber-600 text-xs">Monitorar</span>
+                        <span className="text-amber-600 font-medium">Não testado</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">
+                      {!cap.tem_medicao ? (
+                        <span className="px-2 py-1 text-xs font-bold rounded-full bg-amber-100 text-amber-700">
+                          PENDENTE
+                        </span>
+                      ) : cap.status_validacao === 'reprovado' ? (
+                        <span className="px-2 py-1 text-xs font-bold rounded-full bg-red-100 text-red-700">
+                          REPROVADO
+                        </span>
+                      ) : cap.status_validacao === 'atencao' ? (
+                        <span className="px-2 py-1 text-xs font-bold rounded-full bg-amber-100 text-amber-700">
+                          ATENÇÃO
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 text-xs font-bold rounded-full bg-green-100 text-green-700">
+                          APROVADO
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">
+                      {!cap.tem_medicao ? (
+                        <button
+                          onClick={() => router.push(`/testes?capacitor_id=${cap.id}`)}
+                          className="px-3 py-1 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 transition-colors"
+                        >
+                          Realizar Teste
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => router.push(`/medicoes?capacitor_id=${cap.id}`)}
+                          className="px-3 py-1 bg-primary/10 text-primary text-xs rounded-lg hover:bg-primary/20 transition-colors"
+                        >
+                          Ver Histórico
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -755,6 +816,11 @@ export default function ManutencaoPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      ) : (
+        <div className="py-12 text-center text-slate-400 bg-white rounded-2xl border border-slate-100">
+          <Wrench size={48} className="mx-auto mb-3 opacity-50" />
+          <p>Nenhum capacitor encontrado com o filtro selecionado</p>
         </div>
       )}
 
