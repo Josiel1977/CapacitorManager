@@ -143,7 +143,7 @@ export default function AjudaPage() {
             Fale Conosco
           </a>
           <a 
-            href="https://wa.me/5511999999999"
+            href="https://wa.me/5591984855557"
             target="_blank"
             className="inline-flex items-center gap-2 bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700"
           >
