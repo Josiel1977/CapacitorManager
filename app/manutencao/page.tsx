@@ -6,7 +6,7 @@ import {
   Wrench, TrendingUp, TrendingDown, Activity, AlertTriangle, 
   CheckCircle2, XCircle, Calendar, Clock, Zap, Droplets,
   DollarSign, RefreshCw, Eye, FileText, Download, Shield, Filter,
-  BatteryWarning, Gauge
+  BatteryWarning, Gauge, Building, Banknote, PieChart
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Swal from 'sweetalert2';
@@ -76,18 +76,18 @@ interface IneficienciaCalculada {
   eficiencia_media_percent: number;
   custo_mensal_perda: number;
   capacitores_afetados: number;
+  bancos_afetados: number;
+  recomendacao_substituicao: number;
 }
 
 // Calcular potência efetiva baseada no desvio
 function calcularPotenciaEfetiva(potenciaNominal: number, desvioPercentual: number): number {
-  // Capacitores com desvio perdem eficiência proporcionalmente
   const eficiencia = Math.max(0, 100 - Math.abs(desvioPercentual));
   return (potenciaNominal * eficiencia) / 100;
 }
 
 // Calcular custo estimado da ineficiência (R$/mês)
 function calcularCustoIneficiencia(perdaKvar: number, tarifaReferencia: number = 0.95): number {
-  // Perda em kVAr * 8h/dia * 30 dias * tarifa
   const horasDia = 8;
   const diasMes = 30;
   return perdaKvar * horasDia * diasMes * tarifaReferencia;
@@ -97,6 +97,7 @@ interface CapacitorManutencao {
   id: string;
   codigo: string;
   banco: string;
+  banco_id: string;
   cliente: string;
   cliente_id: string;
   potencia_kvar: number;
@@ -115,6 +116,25 @@ interface CapacitorManutencao {
   eficiencia: number;
 }
 
+interface ClienteResumo {
+  id: string;
+  nome: string;
+  total_kvar_instalado: number;
+  total_kvar_efetivo: number;
+  deficiencia_kvar: number;
+  eficiencia_percentual: number;
+  custo_mensal_perda: number;
+  capacitores_afetados: number;
+  bancos_afetados: number;
+  bancos: {
+    id: string;
+    nome: string;
+    kvar_instalado: number;
+    kvar_efetivo: number;
+    deficiencia: number;
+  }[];
+}
+
 export default function ManutencaoPage() {
   const [capacitores, setCapacitores] = useState<CapacitorManutencao[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,7 +142,8 @@ export default function ManutencaoPage() {
   const [clientes, setClientes] = useState<any[]>([]);
   const [clienteFiltro, setClienteFiltro] = useState<string>('todos');
   const [ineficienciaTotal, setIneficienciaTotal] = useState<IneficienciaCalculada | null>(null);
-  const [ineficienciaCliente, setIneficienciaCliente] = useState<IneficienciaCalculada | null>(null);
+  const [resumoClientes, setResumoClientes] = useState<ClienteResumo[]>([]);
+  const [clienteSelecionadoResumo, setClienteSelecionadoResumo] = useState<ClienteResumo | null>(null);
 
   useEffect(() => {
     fetchClientes();
@@ -145,93 +166,79 @@ export default function ManutencaoPage() {
   async function fetchDadosManutencao() {
     setLoading(true);
     try {
-      // Buscar todas as medições com dados relacionados
-      const { data: medicoesData, error } = await supabase
-        .from('medicoes')
+      // Buscar todos os bancos
+      const { data: bancosData } = await supabase
+        .from('bancos_capacitores')
+        .select('id, nome_banco, cliente_id')
+        .eq('ativo', true);
+
+      const bancosMap = new Map();
+      bancosData?.forEach(banco => {
+        bancosMap.set(banco.id, {
+          nome: banco.nome_banco,
+          cliente_id: banco.cliente_id
+        });
+      });
+
+      // Buscar todos os capacitores com suas medições
+      const { data: capacitoresData } = await supabase
+        .from('capacitores')
         .select(`
-          *,
-          bancos_capacitores (
+          id,
+          codigo_identificacao,
+          potencia_kvar,
+          tensao_nominal_v,
+          capacitancia_nominal_uf,
+          banco_id,
+          medicoes (
             id,
-            nome_banco,
-            cliente_id,
-            clientes (id, nome)
-          ),
-          capacitores (
-            id,
-            codigo_identificacao,
-            potencia_kvar,
-            capacitancia_nominal_uf,
-            tensao_nominal_v
+            desvio_percentual,
+            status_validacao,
+            data_medicao,
+            created_at,
+            tipo_teste,
+            corrente_medida_a,
+            capacitancia_medida_uf
           )
         `)
-        .order('created_at', { ascending: false });
+        .eq('ativo', true);
 
-      if (error) throw error;
-      if (!medicoesData || medicoesData.length === 0) {
+      if (!capacitoresData || capacitoresData.length === 0) {
         setCapacitores([]);
         setLoading(false);
         return;
       }
 
-      // Recalcular desvios usando as mesmas funções do relatório
-      const medicoesCorrigidas = medicoesData.map(med => {
-        let desvio = med.desvio_percentual;
-        let status = med.status_validacao;
-        
-        if (med.capacitores) {
-          const tensaoNominal = med.capacitores.tensao_nominal_v;
-          
-          if (med.tipo_teste === 'corrente' && med.corrente_medida_a) {
-            const correnteTeorica = calcularCorrenteTeorica(med.capacitores.potencia_kvar, tensaoNominal);
-            if (correnteTeorica > 0) {
-              desvio = ((med.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
-              status = getStatusValidacao(desvio);
-            }
-          } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf) {
-            const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
-            if (capacitanciaTeorica > 0) {
-              desvio = ((med.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
-              status = getStatusValidacao(desvio);
-            }
-          }
-        }
-        
-        return {
-          ...med,
-          desvio_percentual: desvio,
-          status_validacao: status
-        };
-      });
-
-      // Agrupar por capacitor
-      const gruposPorCapacitor: { [key: string]: any[] } = {};
-      medicoesCorrigidas.forEach(med => {
-        const key = med.capacitores?.id;
-        if (!key) return;
-        if (!gruposPorCapacitor[key]) {
-          gruposPorCapacitor[key] = [];
-        }
-        gruposPorCapacitor[key].push(med);
-      });
-
-      // Ordenar medições por data (mais antiga primeiro para tendência)
-      Object.keys(gruposPorCapacitor).forEach(key => {
-        gruposPorCapacitor[key].sort((a, b) => 
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        );
-      });
-
+      // Processar cada capacitor
       const processedData: CapacitorManutencao[] = [];
 
-      for (const [capId, medicoes] of Object.entries(gruposPorCapacitor)) {
+      for (const cap of capacitoresData) {
+        const medicoes = cap.medicoes || [];
         if (medicoes.length === 0) continue;
 
-        const ultimaMedicao = medicoes[medicoes.length - 1];
-        const capacitor = ultimaMedicao.capacitores;
-        
-        if (!capacitor) continue;
+        // Ordenar medições por data (mais recente primeiro)
+        const medicoesOrdenadas = [...medicoes].sort((a, b) => {
+          const dateA = a.data_medicao || a.created_at;
+          const dateB = b.data_medicao || b.created_at;
+          return new Date(dateB).getTime() - new Date(dateA).getTime();
+        });
 
-        const desvio = ultimaMedicao.desvio_percentual || 0;
+        const ultimaMedicao = medicoesOrdenadas[0];
+        let desvio = ultimaMedicao.desvio_percentual || 0;
+        
+        // Recalcular desvio se necessário
+        if (ultimaMedicao.tipo_teste === 'corrente' && ultimaMedicao.corrente_medida_a && cap.tensao_nominal_v && cap.potencia_kvar) {
+          const correnteTeorica = calcularCorrenteTeorica(cap.potencia_kvar, cap.tensao_nominal_v);
+          if (correnteTeorica > 0) {
+            desvio = ((ultimaMedicao.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
+          }
+        } else if (ultimaMedicao.tipo_teste === 'capacitancia' && ultimaMedicao.capacitancia_medida_uf && cap.capacitancia_nominal_uf) {
+          const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(cap.capacitancia_nominal_uf);
+          if (capacitanciaTeorica > 0) {
+            desvio = ((ultimaMedicao.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
+          }
+        }
+
         const desvioAbs = Math.abs(desvio);
         
         // Determinar status
@@ -240,31 +247,26 @@ export default function ManutencaoPage() {
         else if (desvioAbs > 10) status = 'warning';
         
         // Calcular tendência
-        const tendenciaData = calcularTendenciaCapacitor(medicoes);
+        const tendenciaData = calcularTendenciaCapacitor(medicoesOrdenadas);
         
         // Calcular potência efetiva e perda
-        const potenciaEfetiva = calcularPotenciaEfetiva(capacitor.potencia_kvar || 0, desvio);
-        const perdaKvar = (capacitor.potencia_kvar || 0) - potenciaEfetiva;
-        const eficiencia = (potenciaEfetiva / (capacitor.potencia_kvar || 1)) * 100;
+        const potenciaEfetiva = calcularPotenciaEfetiva(cap.potencia_kvar || 0, desvio);
+        const perdaKvar = (cap.potencia_kvar || 0) - potenciaEfetiva;
+        const eficiencia = (potenciaEfetiva / (cap.potencia_kvar || 1)) * 100;
         
-        const clienteNome = ultimaMedicao.bancos_capacitores?.clientes?.nome || 'N/A';
-        const clienteId = ultimaMedicao.bancos_capacitores?.cliente_id;
-        const bancoNome = ultimaMedicao.bancos_capacitores?.nome_banco || 'N/A';
+        const bancoInfo = bancosMap.get(cap.banco_id);
+        const clienteId = bancoInfo?.cliente_id;
         
-        // Aplicar filtro por cliente
-        if (clienteFiltro !== 'todos' && clienteId !== clienteFiltro) {
-          continue;
-        }
-
         processedData.push({
-          id: capId,
-          codigo: capacitor.codigo_identificacao || 'N/A',
-          banco: bancoNome,
-          cliente: clienteNome,
+          id: cap.id,
+          codigo: cap.codigo_identificacao || 'N/A',
+          banco: bancoInfo?.nome || 'N/A',
+          banco_id: cap.banco_id || '',
+          cliente: 'Carregando...',
           cliente_id: clienteId || '',
-          potencia_kvar: capacitor.potencia_kvar || 0,
-          tensao_nominal_v: capacitor.tensao_nominal_v || 0,
-          capacitancia_nominal_uf: capacitor.capacitancia_nominal_uf || 0,
+          potencia_kvar: cap.potencia_kvar || 0,
+          tensao_nominal_v: cap.tensao_nominal_v || 0,
+          capacitancia_nominal_uf: cap.capacitancia_nominal_uf || 0,
           ultimo_desvio: desvio,
           ultimo_status: status,
           ultima_data: ultimaMedicao.created_at,
@@ -279,13 +281,81 @@ export default function ManutencaoPage() {
         });
       }
 
+      // Buscar nomes dos clientes
+      const { data: clientesData } = await supabase
+        .from('clientes')
+        .select('id, nome')
+        .eq('ativo', true);
+
+      const clientesMap = new Map();
+      clientesData?.forEach(c => clientesMap.set(c.id, c.nome));
+
+      // Atualizar nomes dos clientes nos dados
+      processedData.forEach(cap => {
+        cap.cliente = clientesMap.get(cap.cliente_id) || 'N/A';
+      });
+
       setCapacitores(processedData);
 
       // ============================================
-      // CALCULAR INEFICIÊNCIA TOTAL
+      // CALCULAR RESUMO POR CLIENTE
       // ============================================
       
-      // Ineficiência total (todos os clientes)
+      const clientesResumo: Map<string, ClienteResumo> = new Map();
+
+      for (const cap of processedData) {
+        if (!clientesResumo.has(cap.cliente_id)) {
+          clientesResumo.set(cap.cliente_id, {
+            id: cap.cliente_id,
+            nome: cap.cliente,
+            total_kvar_instalado: 0,
+            total_kvar_efetivo: 0,
+            deficiencia_kvar: 0,
+            eficiencia_percentual: 0,
+            custo_mensal_perda: 0,
+            capacitores_afetados: 0,
+            bancos_afetados: 0,
+            bancos: []
+          });
+        }
+
+        const resumo = clientesResumo.get(cap.cliente_id)!;
+        resumo.total_kvar_instalado += cap.potencia_kvar;
+        resumo.total_kvar_efetivo += cap.potencia_efetiva;
+        if (cap.perda_kvar > 0.5) resumo.capacitores_afetados++;
+      }
+
+      // Adicionar informações de bancos por cliente
+      for (const [clienteId, resumo] of clientesResumo) {
+        const bancosDoCliente = new Map();
+        for (const cap of processedData.filter(c => c.cliente_id === clienteId)) {
+          if (!bancosDoCliente.has(cap.banco_id)) {
+            bancosDoCliente.set(cap.banco_id, {
+              id: cap.banco_id,
+              nome: cap.banco,
+              kvar_instalado: 0,
+              kvar_efetivo: 0,
+              deficiencia: 0
+            });
+          }
+          const bancoResumo = bancosDoCliente.get(cap.banco_id);
+          bancoResumo.kvar_instalado += cap.potencia_kvar;
+          bancoResumo.kvar_efetivo += cap.potencia_efetiva;
+          bancoResumo.deficiencia = bancoResumo.kvar_instalado - bancoResumo.kvar_efetivo;
+        }
+        resumo.bancos = Array.from(bancosDoCliente.values());
+        resumo.bancos_afetados = resumo.bancos.filter(b => b.deficiencia > 5).length;
+        resumo.deficiencia_kvar = resumo.total_kvar_instalado - resumo.total_kvar_efetivo;
+        resumo.eficiencia_percentual = resumo.total_kvar_instalado > 0 
+          ? (resumo.total_kvar_efetivo / resumo.total_kvar_instalado) * 100 
+          : 100;
+        resumo.custo_mensal_perda = calcularCustoIneficiencia(resumo.deficiencia_kvar);
+      }
+
+      const resumoArray = Array.from(clientesResumo.values()).filter(r => r.total_kvar_instalado > 0);
+      setResumoClientes(resumoArray);
+
+      // Calcular ineficiência total
       let totalNominal = 0;
       let totalEfetivo = 0;
       let capacitoresAfetados = 0;
@@ -306,38 +376,17 @@ export default function ManutencaoPage() {
         total_perda_kvar: perdaTotal,
         eficiencia_media_percent: eficienciaMedia,
         custo_mensal_perda: calcularCustoIneficiencia(perdaTotal),
-        capacitores_afetados: capacitoresAfetados
+        capacitores_afetados: capacitoresAfetados,
+        bancos_afetados: new Set(processedData.filter(c => c.perda_kvar > 5).map(c => c.banco_id)).size,
+        recomendacao_substituicao: Math.ceil(perdaTotal / 10)
       });
 
-      // Ineficiência por cliente (se houver filtro)
+      // Selecionar resumo do cliente filtrado
       if (clienteFiltro !== 'todos') {
-        const clienteSelecionado = clientes.find(c => c.id === clienteFiltro);
-        const capacitoresCliente = processedData.filter(cap => cap.cliente_id === clienteFiltro);
-        
-        let totalNominalCliente = 0;
-        let totalEfetivoCliente = 0;
-        let capacitoresAfetadosCliente = 0;
-        
-        capacitoresCliente.forEach(cap => {
-          totalNominalCliente += cap.potencia_kvar;
-          totalEfetivoCliente += cap.potencia_efetiva;
-          if (cap.perda_kvar > 0.5) capacitoresAfetadosCliente++;
-        });
-        
-        const perdaTotalCliente = totalNominalCliente - totalEfetivoCliente;
-        const eficienciaMediaCliente = totalNominalCliente > 0 ? (totalEfetivoCliente / totalNominalCliente) * 100 : 0;
-        
-        setIneficienciaCliente({
-          nome: clienteSelecionado?.nome || 'Cliente',
-          total_nominal_kvar: totalNominalCliente,
-          total_efetivo_kvar: totalEfetivoCliente,
-          total_perda_kvar: perdaTotalCliente,
-          eficiencia_media_percent: eficienciaMediaCliente,
-          custo_mensal_perda: calcularCustoIneficiencia(perdaTotalCliente),
-          capacitores_afetados: capacitoresAfetadosCliente
-        });
+        const clienteResumo = resumoArray.find(r => r.id === clienteFiltro);
+        setClienteSelecionadoResumo(clienteResumo || null);
       } else {
-        setIneficienciaCliente(null);
+        setClienteSelecionadoResumo(null);
       }
       
     } catch (error) {
@@ -360,6 +409,7 @@ export default function ManutencaoPage() {
 
   // Filtrar capacitores por status
   const filteredCapacitores = capacitores.filter(cap => {
+    if (clienteFiltro !== 'todos' && cap.cliente_id !== clienteFiltro) return false;
     if (filter === 'urgente') return cap.previsao_meses !== null && parseFloat(cap.previsao_meses) <= 3;
     if (filter === 'atencao') return cap.ultimo_status === 'warning';
     return true;
@@ -371,49 +421,18 @@ export default function ManutencaoPage() {
 
   // Top 5 capacitores com maior perda de eficiência
   const topPerdaEficiencia = [...capacitores]
+    .filter(c => clienteFiltro === 'todos' || c.cliente_id === clienteFiltro)
     .sort((a, b) => b.perda_kvar - a.perda_kvar)
     .slice(0, 5);
 
-  function handleGerarRelatorio() {
-    const ineficienciaTexto = ineficienciaTotal ? `
-      <div class="mt-4 p-3 bg-red-50 rounded-lg">
-        <p class="text-xs font-bold text-red-700">⚠️ INEFICIÊNCIA DO SISTEMA:</p>
-        <p class="text-sm">Perda total de potência: <strong>${ineficienciaTotal.total_perda_kvar.toFixed(1)} kVAr</strong></p>
-        <p class="text-sm">Custo mensal estimado: <strong>${ineficienciaTotal.custo_mensal_perda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong></p>
-        <p class="text-xs text-slate-500 mt-1">* Baseado em 8h/dia e tarifa de R$ 0,95/kVAr</p>
-      </div>
-    ` : '';
-
-    Swal.fire({
-      title: 'Relatório de Manutenção',
-      html: `
-        <div class="text-left">
-          <p><strong>📊 Resumo:</strong></p>
-          <ul class="list-disc pl-5 mb-3">
-            <li>🔴 Críticos: ${urgentes}</li>
-            <li>🟡 Atenção: ${atencao}</li>
-            <li>🟢 Saudáveis: ${saudaveis}</li>
-          </ul>
-          <p><strong>💰 Estimativa de Investimento:</strong></p>
-          <p>R$ ${urgentes * 250} em substituições urgentes</p>
-          ${ineficienciaTexto}
-          <hr class="my-3">
-          <p class="text-xs text-slate-500">Relatório gerado em ${new Date().toLocaleDateString('pt-BR')}</p>
-        </div>
-      `,
-      icon: 'info',
-      confirmButtonColor: '#0a2b3c'
-    });
-  }
+  const clienteSelecionadoObj = clientes.find(c => c.id === clienteFiltro);
 
   if (loading) {
     return (
       <div className="space-y-8 pb-12">
         <div className="h-40 animate-pulse rounded-3xl bg-slate-100" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          {[1, 2, 3, 4].map(i => (
-            <div key={i} className="h-32 animate-pulse rounded-2xl bg-slate-100" />
-          ))}
+          {[1, 2, 3, 4].map(i => <div key={i} className="h-32 animate-pulse rounded-2xl bg-slate-100" />)}
         </div>
         <div className="h-96 animate-pulse rounded-2xl bg-slate-100" />
       </div>
@@ -445,49 +464,221 @@ export default function ManutencaoPage() {
         </div>
       </motion.section>
 
-      {/* Filtros */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">Filtrar por Cliente</label>
-          <select 
-            className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2 outline-none focus:border-primary"
-            value={clienteFiltro}
-            onChange={(e) => setClienteFiltro(e.target.value)}
-          >
-            <option value="todos">📋 Todos os clientes</option>
-            {clientes.map(c => (
-              <option key={c.id} value={c.id}>🏢 {c.nome}</option>
+      {/* Resumo por Cliente */}
+      {resumoClientes.length > 0 && clienteFiltro === 'todos' && (
+        <div className="space-y-4">
+          <h2 className="text-xl font-bold text-primary flex items-center gap-2">
+            <Building size={20} />
+            Resumo por Cliente
+          </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            {resumoClientes.map((cliente) => (
+              <motion.div
+                key={cliente.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 hover:shadow-md transition-all cursor-pointer"
+                onClick={() => setClienteFiltro(cliente.id)}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-primary text-lg">{cliente.nome}</h3>
+                  <div className={cn(
+                    "px-2 py-1 rounded-full text-xs font-bold",
+                    cliente.eficiencia_percentual > 80 ? "bg-green-100 text-green-700" :
+                    cliente.eficiencia_percentual > 60 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
+                  )}>
+                    {cliente.eficiencia_percentual.toFixed(1)}% eficiência
+                  </div>
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 text-sm">kVAr Instalado:</span>
+                    <span className="font-bold text-primary text-xl">{cliente.total_kvar_instalado.toFixed(1)} kVAr</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 text-sm">kVAr Efetivo:</span>
+                    <span className="font-bold text-amber-600">{cliente.total_kvar_efetivo.toFixed(1)} kVAr</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 text-sm">Deficiência:</span>
+                    <span className="font-bold text-red-600">-{cliente.deficiencia_kvar.toFixed(1)} kVAr</span>
+                  </div>
+                  <div className="pt-2">
+                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div 
+                        className={cn(
+                          "h-full rounded-full",
+                          cliente.eficiencia_percentual > 80 ? "bg-green-500" :
+                          cliente.eficiencia_percentual > 60 ? "bg-amber-500" : "bg-red-500"
+                        )}
+                        style={{ width: `${cliente.eficiencia_percentual}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between text-xs text-slate-400">
+                  <span>🔧 {cliente.bancos_afetados} bancos com problema</span>
+                  <span>⚡ {cliente.capacitores_afetados} capacitores afetados</span>
+                </div>
+              </motion.div>
             ))}
-          </select>
+          </div>
         </div>
-        <div className="flex gap-2 items-end">
-          <button
-            onClick={() => setFilter('todos')}
-            className={cn(
-              "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-              filter === 'todos' ? "bg-primary text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+      )}
+
+      {/* Detalhamento do Cliente Selecionado */}
+      {clienteSelecionadoResumo && clienteFiltro !== 'todos' && (
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gradient-to-r from-primary/5 to-secondary/5 rounded-2xl p-6 border border-primary/20"
+        >
+          <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
+            <div>
+              <h2 className="text-2xl font-bold text-primary">{clienteSelecionadoResumo.nome}</h2>
+              <p className="text-slate-500">Análise completa do cliente</p>
+            </div>
+            <button
+              onClick={() => setClienteFiltro('todos')}
+              className="text-sm text-primary hover:underline flex items-center gap-1"
+            >
+              Ver todos os clientes →
+            </button>
+          </div>
+
+          {/* Cards de resumo do cliente */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white rounded-xl p-4 text-center">
+              <p className="text-xs text-slate-500">kVAr Instalado</p>
+              <p className="text-2xl font-bold text-primary">{clienteSelecionadoResumo.total_kvar_instalado.toFixed(1)} kVAr</p>
+            </div>
+            <div className="bg-white rounded-xl p-4 text-center">
+              <p className="text-xs text-slate-500">kVAr Efetivo</p>
+              <p className="text-2xl font-bold text-amber-600">{clienteSelecionadoResumo.total_kvar_efetivo.toFixed(1)} kVAr</p>
+            </div>
+            <div className="bg-white rounded-xl p-4 text-center">
+              <p className="text-xs text-slate-500">Deficiência</p>
+              <p className="text-2xl font-bold text-red-600">-{clienteSelecionadoResumo.deficiencia_kvar.toFixed(1)} kVAr</p>
+            </div>
+            <div className="bg-white rounded-xl p-4 text-center">
+              <p className="text-xs text-slate-500">Custo Mensal</p>
+              <p className="text-2xl font-bold text-red-600">{clienteSelecionadoResumo.custo_mensal_perda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+            </div>
+          </div>
+
+          {/* Barra de eficiência */}
+          <div className="mb-6">
+            <div className="flex justify-between text-sm mb-1">
+              <span>Eficiência do Sistema</span>
+              <span className="font-bold">{clienteSelecionadoResumo.eficiencia_percentual.toFixed(1)}%</span>
+            </div>
+            <div className="h-3 bg-slate-200 rounded-full overflow-hidden">
+              <div 
+                className={cn(
+                  "h-full rounded-full transition-all duration-500",
+                  clienteSelecionadoResumo.eficiencia_percentual > 80 ? "bg-green-500" :
+                  clienteSelecionadoResumo.eficiencia_percentual > 60 ? "bg-amber-500" : "bg-red-500"
+                )}
+                style={{ width: `${clienteSelecionadoResumo.eficiencia_percentual}%` }}
+              />
+            </div>
+            {clienteSelecionadoResumo.deficiencia_kvar > 0 && (
+              <p className="text-xs text-red-500 mt-2">
+                ⚠️ Deficiência de {clienteSelecionadoResumo.deficiencia_kvar.toFixed(1)} kVAr detectada. 
+                Recomenda-se instalar aproximadamente <strong>{Math.ceil(clienteSelecionadoResumo.deficiencia_kvar / 10)}</strong> capacitores de 10 kVAr.
+              </p>
             )}
-          >
-            Todos ({capacitores.length})
-          </button>
-          <button
-            onClick={() => setFilter('urgente')}
-            className={cn(
-              "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-              filter === 'urgente' ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            )}
-          >
-            Urgentes ({urgentes})
-          </button>
-          <button
-            onClick={() => setFilter('atencao')}
-            className={cn(
-              "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-              filter === 'atencao' ? "bg-amber-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            )}
-          >
-            Atenção ({atencao})
-          </button>
+          </div>
+
+          {/* Detalhamento por Banco */}
+          <div>
+            <h3 className="font-bold text-primary mb-3 flex items-center gap-2">
+              <Database size={16} />
+              Detalhamento por Banco de Capacitores
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="bg-slate-100 text-xs font-medium text-slate-500">
+                  <tr>
+                    <th className="px-4 py-2">Banco</th>
+                    <th className="px-4 py-2">kVAr Instalado</th>
+                    <th className="px-4 py-2">kVAr Efetivo</th>
+                    <th className="px-4 py-2">Deficiência</th>
+                    <th className="px-4 py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {clienteSelecionadoResumo.bancos.map((banco) => (
+                    <tr key={banco.id} className="text-sm">
+                      <td className="px-4 py-2 font-medium">{banco.nome}</td>
+                      <td className="px-4 py-2">{banco.kvar_instalado.toFixed(1)} kVAr</td>
+                      <td className="px-4 py-2 text-amber-600">{banco.kvar_efetivo.toFixed(1)} kVAr</td>
+                      <td className="px-4 py-2 text-red-600">-{banco.deficiencia.toFixed(1)} kVAr</td>
+                      <td className="px-4 py-2">
+                        <span className={cn(
+                          "px-2 py-0.5 text-xs rounded-full",
+                          banco.deficiencia > 10 ? "bg-red-100 text-red-700" :
+                          banco.deficiencia > 5 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
+                        )}>
+                          {banco.deficiencia > 10 ? "Crítico" : banco.deficiencia > 5 ? "Atenção" : "Normal"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Filtros */}
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Filtrar por Cliente</label>
+            <select 
+              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-primary"
+              value={clienteFiltro}
+              onChange={(e) => setClienteFiltro(e.target.value)}
+            >
+              <option value="todos">📋 Todos os clientes</option>
+              {clientes.map(c => (
+                <option key={c.id} value={c.id}>🏢 {c.nome}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2 items-end">
+            <button
+              onClick={() => setFilter('todos')}
+              className={cn(
+                "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                filter === 'todos' ? "bg-primary text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              )}
+            >
+              Todos ({filteredCapacitores.length})
+            </button>
+            <button
+              onClick={() => setFilter('urgente')}
+              className={cn(
+                "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                filter === 'urgente' ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              )}
+            >
+              Urgentes ({urgentes})
+            </button>
+            <button
+              onClick={() => setFilter('atencao')}
+              className={cn(
+                "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                filter === 'atencao' ? "bg-amber-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              )}
+            >
+              Atenção ({atencao})
+            </button>
+          </div>
         </div>
       </div>
 
@@ -529,111 +720,62 @@ export default function ManutencaoPage() {
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 bg-primary/10 rounded-lg text-primary">
-              <Droplets size={22} />
+              <PieChart size={22} />
             </div>
-            <span className="text-xs font-medium text-slate-500 uppercase">Total</span>
+            <span className="text-xs font-medium text-slate-500 uppercase">Total Analisado</span>
           </div>
-          <p className="text-3xl font-bold text-primary">{capacitores.length}</p>
+          <p className="text-3xl font-bold text-primary">{capacitores.filter(c => clienteFiltro === 'todos' || c.cliente_id === clienteFiltro).length}</p>
           <p className="text-xs text-slate-400 mt-1">Capacitores monitorados</p>
         </div>
       </div>
 
-      {/* Cards de Ineficiência */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Ineficiência Total do Sistema */}
-        {ineficienciaTotal && ineficienciaTotal.total_nominal_kvar > 0 && (
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-red-100 rounded-lg text-red-600">
-                  <BatteryWarning size={22} />
-                </div>
-                <h3 className="font-bold text-primary">Ineficiência Total</h3>
+      {/* Ineficiência Total do Sistema */}
+      {ineficienciaTotal && ineficienciaTotal.total_nominal_kvar > 0 && clienteFiltro === 'todos' && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-red-100 rounded-lg text-red-600">
+                <BatteryWarning size={22} />
               </div>
-              <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded-full">
-                Perda: {ineficienciaTotal.total_perda_kvar.toFixed(1)} kVAr
-              </span>
+              <h3 className="font-bold text-primary">Ineficiência Total do Sistema</h3>
             </div>
-            
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Potência Nominal Total:</span>
-                <span className="font-bold">{ineficienciaTotal.total_nominal_kvar.toFixed(1)} kVAr</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Potência Efetiva Real:</span>
-                <span className="font-bold text-amber-600">{ineficienciaTotal.total_efetivo_kvar.toFixed(1)} kVAr</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Perda de Capacidade:</span>
-                <span className="font-bold text-red-600">-{ineficienciaTotal.total_perda_kvar.toFixed(1)} kVAr</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Eficiência Média:</span>
-                <div className="flex items-center gap-2">
-                  <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-red-500 rounded-full"
-                      style={{ width: `${ineficienciaTotal.eficiencia_media_percent}%` }}
-                    />
-                  </div>
-                  <span className={cn(
-                    "font-bold",
-                    ineficienciaTotal.eficiencia_media_percent > 80 ? "text-green-600" : "text-red-600"
-                  )}>
-                    {ineficienciaTotal.eficiencia_media_percent.toFixed(1)}%
-                  </span>
-                </div>
-              </div>
-              <div className="mt-3 pt-3 border-t border-slate-100">
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">💰 Custo Mensal Estimado:</span>
-                  <span className="font-bold text-red-600">
-                    {ineficienciaTotal.custo_mensal_perda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                  </span>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  * Baseado em 8h/dia de operação e tarifa de R$ 0,95/kVAr
-                </p>
-              </div>
+            <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded-full">
+              Perda: {ineficienciaTotal.total_perda_kvar.toFixed(1)} kVAr
+            </span>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <p className="text-xs text-slate-500">Potência Instalada</p>
+              <p className="text-xl font-bold text-primary">{ineficienciaTotal.total_nominal_kvar.toFixed(1)} kVAr</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Potência Disponível</p>
+              <p className="text-xl font-bold text-amber-600">{ineficienciaTotal.total_efetivo_kvar.toFixed(1)} kVAr</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Perda Mensal Estimada</p>
+              <p className="text-xl font-bold text-red-600">{ineficienciaTotal.custo_mensal_perda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
             </div>
           </div>
-        )}
-
-        {/* Ineficiência por Cliente (quando filtrado) */}
-        {ineficienciaCliente && ineficienciaCliente.total_nominal_kvar > 0 && (
-          <div className="bg-gradient-to-r from-primary/5 to-secondary/5 rounded-2xl p-6 border border-primary/20">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-primary/10 rounded-lg text-primary">
-                <TrendingDown size={22} />
-              </div>
-              <h3 className="font-bold text-primary">Ineficiência do Cliente</h3>
+          
+          <div className="mt-4">
+            <div className="flex justify-between text-sm mb-1">
+              <span>Eficiência Média</span>
+              <span className="font-bold">{ineficienciaTotal.eficiencia_media_percent.toFixed(1)}%</span>
             </div>
-            
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Potência Instalada:</span>
-                <span className="font-bold">{ineficienciaCliente.total_nominal_kvar.toFixed(1)} kVAr</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Potência Disponível:</span>
-                <span className="font-bold text-amber-600">{ineficienciaCliente.total_efetivo_kvar.toFixed(1)} kVAr</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">kVAr Perdidos:</span>
-                <span className="font-bold text-red-600">{ineficienciaCliente.total_perda_kvar.toFixed(1)} kVAr</span>
-              </div>
-              <div className="mt-2 p-3 bg-amber-50 rounded-lg">
-                <p className="text-xs text-amber-700">
-                  ⚠️ Para recuperar essa potência perdida, seria necessário instalar 
-                  aproximadamente <strong>{Math.ceil(ineficienciaCliente.total_perda_kvar / 10)}</strong> capacitores 
-                  de 10 kVAr.
-                </p>
-              </div>
+            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-red-500 rounded-full"
+                style={{ width: `${ineficienciaTotal.eficiencia_media_percent}%` }}
+              />
             </div>
+            <p className="text-xs text-amber-600 mt-2">
+              💡 Recomenda-se instalar aproximadamente <strong>{ineficienciaTotal.recomendacao_substituicao}</strong> capacitores de 10 kVAr para recuperar a potência perdida.
+            </p>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Tabela de Capacitores com Maior Ineficiência */}
       {topPerdaEficiencia.length > 0 && (
@@ -673,17 +815,14 @@ export default function ManutencaoPage() {
                             style={{ width: `${cap.eficiencia}%` }}
                           />
                         </div>
-                        <span className="text-xs">
-                          {cap.eficiencia.toFixed(0)}%
-                        </span>
+                        <span className="text-xs">{cap.eficiencia.toFixed(0)}%</span>
                       </div>
                     </td>
                     <td className="px-5 py-3">
                       <span className={cn(
                         "px-2 py-1 text-xs font-bold rounded-full",
                         cap.previsao_meses && parseFloat(cap.previsao_meses) <= 3 ? "bg-red-100 text-red-700" :
-                        cap.ultimo_status === 'warning' ? "bg-amber-100 text-amber-700" :
-                        "bg-green-100 text-green-700"
+                        cap.ultimo_status === 'warning' ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
                       )}>
                         {cap.previsao_meses && parseFloat(cap.previsao_meses) <= 3 ? "CRÍTICO" :
                          cap.ultimo_status === 'warning' ? "ATENÇÃO" : "OK"}
@@ -705,13 +844,6 @@ export default function ManutencaoPage() {
         >
           <RefreshCw size={16} />
           Atualizar
-        </button>
-        <button
-          onClick={handleGerarRelatorio}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary/90"
-        >
-          <FileText size={16} />
-          Relatório
         </button>
       </div>
 
@@ -738,8 +870,8 @@ export default function ManutencaoPage() {
                     <Wrench size={32} className="mx-auto mb-2 opacity-50" />
                     <p>Nenhum capacitor encontrado</p>
                     <p className="text-xs mt-1">Cadastre medições para começar a análise</p>
-                    </td>
-                  </tr>
+                  </td>
+                </tr>
               ) : (
                 filteredCapacitores.map((cap) => (
                   <tr key={cap.id} className="text-sm hover:bg-slate-50 transition-colors">
@@ -803,8 +935,7 @@ export default function ManutencaoPage() {
                       <span className={cn(
                         "px-2 py-1 text-xs font-bold rounded-full",
                         cap.previsao_meses && parseFloat(cap.previsao_meses) <= 3 ? "bg-red-100 text-red-700" :
-                        cap.ultimo_status === 'warning' ? "bg-amber-100 text-amber-700" :
-                        "bg-green-100 text-green-700"
+                        cap.ultimo_status === 'warning' ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
                       )}>
                         {cap.previsao_meses && parseFloat(cap.previsao_meses) <= 3 ? "CRÍTICO" :
                          cap.ultimo_status === 'warning' ? "ATENÇÃO" : "OK"}
