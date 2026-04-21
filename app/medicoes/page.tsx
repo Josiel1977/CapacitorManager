@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, Suspense } from 'react';
+import React, { useEffect, useState, Suspense, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { ArrowLeft, Calendar, Zap, Activity, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, XCircle, FileText, Download } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
