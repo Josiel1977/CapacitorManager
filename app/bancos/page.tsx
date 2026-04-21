@@ -2,18 +2,26 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Plus, Search, Edit2, Trash2, X, Save, Database, Filter, ChevronDown, RefreshCw, Calculator } from 'lucide-react';
+import { 
+  Plus, Search, Edit2, Trash2, X, Save, Database, Filter, ChevronDown, 
+  RefreshCw, Calculator, TrendingUp, TrendingDown, AlertTriangle, 
+  CheckCircle2, Zap, Eye, ArrowRight, LayoutGrid, List,
+  BarChart3, Activity, DollarSign, Clock
+} from 'lucide-react';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseNumber, cn } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
 
 export default function BancosPage() {
+  const router = useRouter();
   const [bancos, setBancos] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [calculando, setCalculando] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [clienteFiltro, setClienteFiltro] = useState<string>('todos');
+  const [viewMode, setViewMode] = useState<'cards' | 'lista'>('cards');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBanco, setEditingBanco] = useState<any>(null);
   const [formData, setFormData] = useState({
@@ -23,16 +31,69 @@ export default function BancosPage() {
     tensao_nominal: '',
     potencia_total_kvar: '',
   });
+  const [resumoCliente, setResumoCliente] = useState<any>(null);
 
   useEffect(() => {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (clienteFiltro !== 'todos') {
+      carregarResumoCliente();
+    } else {
+      setResumoCliente(null);
+    }
+  }, [clienteFiltro, bancos]);
+
+  async function carregarResumoCliente() {
+    if (clienteFiltro === 'todos') return;
+    
+    const bancosCliente = bancos.filter(b => b.cliente_id === clienteFiltro);
+    const totalKvarInstalado = bancosCliente.reduce((sum, b) => sum + (b.potencia_calculada || 0), 0);
+    
+    // Calcular deficiência (baseado em capacitores com desvio > 10%)
+    let totalKvarEfetivo = 0;
+    let capacitoresProblema = 0;
+    
+    for (const banco of bancosCliente) {
+      const { data: capacitores } = await supabase
+        .from('capacitores')
+        .select(`
+          id,
+          potencia_kvar,
+          medicoes (desvio_percentual)
+        `)
+        .eq('banco_id', banco.id)
+        .eq('ativo', true);
+      
+      if (capacitores) {
+        for (const cap of capacitores) {
+          const ultimaMedicao = cap.medicoes?.[0];
+          const desvio = Math.abs(ultimaMedicao?.desvio_percentual || 0);
+          const eficiencia = Math.max(0, 100 - desvio);
+          totalKvarEfetivo += (cap.potencia_kvar * eficiencia) / 100;
+          if (desvio > 10) capacitoresProblema++;
+        }
+      }
+    }
+    
+    const deficienciaKvar = totalKvarInstalado - totalKvarEfetivo;
+    const eficienciaPercentual = totalKvarInstalado > 0 ? (totalKvarEfetivo / totalKvarInstalado) * 100 : 100;
+    
+    setResumoCliente({
+      totalKvarInstalado,
+      totalKvarEfetivo,
+      deficienciaKvar,
+      eficienciaPercentual,
+      capacitoresProblema,
+      totalBancos: bancosCliente.length
+    });
+  }
+
   async function fetchData() {
     try {
       setLoading(true);
       
-      // Buscar todos os bancos ativos com dados do cliente
       const { data: bancosData, error: bancosError } = await supabase
         .from('bancos_capacitores')
         .select(`
@@ -42,7 +103,6 @@ export default function BancosPage() {
         .eq('ativo', true)
         .order('nome_banco');
       
-      // Buscar clientes ativos para o filtro
       const { data: clientesData, error: clientesError } = await supabase
         .from('clientes')
         .select('id, nome')
@@ -52,13 +112,11 @@ export default function BancosPage() {
       if (bancosError) throw bancosError;
       if (clientesError) throw clientesError;
 
-      // Buscar capacitores para calcular potência real de cada banco
       const { data: capacitoresData } = await supabase
         .from('capacitores')
         .select('banco_id, potencia_kvar')
         .eq('ativo', true);
 
-      // Criar mapa de potência total por banco
       const potenciaPorBanco: { [key: string]: number } = {};
       capacitoresData?.forEach(cap => {
         if (cap.banco_id) {
@@ -66,7 +124,6 @@ export default function BancosPage() {
         }
       });
 
-      // Atualizar bancos com a potência calculada
       const bancosComPotenciaReal = (bancosData || []).map(banco => ({
         ...banco,
         potencia_calculada: potenciaPorBanco[banco.id] || 0,
@@ -84,11 +141,9 @@ export default function BancosPage() {
     }
   }
 
-  // Função para recalcular a potência total de um banco baseado nos capacitores
   async function recalcularPotenciaBanco(bancoId: string, bancoNome: string) {
     setCalculando(bancoId);
     try {
-      // Buscar todos os capacitores ativos do banco
       const { data: capacitores, error } = await supabase
         .from('capacitores')
         .select('id, potencia_kvar')
@@ -97,10 +152,8 @@ export default function BancosPage() {
 
       if (error) throw error;
 
-      // Calcular soma das potências
       const potenciaTotal = capacitores?.reduce((sum, cap) => sum + (cap.potencia_kvar || 0), 0) || 0;
 
-      // Atualizar o banco com a nova potência total
       const { error: updateError } = await supabase
         .from('bancos_capacitores')
         .update({ potencia_total_kvar: potenciaTotal })
@@ -122,7 +175,6 @@ export default function BancosPage() {
         confirmButtonColor: '#0a2b3c'
       });
 
-      // Recarregar dados
       fetchData();
     } catch (error: any) {
       Swal.fire('Erro', error.message, 'error');
@@ -131,71 +183,48 @@ export default function BancosPage() {
     }
   }
 
-  // Função para recalcular todos os bancos de um cliente
-  async function recalcularTodosBancos(clienteId: string, clienteNome: string) {
-    const result = await Swal.fire({
-      title: 'Recalcular todos os bancos?',
-      html: `
-        <p>Isso irá recalcular a potência total de <strong>TODOS</strong> os bancos do cliente <strong>${clienteNome}</strong>.</p>
-        <p class="text-sm text-slate-500 mt-2">A operação pode levar alguns segundos.</p>
-      `,
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonColor: '#0a2b3c',
-      cancelButtonColor: '#e74c3c',
-      confirmButtonText: 'Sim, recalcular todos',
-      cancelButtonText: 'Cancelar'
-    });
-
-    if (!result.isConfirmed) return;
-
-    // Buscar todos os bancos do cliente
-    const { data: bancosCliente } = await supabase
-      .from('bancos_capacitores')
-      .select('id, nome_banco')
-      .eq('cliente_id', clienteId)
-      .eq('ativo', true);
-
-    if (!bancosCliente || bancosCliente.length === 0) {
-      Swal.fire('Aviso', 'Nenhum banco encontrado para este cliente', 'info');
-      return;
-    }
-
-    let atualizados = 0;
-    for (const banco of bancosCliente) {
-      const { data: capacitores } = await supabase
-        .from('capacitores')
-        .select('potencia_kvar')
-        .eq('banco_id', banco.id)
-        .eq('ativo', true);
-
-      const potenciaTotal = capacitores?.reduce((sum, cap) => sum + (cap.potencia_kvar || 0), 0) || 0;
-
-      await supabase
-        .from('bancos_capacitores')
-        .update({ potencia_total_kvar: potenciaTotal })
-        .eq('id', banco.id);
-
-      atualizados++;
-    }
-
+  async function handleLoginRedirect() {
     Swal.fire({
-      title: 'Atualização concluída!',
-      text: `${atualizados} banco(s) atualizado(s) para o cliente ${clienteNome}`,
-      icon: 'success',
-      confirmButtonColor: '#0a2b3c'
+      title: '🔐 Acesso Restrito',
+      html: `
+        <div class="text-left">
+          <p>Para visualizar os detalhes completos do cliente, você precisa estar logado.</p>
+          <div class="mt-4 p-3 bg-primary/10 rounded-lg">
+            <p class="text-sm font-bold text-primary">Área do Cliente</p>
+            <p class="text-xs text-slate-500 mt-1">Acesse com suas credenciais para ver:</p>
+            <ul class="text-xs text-slate-500 mt-2 list-disc pl-4">
+              <li>📊 Seus bancos de capacitores</li>
+              <li>⚡ Capacitores e medições</li>
+              <li>📈 Relatórios personalizados</li>
+              <li>🔧 Recomendações de manutenção</li>
+            </ul>
+          </div>
+          <p class="text-xs text-slate-400 mt-3">Entre em contato com o administrador para obter acesso.</p>
+        </div>
+      `,
+      icon: 'info',
+      showCancelButton: true,
+      confirmButtonText: 'Entrar na Área do Cliente',
+      cancelButtonText: 'Voltar',
+      confirmButtonColor: '#0a2b3c',
+      cancelButtonColor: '#e74c3c'
+    }).then((result) => {
+      if (result.isConfirmed) {
+        // Redirecionar para página de login do cliente
+        router.push('/cliente/login');
+      }
     });
+  }
 
-    fetchData();
+  function handleVerCapacitores(bancoId: string) {
+    router.push(`/capacitores?banco_id=${bancoId}`);
   }
 
   const filteredBancos = useMemo(() => {
     let filtered = [...bancos];
-    
     if (clienteFiltro !== 'todos') {
       filtered = filtered.filter(b => b.cliente_id === clienteFiltro);
     }
-    
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(b => 
@@ -204,7 +233,6 @@ export default function BancosPage() {
         b.localizacao?.toLowerCase().includes(term)
       );
     }
-    
     return filtered;
   }, [bancos, clienteFiltro, searchTerm]);
 
@@ -214,223 +242,257 @@ export default function BancosPage() {
     clientesAtendidos: new Set(filteredBancos.map(b => b.cliente_id)).size,
   };
 
-  function handleOpenModal(banco: any = null) {
-    if (banco) {
-      setEditingBanco(banco);
-      setFormData({
-        cliente_id: banco.cliente_id,
-        nome_banco: banco.nome_banco,
-        localizacao: banco.localizacao || '',
-        tensao_nominal: banco.tensao_nominal || '',
-        potencia_total_kvar: banco.potencia_calculada?.toString() || banco.potencia_total_kvar?.toString() || '',
-      });
-    } else {
-      setEditingBanco(null);
-      setFormData({
-        cliente_id: clienteFiltro !== 'todos' ? clienteFiltro : '',
-        nome_banco: '',
-        localizacao: '',
-        tensao_nominal: '',
-        potencia_total_kvar: '',
-      });
-    }
-    setIsModalOpen(true);
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    
-    if (!formData.cliente_id) {
-      Swal.fire('Atenção', 'Selecione um cliente', 'warning');
-      return;
-    }
-    
-    try {
-      const data = {
-        cliente_id: formData.cliente_id,
-        nome_banco: formData.nome_banco,
-        localizacao: formData.localizacao || null,
-        tensao_nominal: formData.tensao_nominal ? parseNumber(formData.tensao_nominal) : null,
-        potencia_total_kvar: formData.potencia_total_kvar ? parseNumber(formData.potencia_total_kvar) : null,
-      };
-
-      if (editingBanco) {
-        const { error } = await supabase
-          .from('bancos_capacitores')
-          .update(data)
-          .eq('id', editingBanco.id);
-        if (error) throw error;
-        Swal.fire('Sucesso', 'Banco atualizado com sucesso!', 'success');
-      } else {
-        const { error } = await supabase
-          .from('bancos_capacitores')
-          .insert([{ ...data, ativo: true }]);
-        if (error) throw error;
-        Swal.fire('Sucesso', 'Banco cadastrado com sucesso!', 'success');
-      }
-      setIsModalOpen(false);
-      fetchData();
-    } catch (error: any) {
-      Swal.fire('Erro', error.message, 'error');
-    }
-  }
-
-  async function handleDelete(id: string) {
-    const result = await Swal.fire({
-      title: 'Tem certeza?',
-      text: "O banco será desativado do sistema.",
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#0a2b3c',
-      cancelButtonColor: '#e74c3c',
-      confirmButtonText: 'Sim, desativar',
-      cancelButtonText: 'Cancelar'
-    });
-
-    if (result.isConfirmed) {
-      try {
-        const { count: capacitoresCount } = await supabase
-          .from('capacitores')
-          .select('*', { count: 'exact', head: true })
-          .eq('banco_id', id)
-          .eq('ativo', true);
-        
-        if (capacitoresCount && capacitoresCount > 0) {
-          const confirm = await Swal.fire({
-            title: 'Atenção!',
-            text: `Este banco possui ${capacitoresCount} capacitor(es) vinculado(s). Desativar o banco irá desativar também seus capacitores. Deseja continuar?`,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#0a2b3c',
-            cancelButtonColor: '#e74c3c',
-            confirmButtonText: 'Sim, continuar',
-            cancelButtonText: 'Cancelar'
-          });
-          
-          if (!confirm.isConfirmed) return;
-        }
-        
-        const { error } = await supabase
-          .from('bancos_capacitores')
-          .update({ ativo: false })
-          .eq('id', id);
-        
-        if (error) throw error;
-        Swal.fire('Desativado!', 'Banco removido com sucesso.', 'success');
-        fetchData();
-      } catch (error: any) {
-        Swal.fire('Erro', error.message, 'error');
-      }
-    }
-  }
-
   const clienteSelecionado = clientes.find(c => c.id === clienteFiltro);
 
+  if (loading) {
+    return (
+      <div className="space-y-8 pb-12">
+        <div className="h-64 animate-pulse rounded-3xl bg-slate-100" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[1, 2, 3].map(i => <div key={i} className="h-48 animate-pulse rounded-2xl bg-slate-100" />)}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-primary">Bancos de Capacitores</h1>
-          <p className="text-slate-500">Gerencie os bancos vinculados aos seus clientes</p>
-        </div>
-        <div className="flex gap-2">
-          {clienteFiltro !== 'todos' && (
-            <button 
-              onClick={() => recalcularTodosBancos(clienteFiltro, clienteSelecionado?.nome || '')}
-              className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-primary transition-colors hover:bg-primary/20"
-            >
-              <Calculator size={18} />
-              Recalc. todos os bancos
-            </button>
-          )}
-          <button 
-            onClick={() => handleOpenModal()}
-            className="flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-white transition-colors hover:bg-primary/90"
-          >
-            <Plus size={20} />
-            Novo Banco
-          </button>
-        </div>
-      </header>
-
-      {/* Filtros */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-        <div className="lg:col-span-1">
-          <label className="mb-1 block text-xs font-medium text-slate-500">Filtrar por Cliente</label>
-          <div className="relative">
-            <select 
-              className="w-full appearance-none rounded-lg border border-slate-200 bg-white px-4 py-2 pr-8 outline-none focus:border-primary"
-              value={clienteFiltro}
-              onChange={(e) => setClienteFiltro(e.target.value)}
-            >
-              <option value="todos">📋 Todos os clientes</option>
-              {clientes.map(c => (
-                <option key={c.id} value={c.id}>🏢 {c.nome}</option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+    <div className="space-y-8 pb-12">
+      {/* Hero Section - Chamativa */}
+      <motion.section 
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-primary to-primary/80 p-8 text-white shadow-xl md:p-12"
+      >
+        <div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-secondary/20 blur-3xl" />
+        <div className="absolute -bottom-20 -left-20 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
+        
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="rounded-xl bg-secondary/20 p-2">
+              <Database size={28} className="text-secondary" />
+            </div>
+            <span className="text-sm font-medium text-white/80">Gestão de Bancos</span>
           </div>
+          <h1 className="mb-4 text-4xl font-bold leading-tight md:text-5xl">
+            Bancos de <span className="text-secondary">Capacitores</span>
+          </h1>
+          <p className="text-lg text-white/80 md:text-xl max-w-2xl">
+            Gerencie todos os bancos de capacitores, acompanhe a potência instalada e a eficiência do sistema.
+          </p>
         </div>
+      </motion.section>
 
-        <div className="lg:col-span-2">
-          <label className="mb-1 block text-xs font-medium text-slate-500">Buscar</label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input 
-              type="text" 
-              placeholder="Buscar por nome do banco, cliente ou localização..." 
-              className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-10 pr-4 outline-none focus:border-primary"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+      {/* Cards de Resumo */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 bg-primary/10 rounded-lg text-primary">
+              <Database size={22} />
+            </div>
+            <span className="text-xs font-medium text-slate-500 uppercase">Total de Bancos</span>
           </div>
+          <p className="text-3xl font-bold text-primary">{stats.total}</p>
+          <p className="text-xs text-slate-400 mt-1">Bancos cadastrados</p>
         </div>
 
-        <div className="bg-primary/5 rounded-lg p-3 text-center">
-          <p className="text-xs text-slate-500">Potência Total</p>
-          <p className="text-2xl font-bold text-primary">{stats.totalPotencia.toFixed(0)} kVAr</p>
-          <p className="text-[10px] text-slate-400">{stats.total} banco(s)</p>
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
+              <Zap size={22} />
+            </div>
+            <span className="text-xs font-medium text-slate-500 uppercase">Potência Instalada</span>
+          </div>
+          <p className="text-3xl font-bold text-amber-600">{stats.totalPotencia.toFixed(0)} kVAr</p>
+          <p className="text-xs text-slate-400 mt-1">Capacidade total</p>
+        </div>
+
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 bg-green-50 rounded-lg text-green-600">
+              <CheckCircle2 size={22} />
+            </div>
+            <span className="text-xs font-medium text-slate-500 uppercase">Clientes</span>
+          </div>
+          <p className="text-3xl font-bold text-green-600">{stats.clientesAtendidos}</p>
+          <p className="text-xs text-slate-400 mt-1">Clientes atendidos</p>
+        </div>
+
+        <div className="bg-gradient-to-r from-primary/10 to-secondary/10 rounded-2xl p-6 border border-primary/20">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 bg-primary/20 rounded-lg text-primary">
+              <TrendingUp size={22} />
+            </div>
+            <span className="text-xs font-medium text-slate-500 uppercase">Eficiência Média</span>
+          </div>
+          <p className="text-3xl font-bold text-primary">
+            {resumoCliente ? resumoCliente.eficienciaPercentual.toFixed(1) : '100'}%
+          </p>
+          <p className="text-xs text-slate-400 mt-1">do sistema</p>
         </div>
       </div>
 
-      {clienteFiltro !== 'todos' && (
-        <div className="flex items-center gap-2 text-sm bg-primary/10 text-primary rounded-lg px-3 py-2">
-          <Filter size={14} />
-          <span>Filtrando por: <strong>{clienteSelecionado?.nome}</strong></span>
-          <button 
-            onClick={() => setClienteFiltro('todos')}
-            className="ml-auto text-xs hover:underline"
-          >
-            Limpar filtro
-          </button>
-        </div>
+      {/* Resumo do Cliente Selecionado */}
+      {resumoCliente && (
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gradient-to-r from-primary/5 to-secondary/5 rounded-2xl p-6 border border-primary/20"
+        >
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <h3 className="font-bold text-primary text-lg">{clienteSelecionado?.nome}</h3>
+              <p className="text-sm text-slate-500">Resumo do Cliente</p>
+            </div>
+            <button
+              onClick={handleLoginRedirect}
+              className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition-colors"
+            >
+              <Eye size={16} />
+              Acessar Área do Cliente
+            </button>
+          </div>
+          
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
+            <div className="text-center">
+              <p className="text-xs text-slate-500">Bancos</p>
+              <p className="text-xl font-bold text-primary">{resumoCliente.totalBancos}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-slate-500">kVAr Instalado</p>
+              <p className="text-xl font-bold text-amber-600">{resumoCliente.totalKvarInstalado.toFixed(0)}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-slate-500">kVAr Efetivo</p>
+              <p className="text-xl font-bold text-green-600">{resumoCliente.totalKvarEfetivo.toFixed(0)}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-slate-500">Deficiência</p>
+              <p className="text-xl font-bold text-red-600">{resumoCliente.deficienciaKvar.toFixed(0)} kVAr</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-slate-500">Capacitores com Problema</p>
+              <p className="text-xl font-bold text-amber-600">{resumoCliente.capacitoresProblema}</p>
+            </div>
+          </div>
+          
+          <div className="mt-4">
+            <div className="flex justify-between text-sm mb-1">
+              <span>Eficiência do Sistema</span>
+              <span className="font-bold">{resumoCliente.eficienciaPercentual.toFixed(1)}%</span>
+            </div>
+            <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+              <div 
+                className={cn(
+                  "h-full rounded-full",
+                  resumoCliente.eficienciaPercentual > 80 ? "bg-green-500" : 
+                  resumoCliente.eficienciaPercentual > 60 ? "bg-amber-500" : "bg-red-500"
+                )}
+                style={{ width: `${resumoCliente.eficienciaPercentual}%` }}
+              />
+            </div>
+            {resumoCliente.deficienciaKvar > 0 && (
+              <p className="text-xs text-red-500 mt-2">
+                ⚠️ Deficiência de {resumoCliente.deficienciaKvar.toFixed(0)} kVAr detectada. 
+                Recomenda-se manutenção para recuperar a eficiência.
+              </p>
+            )}
+          </div>
+        </motion.div>
       )}
 
-      {/* Grid de Bancos */}
-      {loading ? (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-56 animate-pulse rounded-xl bg-slate-100" />
-          ))}
+      {/* Filtros */}
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="lg:col-span-4">
+            <label className="mb-1 block text-xs font-medium text-slate-500">Filtrar por Cliente</label>
+            <div className="relative">
+              <select 
+                className="w-full appearance-none rounded-lg border border-slate-200 bg-white px-4 py-2.5 pr-8 outline-none focus:border-primary"
+                value={clienteFiltro}
+                onChange={(e) => setClienteFiltro(e.target.value)}
+              >
+                <option value="todos">📋 Todos os clientes</option>
+                {clientes.map(c => (
+                  <option key={c.id} value={c.id}>🏢 {c.nome}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+            </div>
+          </div>
+
+          <div className="lg:col-span-5">
+            <label className="mb-1 block text-xs font-medium text-slate-500">Buscar</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input 
+                type="text" 
+                placeholder="Buscar por nome do banco, cliente ou localização..." 
+                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-10 pr-4 outline-none focus:border-primary"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="lg:col-span-3 flex items-end gap-2">
+            <div className="flex-1 bg-primary/5 rounded-lg p-2 text-center">
+              <p className="text-[10px] text-slate-500">Potência Total</p>
+              <p className="text-lg font-bold text-primary">{stats.totalPotencia.toFixed(0)} kVAr</p>
+            </div>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setViewMode('cards')}
+                className={cn(
+                  "p-2 rounded-lg transition-colors",
+                  viewMode === 'cards' ? "bg-primary text-white" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                )}
+              >
+                <LayoutGrid size={18} />
+              </button>
+              <button
+                onClick={() => setViewMode('lista')}
+                className={cn(
+                  "p-2 rounded-lg transition-colors",
+                  viewMode === 'lista' ? "bg-primary text-white" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                )}
+              >
+                <List size={18} />
+              </button>
+            </div>
+          </div>
         </div>
-      ) : (
+      </div>
+
+      {/* Botão Novo Banco */}
+      <div className="flex justify-end">
+        <button 
+          onClick={() => handleOpenModal()}
+          className="flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-white font-medium transition-colors hover:bg-primary/90 shadow-md"
+        >
+          <Plus size={20} />
+          Novo Banco de Capacitores
+        </button>
+      </div>
+
+      {/* Grid/Lista de Bancos */}
+      {viewMode === 'cards' ? (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
           {filteredBancos.map((banco) => (
             <motion.div 
               key={banco.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="group relative rounded-xl bg-white p-6 shadow-sm border border-slate-100 transition-all hover:shadow-md"
+              className="group relative rounded-2xl bg-white p-6 shadow-sm border border-slate-100 transition-all hover:shadow-lg hover:border-primary/20"
             >
               <div className="mb-4 flex items-start justify-between">
-                <div className="rounded-lg bg-primary/10 p-2 text-primary">
+                <div className="rounded-xl bg-primary/10 p-3 text-primary">
                   <Database size={24} />
                 </div>
                 <div className="flex gap-1">
                   <button 
                     onClick={() => recalcularPotenciaBanco(banco.id, banco.nome_banco)}
                     disabled={calculando === banco.id}
-                    className="rounded p-1.5 text-green-600 hover:bg-green-50 transition-colors disabled:opacity-50"
+                    className="rounded-lg p-2 text-green-600 hover:bg-green-50 transition-colors disabled:opacity-50"
                     title="Recalcular potência total"
                   >
                     {calculando === banco.id ? (
@@ -441,14 +503,14 @@ export default function BancosPage() {
                   </button>
                   <button 
                     onClick={() => handleOpenModal(banco)}
-                    className="rounded p-1.5 text-blue-600 hover:bg-blue-50 transition-colors"
+                    className="rounded-lg p-2 text-blue-600 hover:bg-blue-50 transition-colors"
                     title="Editar"
                   >
                     <Edit2 size={16} />
                   </button>
                   <button 
                     onClick={() => handleDelete(banco.id)}
-                    className="rounded p-1.5 text-red-600 hover:bg-red-50 transition-colors"
+                    className="rounded-lg p-2 text-red-600 hover:bg-red-50 transition-colors"
                     title="Excluir"
                   >
                     <Trash2 size={16} />
@@ -476,52 +538,90 @@ export default function BancosPage() {
                 <div className="flex justify-between items-center pt-2 border-t border-slate-100">
                   <span className="flex items-center gap-1">
                     <Calculator size={12} />
-                    Potência Total:
+                    Potência:
                   </span>
                   <span className={cn(
-                    "font-bold",
+                    "font-bold text-lg",
                     banco.potencia_divergente ? "text-amber-600" : "text-primary"
                   )}>
                     {banco.potencia_calculada?.toFixed(1) || 0} kVAr
                   </span>
                 </div>
-                {banco.potencia_divergente && (
-                  <div className="text-xs text-amber-600 bg-amber-50 p-2 rounded-lg mt-1">
-                    ⚠️ Divergência: Digitado {banco.potencia_digitada} kVAr | Calculado {banco.potencia_calculada} kVAr
-                    <br />
-                    <button 
-                      onClick={() => recalcularPotenciaBanco(banco.id, banco.nome_banco)}
-                      className="text-primary underline text-[10px] mt-1"
-                    >
-                      Clique para corrigir automaticamente
-                    </button>
-                  </div>
-                )}
               </div>
 
               <button 
-                onClick={() => window.location.href = `/capacitores?banco_id=${banco.id}`}
-                className="mt-4 w-full text-center text-xs text-primary hover:underline"
+                onClick={() => handleVerCapacitores(banco.id)}
+                className="mt-5 w-full flex items-center justify-center gap-2 rounded-xl bg-primary/10 py-2.5 text-primary font-medium hover:bg-primary/20 transition-colors"
               >
-                Ver capacitores →
+                Ver Capacitores
+                <ArrowRight size={16} />
               </button>
             </motion.div>
           ))}
         </div>
+      ) : (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 text-sm font-medium text-slate-500">
+                <tr>
+                  <th className="px-6 py-4">Banco</th>
+                  <th className="px-6 py-4">Cliente</th>
+                  <th className="px-6 py-4">Localização</th>
+                  <th className="px-6 py-4">Tensão</th>
+                  <th className="px-6 py-4">Potência</th>
+                  <th className="px-6 py-4 text-center">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredBancos.map((banco) => (
+                  <tr key={banco.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-4 font-bold text-primary">{banco.nome_banco}</td>
+                    <td className="px-6 py-4">{banco.clientes?.nome}</td>
+                    <td className="px-6 py-4 text-slate-500">{banco.localizacao || '-'}</td>
+                    <td className="px-6 py-4">{banco.tensao_nominal || '-'} V</td>
+                    <td className="px-6 py-4 font-bold text-primary">{banco.potencia_calculada?.toFixed(0) || 0} kVAr</td>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex justify-center gap-2">
+                        <button 
+                          onClick={() => handleVerCapacitores(banco.id)}
+                          className="p-1.5 text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                          title="Ver capacitores"
+                        >
+                          <Eye size={18} />
+                        </button>
+                        <button 
+                          onClick={() => handleOpenModal(banco)}
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                        <button 
+                          onClick={() => handleDelete(banco.id)}
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {filteredBancos.length === 0 && !loading && (
-        <div className="py-12 text-center text-slate-400">
-          <Database size={48} className="mx-auto mb-3 opacity-50" />
-          <p>Nenhum banco encontrado</p>
-          {clienteFiltro !== 'todos' && (
-            <button 
-              onClick={() => setClienteFiltro('todos')}
-              className="mt-2 text-primary hover:underline"
-            >
-              Limpar filtro e ver todos os bancos
-            </button>
-          )}
+        <div className="py-16 text-center text-slate-400 bg-white rounded-2xl border border-slate-100">
+          <Database size={64} className="mx-auto mb-4 opacity-30" />
+          <p className="text-lg">Nenhum banco encontrado</p>
+          <button 
+            onClick={() => handleOpenModal()}
+            className="mt-4 text-primary hover:underline"
+          >
+            + Cadastrar primeiro banco
+          </button>
         </div>
       )}
 
@@ -608,21 +708,18 @@ export default function BancosPage() {
                   <div>
                     <label className="mb-1 block text-sm font-medium text-slate-700">
                       Potência Total (kVAr)
-                      <span className="text-xs text-slate-400 ml-1">(opcional - será calculada automaticamente)</span>
                     </label>
                     <input 
                       type="number" 
-                      placeholder="Ex: 150"
+                      placeholder="Calculada automaticamente"
                       className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary bg-slate-50"
                       value={formData.potencia_total_kvar}
                       onChange={(e) => setFormData({...formData, potencia_total_kvar: e.target.value})}
-                      disabled={!editingBanco}
+                      disabled
                     />
-                    {!editingBanco && (
-                      <p className="text-[10px] text-slate-400 mt-1">
-                        💡 A potência será calculada automaticamente após adicionar os capacitores
-                      </p>
-                    )}
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      💡 A potência será calculada automaticamente após adicionar os capacitores
+                    </p>
                   </div>
                 </div>
 
@@ -649,4 +746,114 @@ export default function BancosPage() {
       </AnimatePresence>
     </div>
   );
+
+  async function handleOpenModal(banco: any = null) {
+    if (banco) {
+      setEditingBanco(banco);
+      setFormData({
+        cliente_id: banco.cliente_id,
+        nome_banco: banco.nome_banco,
+        localizacao: banco.localizacao || '',
+        tensao_nominal: banco.tensao_nominal || '',
+        potencia_total_kvar: banco.potencia_calculada?.toString() || banco.potencia_total_kvar?.toString() || '',
+      });
+    } else {
+      setEditingBanco(null);
+      setFormData({
+        cliente_id: clienteFiltro !== 'todos' ? clienteFiltro : '',
+        nome_banco: '',
+        localizacao: '',
+        tensao_nominal: '',
+        potencia_total_kvar: '',
+      });
+    }
+    setIsModalOpen(true);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    
+    if (!formData.cliente_id) {
+      Swal.fire('Atenção', 'Selecione um cliente', 'warning');
+      return;
+    }
+    
+    try {
+      const data = {
+        cliente_id: formData.cliente_id,
+        nome_banco: formData.nome_banco,
+        localizacao: formData.localizacao || null,
+        tensao_nominal: formData.tensao_nominal ? parseNumber(formData.tensao_nominal) : null,
+        potencia_total_kvar: 0, // Começa com 0, será calculado depois
+      };
+
+      if (editingBanco) {
+        const { error } = await supabase
+          .from('bancos_capacitores')
+          .update(data)
+          .eq('id', editingBanco.id);
+        if (error) throw error;
+        Swal.fire('Sucesso', 'Banco atualizado com sucesso!', 'success');
+      } else {
+        const { error } = await supabase
+          .from('bancos_capacitores')
+          .insert([{ ...data, ativo: true }]);
+        if (error) throw error;
+        Swal.fire('Sucesso', 'Banco cadastrado com sucesso!', 'success');
+      }
+      setIsModalOpen(false);
+      fetchData();
+    } catch (error: any) {
+      Swal.fire('Erro', error.message, 'error');
+    }
+  }
+
+  async function handleDelete(id: string) {
+    const result = await Swal.fire({
+      title: 'Tem certeza?',
+      text: "O banco será desativado do sistema.",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#0a2b3c',
+      cancelButtonColor: '#e74c3c',
+      confirmButtonText: 'Sim, desativar',
+      cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        const { count: capacitoresCount } = await supabase
+          .from('capacitores')
+          .select('*', { count: 'exact', head: true })
+          .eq('banco_id', id)
+          .eq('ativo', true);
+        
+        if (capacitoresCount && capacitoresCount > 0) {
+          const confirm = await Swal.fire({
+            title: 'Atenção!',
+            text: `Este banco possui ${capacitoresCount} capacitor(es) vinculado(s). Desativar o banco irá desativar também seus capacitores. Deseja continuar?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#0a2b3c',
+            cancelButtonColor: '#e74c3c',
+            confirmButtonText: 'Sim, continuar',
+            cancelButtonText: 'Cancelar'
+          });
+          
+          if (!confirm.isConfirmed) return;
+        }
+        
+        const { error } = await supabase
+          .from('bancos_capacitores')
+          .update({ ativo: false })
+          .eq('id', id);
+        
+        if (error) throw error;
+        Swal.fire('Desativado!', 'Banco removido com sucesso.', 'success');
+        fetchData();
+      } catch (error: any) {
+        Swal.fire('Erro', error.message, 'error');
+      }
+    }
+  }
 }
