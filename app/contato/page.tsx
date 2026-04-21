@@ -224,7 +224,7 @@ export default function ContatoPage() {
                 </div>
                 <div>
                   <p className="text-xs text-slate-500">E-mail</p>
-                  <p className="text-sm font-medium">contato@jmeletroservice.com</p>
+                  <p className="text-sm font-medium">contato@jmeletroservice.com.br</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
