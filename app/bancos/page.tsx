@@ -32,6 +32,7 @@ export default function BancosPage() {
     potencia_total_kvar: '',
   });
   const [resumoCliente, setResumoCliente] = useState<any>(null);
+  const [eficienciaMedia, setEficienciaMedia] = useState<number | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -43,8 +44,98 @@ export default function BancosPage() {
     } else {
       setResumoCliente(null);
     }
+    // Recalcular eficiência quando o filtro mudar
+    calcularEficienciaMedia(clienteFiltro !== 'todos' ? clienteFiltro : undefined);
   }, [clienteFiltro, bancos]);
 
+  // ============================================
+  // FUNÇÃO PARA CALCULAR EFICIÊNCIA MÉDIA
+  // ============================================
+  async function calcularEficienciaMedia(clienteId?: string) {
+    try {
+      // Buscar todos os capacitores com suas últimas medições
+      let query = supabase
+        .from('capacitores')
+        .select(`
+          id,
+          potencia_kvar,
+          banco_id,
+          bancos_capacitores (
+            cliente_id,
+            nome_banco
+          ),
+          medicoes (
+            desvio_percentual,
+            status_validacao,
+            created_at
+          )
+        `)
+        .eq('ativo', true);
+
+      // Se tiver cliente filtrado, restringir aos bancos desse cliente
+      if (clienteId && clienteId !== 'todos') {
+        const { data: bancosDoCliente } = await supabase
+          .from('bancos_capacitores')
+          .select('id')
+          .eq('cliente_id', clienteId)
+          .eq('ativo', true);
+        
+        const bancosIds = bancosDoCliente?.map(b => b.id) || [];
+        if (bancosIds.length > 0) {
+          query = query.in('banco_id', bancosIds);
+        } else {
+          setEficienciaMedia(null);
+          return;
+        }
+      }
+
+      const { data: capacitores } = await query;
+
+      if (!capacitores || capacitores.length === 0) {
+        setEficienciaMedia(null);
+        return;
+      }
+
+      let totalPotenciaNominal = 0;
+      let totalPotenciaEfetiva = 0;
+
+      for (const cap of capacitores) {
+        const potenciaNominal = cap.potencia_kvar || 0;
+        totalPotenciaNominal += potenciaNominal;
+
+        // Obter a última medição (mais recente)
+        const medicoes = cap.medicoes || [];
+        if (medicoes.length === 0) {
+          // Sem medição, consideramos 100% (aprovado)
+          totalPotenciaEfetiva += potenciaNominal;
+          continue;
+        }
+
+        const ultimaMedicao = [...medicoes].sort((a: any, b: any) => 
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )[0];
+
+        const status = ultimaMedicao.status_validacao;
+        let fator = 1; // aprovado
+        if (status === 'atencao') fator = 0.7;
+        else if (status === 'reprovado') fator = 0;
+
+        totalPotenciaEfetiva += potenciaNominal * fator;
+      }
+
+      const eficiencia = totalPotenciaNominal > 0 
+        ? (totalPotenciaEfetiva / totalPotenciaNominal) * 100 
+        : 0;
+      setEficienciaMedia(eficiencia);
+    } catch (error) {
+      console.error('Erro ao calcular eficiência:', error);
+      setEficienciaMedia(null);
+    }
+  }
+
+  // ============================================
+  // FUNÇÃO PARA CARREGAR RESUMO DO CLIENTE
+  // ============================================
   async function carregarResumoCliente() {
     if (clienteFiltro === 'todos') return;
     
@@ -58,6 +149,9 @@ export default function BancosPage() {
     });
   }
 
+  // ============================================
+  // FETCH PRINCIPAL
+  // ============================================
   async function fetchData() {
     try {
       setLoading(true);
@@ -116,6 +210,9 @@ export default function BancosPage() {
         .order('nome');
 
       setClientes(clientesData || []);
+
+      // Calcular eficiência com o filtro atual (se houver)
+      await calcularEficienciaMedia(clienteFiltro !== 'todos' ? clienteFiltro : undefined);
     } catch (error) {
       console.error('Error:', error);
       Swal.fire('Erro', 'Não foi possível carregar os dados', 'error');
@@ -124,6 +221,9 @@ export default function BancosPage() {
     }
   }
 
+  // ============================================
+  // RECALCULAR POTÊNCIA DE UM BANCO
+  // ============================================
   async function recalcularPotenciaBanco(bancoId: string, bancoNome: string) {
     setCalculando(bancoId);
     try {
@@ -166,6 +266,9 @@ export default function BancosPage() {
     }
   }
 
+  // ============================================
+  // FILTRO E ESTATÍSTICAS
+  // ============================================
   const filteredBancos = useMemo(() => {
     let filtered = [...bancos];
     if (clienteFiltro !== 'todos') {
@@ -188,6 +291,9 @@ export default function BancosPage() {
     clientesAtendidos: new Set(filteredBancos.map(b => b.cliente_id)).size,
   };
 
+  // ============================================
+  // HANDLERS DO MODAL
+  // ============================================
   function handleOpenModal(banco: any = null) {
     if (banco) {
       setEditingBanco(banco);
@@ -300,6 +406,9 @@ export default function BancosPage() {
 
   const clienteSelecionado = clientes.find(c => c.id === clienteFiltro);
 
+  // ============================================
+  // RENDER
+  // ============================================
   if (loading) {
     return (
       <div className="space-y-8 pb-12">
@@ -380,7 +489,9 @@ export default function BancosPage() {
             </div>
             <span className="text-xs font-medium text-slate-500 uppercase">Eficiência Média</span>
           </div>
-          <p className="text-3xl font-bold text-primary">--%</p>
+          <p className="text-3xl font-bold text-primary">
+            {eficienciaMedia !== null ? `${eficienciaMedia.toFixed(1)}%` : '--%'}
+          </p>
           <p className="text-xs text-slate-400 mt-1">do sistema</p>
         </div>
       </div>
@@ -623,7 +734,7 @@ export default function BancosPage() {
                         </button>
                       </div>
                     </td>
-                   </tr>
+                  </tr>
                 ))}
               </tbody>
             </table>
