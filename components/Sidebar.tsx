@@ -38,7 +38,6 @@ const menuItems = [
   { name: 'Gráficos', href: '/graficos', icon: BarChart3, badge: null },
   { name: 'Histórico', href: '/historico', icon: History, badge: null },
   { name: 'Memória de Massa', href: '/analise-fatura', icon: Activity, badge: null },
-  { name: 'EnergyWise', href: '/energywise', icon: Zap, badge: null },
   { name: 'Relatórios', href: '/relatorios', icon: FileText, badge: null },
   { name: 'Manutenção Preditiva', href: '/manutencao', icon: Wrench, badge: 'Premium' },
   { name: 'Configurações', href: '/configuracoes', icon: Settings, badge: null },
