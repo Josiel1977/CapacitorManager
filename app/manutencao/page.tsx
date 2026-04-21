@@ -11,9 +11,10 @@ import {
 import { supabase } from '@/lib/supabase';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
 
 // ============================================
-// FUNÇÕES DE CÁLCULO (MESMAS DO RELATÓRIO/VALIDAÇÃO)
+// FUNÇÕES DE CÁLCULO
 // ============================================
 
 function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
@@ -25,7 +26,6 @@ function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): numb
     return capacitanciaNominalFase * 1.5;
 }
 
-// MESMA função de validação usada em TODO o sistema
 function getStatusValidacao(desvio: number): string {
     if (desvio >= -5 && desvio <= 10) return 'aprovado';
     if (desvio >= -10 && desvio < -5) return 'atencao';
@@ -33,7 +33,6 @@ function getStatusValidacao(desvio: number): string {
     return 'reprovado';
 }
 
-// Função para calcular tendência de degradação
 function calcularTendenciaCapacitor(medicoes: any[]) {
     if (medicoes.length < 2) return null;
     
@@ -65,25 +64,19 @@ function calcularTendenciaCapacitor(medicoes: any[]) {
     };
 }
 
-// ============================================
-// FUNÇÕES DE CÁLCULO DE INEFICIÊNCIA (BASEADA NO STATUS DE VALIDAÇÃO)
-// ============================================
-
-// Calcular potência efetiva baseada no STATUS de validação, NÃO no desvio absoluto
 function calcularPotenciaEfetivaPorStatus(potenciaNominal: number, statusValidacao: string): number {
     switch (statusValidacao) {
         case 'aprovado':
-            return potenciaNominal; // 100% da potência
+            return potenciaNominal;
         case 'atencao':
-            return potenciaNominal * 0.7; // 70% da potência (perda de 30%)
+            return potenciaNominal * 0.7;
         case 'reprovado':
-            return 0; // 0% da potência - precisa substituir
+            return 0;
         default:
             return potenciaNominal;
     }
 }
 
-// Calcular custo estimado da ineficiência (R$/mês)
 function calcularCustoIneficiencia(perdaKvar: number, tarifaReferencia: number = 0.95): number {
   const horasDia = 8;
   const diasMes = 30;
@@ -101,7 +94,7 @@ interface CapacitorManutencao {
   tensao_nominal_v: number;
   capacitancia_nominal_uf: number;
   ultimo_desvio: number;
-  status_validacao: string; // 'aprovado', 'atencao', 'reprovado'
+  status_validacao: string;
   ultima_data: string;
   tendencia: 'piorando' | 'melhorando' | 'estavel';
   previsao_meses: string | null;
@@ -137,6 +130,7 @@ interface ClienteResumo {
 }
 
 export default function ManutencaoPage() {
+  const router = useRouter();
   const [capacitores, setCapacitores] = useState<CapacitorManutencao[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'todos' | 'reprovado' | 'atencao'>('todos');
@@ -218,14 +212,12 @@ export default function ManutencaoPage() {
       const clientesMap = new Map();
       clientesData?.forEach(c => clientesMap.set(c.id, c.nome));
 
-      // Processar cada capacitor
       const processedData: CapacitorManutencao[] = [];
 
       for (const cap of capacitoresData) {
         const medicoes = cap.medicoes || [];
         if (medicoes.length === 0) continue;
 
-        // Ordenar medições por data (mais recente primeiro)
         const medicoesOrdenadas = [...medicoes].sort((a, b) => {
           const dateA = a.data_medicao || a.created_at;
           const dateB = b.data_medicao || b.created_at;
@@ -236,7 +228,6 @@ export default function ManutencaoPage() {
         let desvio = ultimaMedicao.desvio_percentual || 0;
         let status = ultimaMedicao.status_validacao || 'atencao';
         
-        // Recalcular desvio e status se necessário (para consistência)
         if (ultimaMedicao.tipo_teste === 'corrente' && ultimaMedicao.corrente_medida_a && cap.tensao_nominal_v && cap.potencia_kvar) {
           const correnteTeorica = calcularCorrenteTeorica(cap.potencia_kvar, cap.tensao_nominal_v);
           if (correnteTeorica > 0) {
@@ -251,23 +242,22 @@ export default function ManutencaoPage() {
           }
         }
         
-        // Calcular tendência
         const tendenciaData = calcularTendenciaCapacitor(medicoesOrdenadas);
         
-        // Calcular potência efetiva baseada no STATUS de validação
         const potenciaEfetiva = calcularPotenciaEfetivaPorStatus(cap.potencia_kvar || 0, status);
         const perdaKvar = (cap.potencia_kvar || 0) - potenciaEfetiva;
         const eficiencia = (potenciaEfetiva / (cap.potencia_kvar || 1)) * 100;
         
         const bancoInfo = bancosMap.get(cap.banco_id);
         const clienteId = bancoInfo?.cliente_id;
+        const clienteNome = clientesMap.get(clienteId) || 'N/A';
         
         processedData.push({
           id: cap.id,
           codigo: cap.codigo_identificacao || 'N/A',
           banco: bancoInfo?.nome || 'N/A',
           banco_id: cap.banco_id || '',
-          cliente: clientesMap.get(clienteId) || 'N/A',
+          cliente: clienteNome,
           cliente_id: clienteId || '',
           potencia_kvar: cap.potencia_kvar || 0,
           tensao_nominal_v: cap.tensao_nominal_v || 0,
@@ -288,10 +278,7 @@ export default function ManutencaoPage() {
 
       setCapacitores(processedData);
 
-      // ============================================
-      // CALCULAR RESUMO POR CLIENTE
-      // ============================================
-      
+      // Calcular resumo por cliente
       const clientesResumo: Map<string, ClienteResumo> = new Map();
 
       for (const cap of processedData) {
@@ -320,7 +307,6 @@ export default function ManutencaoPage() {
         else if (cap.status_validacao === 'reprovado') resumo.reprovados++;
       }
 
-      // Adicionar informações de bancos por cliente
       for (const [clienteId, resumo] of clientesResumo) {
         const bancosDoCliente = new Map();
         for (const cap of processedData.filter(c => c.cliente_id === clienteId)) {
@@ -356,7 +342,6 @@ export default function ManutencaoPage() {
       const resumoArray = Array.from(clientesResumo.values()).filter(r => r.total_kvar_instalado > 0);
       setResumoClientes(resumoArray);
 
-      // Selecionar resumo do cliente filtrado
       if (clienteFiltro !== 'todos') {
         const clienteResumo = resumoArray.find(r => r.id === clienteFiltro);
         setClienteSelecionadoResumo(clienteResumo || null);
@@ -368,7 +353,7 @@ export default function ManutencaoPage() {
       console.error('Erro ao buscar dados:', error);
       Swal.fire({
         title: 'Erro',
-        text: 'Não foi possível carregar os dados. Verifique sua conexão.',
+        text: 'Não foi possível carregar os dados.',
         icon: 'error',
         confirmButtonColor: '#0a2b3c'
       });
@@ -377,12 +362,10 @@ export default function ManutencaoPage() {
     }
   }
 
-  // Recarregar quando o filtro de cliente mudar
   useEffect(() => {
     fetchDadosManutencao();
   }, [clienteFiltro]);
 
-  // Filtrar capacitores por status
   const filteredCapacitores = capacitores.filter(cap => {
     if (clienteFiltro !== 'todos' && cap.cliente_id !== clienteFiltro) return false;
     if (filter === 'reprovado') return cap.status_validacao === 'reprovado';
@@ -394,7 +377,6 @@ export default function ManutencaoPage() {
   const atencao = capacitores.filter(c => c.status_validacao === 'atencao').length;
   const aprovados = capacitores.filter(c => c.status_validacao === 'aprovado').length;
 
-  // Top 5 capacitores com maior perda de eficiência
   const topPerdaEficiencia = [...capacitores]
     .filter(c => (clienteFiltro === 'todos' || c.cliente_id === clienteFiltro) && c.status_validacao !== 'aprovado')
     .sort((a, b) => b.perda_kvar - a.perda_kvar)
@@ -514,15 +496,23 @@ export default function ManutencaoPage() {
               <h2 className="text-2xl font-bold text-primary">{clienteSelecionadoResumo.nome}</h2>
               <p className="text-slate-500">Análise completa baseada nas validações técnicas</p>
             </div>
-            <button
-              onClick={() => setClienteFiltro('todos')}
-              className="text-sm text-primary hover:underline flex items-center gap-1"
-            >
-              Ver todos os clientes →
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => router.push(`/capacitores?cliente_id=${clienteFiltro}`)}
+                className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition-colors"
+              >
+                <Eye size={16} />
+                Ver todos os capacitores
+              </button>
+              <button
+                onClick={() => setClienteFiltro('todos')}
+                className="text-sm text-primary hover:underline"
+              >
+                Voltar
+              </button>
+            </div>
           </div>
 
-          {/* Cards de resumo do cliente */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
             <div className="bg-white rounded-xl p-4 text-center">
               <p className="text-xs text-slate-500">kVAr Instalado</p>
@@ -546,7 +536,6 @@ export default function ManutencaoPage() {
             </div>
           </div>
 
-          {/* Barra de eficiência */}
           <div className="mb-6">
             <div className="flex justify-between text-sm mb-1">
               <span>Eficiência do Sistema</span>
@@ -564,7 +553,6 @@ export default function ManutencaoPage() {
             </div>
           </div>
 
-          {/* Detalhamento por Banco */}
           <div>
             <h3 className="font-bold text-primary mb-3 flex items-center gap-2">
               <Database size={16} />
@@ -599,11 +587,11 @@ export default function ManutencaoPage() {
                         )}>
                           {banco.deficiencia > 20 ? "Crítico" : banco.deficiencia > 10 ? "Atenção" : "Normal"}
                         </span>
-                       </td>
+                      </td>
                       <td className="px-4 py-2 text-green-600">{banco.aprovados}</td>
                       <td className="px-4 py-2 text-amber-600">{banco.atencao}</td>
                       <td className="px-4 py-2 text-red-600">{banco.reprovados}</td>
-                     </tr>
+                    </tr>
                   ))}
                 </tbody>
               </table>
