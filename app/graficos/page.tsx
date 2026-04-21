@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
-import { BarChart3, TrendingUp, AlertCircle, Zap, Download, Calendar, TrendingDown, Activity, FileText } from 'lucide-react';
+import { BarChart3, TrendingUp, AlertCircle, Zap, Download, Calendar, TrendingDown, Activity, FileText, Filter, ChevronDown } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { toPng } from 'html-to-image';
 import {
@@ -71,12 +71,18 @@ export default function GraficosPage() {
   useEffect(() => {
     const loadBancos = async () => {
       if (selection.cliente_id) {
-        const { data } = await supabase.from('bancos_capacitores').select('id, nome_banco').eq('cliente_id', selection.cliente_id).eq('ativo', true).order('nome_banco');
+        const { data } = await supabase
+          .from('bancos_capacitores')
+          .select('id, nome_banco')
+          .eq('cliente_id', selection.cliente_id)
+          .eq('ativo', true)
+          .order('nome_banco');
         setBancos(data || []);
       } else {
         setBancos([]);
         setSelection(s => ({ ...s, banco_id: '' }));
         setSelectedCapacitor('');
+        setCapacitores([]);
       }
     };
     loadBancos();
@@ -85,7 +91,12 @@ export default function GraficosPage() {
   useEffect(() => {
     const loadCapacitores = async () => {
       if (selection.banco_id) {
-        const { data } = await supabase.from('capacitores').select('*, bancos_capacitores(nome_banco, cliente_id)').eq('banco_id', selection.banco_id).eq('ativo', true).order('codigo_identificacao');
+        const { data } = await supabase
+          .from('capacitores')
+          .select('*, bancos_capacitores(nome_banco, cliente_id)')
+          .eq('banco_id', selection.banco_id)
+          .eq('ativo', true)
+          .order('codigo_identificacao');
         setCapacitores(data || []);
       } else {
         setCapacitores([]);
@@ -154,7 +165,6 @@ export default function GraficosPage() {
               if (desvioFinal === null || desvioFinal === undefined) {
                 if (cap.capacitancia_nominal_uf) {
                   const teorico = calcularCapacitanciaTeoricaDelta(cap.capacitancia_nominal_uf);
-                  // Simular se não tiver medição
                   desvioFinal = 0;
                 }
               }
@@ -348,7 +358,6 @@ export default function GraficosPage() {
     try {
       Swal.fire({ title: 'Exportando...', text: 'Aguarde', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
       
-      // Forçar visibilidade dos elementos do PDF durante a captura
       const header = document.querySelector('.pdf-header') as HTMLElement;
       const footer = document.querySelector('.pdf-footer') as HTMLElement;
       if (header) header.style.display = 'flex';
@@ -356,7 +365,6 @@ export default function GraficosPage() {
 
       const canvas = chartRef.current.toBase64Image();
       
-      // Restaurar estado original
       if (header) header.style.display = 'none';
       if (footer) footer.style.display = 'none';
 
@@ -386,7 +394,6 @@ export default function GraficosPage() {
         }
       });
 
-      // Tornar elementos do PDF visíveis antes de capturar
       const header = reportRef.current.querySelector('.pdf-header') as HTMLElement;
       const footer = reportRef.current.querySelector('.pdf-footer') as HTMLElement;
       if (header) header.style.display = 'flex';
@@ -405,7 +412,6 @@ export default function GraficosPage() {
         }
       });
 
-      // Esconder novamente os elementos
       if (header) header.style.display = 'none';
       if (footer) footer.style.display = 'none';
       
@@ -442,7 +448,7 @@ export default function GraficosPage() {
 
   return (
     <div className="space-y-8">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-3xl font-bold text-primary">Análise Gráfica</h1>
           <p className="text-slate-500">Acompanhe a evolução, tendência e compare capacitores</p>
@@ -459,7 +465,7 @@ export default function GraficosPage() {
       </header>
 
       {/* Selectors */}
-      <div className="rounded-xl bg-white p-6 shadow-sm">
+      <div className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Cliente</label>
@@ -468,7 +474,7 @@ export default function GraficosPage() {
               value={selection.cliente_id}
               onChange={(e) => setSelection({...selection, cliente_id: e.target.value})}
             >
-              <option value="">Selecione...</option>
+              <option value="">Selecione um cliente...</option>
               {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
             </select>
           </div>
@@ -480,7 +486,7 @@ export default function GraficosPage() {
               value={selection.banco_id}
               onChange={(e) => setSelection({...selection, banco_id: e.target.value})}
             >
-              <option value="">Selecione...</option>
+              <option value="">Selecione um banco...</option>
               {bancos.map(b => <option key={b.id} value={b.id}>{b.nome_banco}</option>)}
             </select>
           </div>
@@ -492,7 +498,7 @@ export default function GraficosPage() {
               value={selectedCapacitor}
               onChange={(e) => setSelectedCapacitor(e.target.value)}
             >
-              <option value="">Selecione...</option>
+              <option value="">Selecione um capacitor...</option>
               {capacitores.map(c => <option key={c.id} value={c.id}>{c.codigo_identificacao} ({c.tensao_nominal_v}V - {c.potencia_kvar}kVAr)</option>)}
             </select>
           </div>
@@ -504,207 +510,207 @@ export default function GraficosPage() {
           <div 
             id="graphics-report-container" 
             ref={reportRef}
-            className="bg-white p-12 shadow-2xl space-y-8"
+            className="bg-white p-8 shadow-2xl space-y-8"
             style={{ width: '794px', minHeight: '1122px' }}
           >
-            {/* Header para o PDF (Visível apenas no PDF via onclone ou se quisermos manter no preview) */}
-          <div className="hidden pdf-header mb-8 flex flex-row items-center justify-between border-b-4 pb-8 gap-4" style={{ borderColor: '#EAB308', backgroundColor: '#0f172a', margin: '-24px -24px 24px -24px', padding: '24px' }}>
-            <div className="flex items-center gap-4">
-              <div className="rounded-2xl p-3 text-primary" style={{ backgroundColor: '#EAB308' }}>
-                <Zap size={32} className="text-slate-900" />
-              </div>
-              <div>
-                <h2 className="text-2xl font-black tracking-tighter uppercase" style={{ color: '#ffffff' }}>
-                  CAPACITOR<span style={{ color: '#EAB308' }}>MANAGER</span>
-                </h2>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Análise Gráfica e Tendência Técnica</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <p className="text-[10px] font-bold text-slate-500">DATA DE EMISSÃO</p>
-              <p className="text-sm font-bold text-white">{new Date().toLocaleDateString('pt-BR')}</p>
-            </div>
-          </div>
-
-          {/* Informações do Capacitor */}
-          <div className="rounded-xl bg-gradient-to-r from-primary to-primary-light p-6 text-white shadow-sm">
-            <div className="flex flex-wrap justify-between items-center gap-4">
-              <div>
-                <h2 className="text-2xl font-bold">{selectedCapacitorData.codigo_identificacao}</h2>
-                <p className="text-white/70">{selectedCapacitorData.bancos_capacitores?.nome_banco}</p>
-              </div>
-              <div className="flex gap-6">
-                <div className="text-center">
-                  <p className="text-xs text-white/50">TENSÃO</p>
-                  <p className="text-xl font-bold">{selectedCapacitorData.tensao_nominal_v}V</p>
+            {/* Header para o PDF */}
+            <div className="pdf-header hidden mb-8 flex flex-row items-center justify-between border-b-4 pb-8 gap-4" style={{ borderColor: '#EAB308', backgroundColor: '#0f172a', margin: '-24px -24px 24px -24px', padding: '24px' }}>
+              <div className="flex items-center gap-4">
+                <div className="rounded-2xl p-3 text-primary" style={{ backgroundColor: '#EAB308' }}>
+                  <Zap size={32} className="text-slate-900" />
                 </div>
-                <div className="text-center">
-                  <p className="text-xs text-white/50">POTÊNCIA</p>
-                  <p className="text-xl font-bold">{selectedCapacitorData.potencia_kvar} kVAr</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-white/50">CAPACITÂNCIA</p>
-                  <p className="text-xl font-bold">{selectedCapacitorData.capacitancia_nominal_uf} µF</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-            {/* Main Chart */}
-            <div className="lg:col-span-2 rounded-xl bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
                 <div>
-                  <h2 className="text-xl font-bold text-primary">Evolução do Desvio</h2>
-                  <p className="text-xs text-slate-400">Linhas vermelhas indicam os limites de tolerância (-5% e +10%)</p>
+                  <h2 className="text-2xl font-black tracking-tighter uppercase" style={{ color: '#ffffff' }}>
+                    CAPACITOR<span style={{ color: '#EAB308' }}>MANAGER</span>
+                  </h2>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Análise Gráfica e Tendência Técnica</p>
                 </div>
-                <button 
-                  onClick={exportarGrafico}
-                  className="flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200"
-                >
-                  <Download size={16} />
-                  Exportar
-                </button>
               </div>
-              <div className="h-[400px]">
-                {history.length > 0 ? (
-                  <Line ref={chartRef} data={chartData} options={chartOptions} />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-slate-400">
-                    Nenhuma medição encontrada para este capacitor
-                  </div>
-                )}
+              <div className="text-right">
+                <p className="text-[10px] font-bold text-slate-500">DATA DE EMISSÃO</p>
+                <p className="text-sm font-bold text-white">{new Date().toLocaleDateString('pt-BR')}</p>
               </div>
             </div>
 
-            {/* Analysis Sidebar */}
-            <div className="space-y-6">
-              <section className="rounded-xl bg-white p-6 shadow-sm">
-                <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-primary">
-                  <TrendingUp size={20} className="text-secondary" />
-                  Análise de Tendência
-                </h3>
-                
-                {history.length >= 2 ? (
-                  <div className="space-y-6">
-                    <div className="rounded-lg bg-slate-50 p-4">
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Degradação Total</p>
-                      <p className={cn(
-                        "text-2xl font-black",
-                        degradation > 10 ? "text-red-600" : degradation > 5 ? "text-amber-600" : "text-green-600"
-                      )}>
-                        {degradation > 0 ? '+' : ''}{degradation?.toFixed(2)}%
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">Comparação entre 1ª e última medição</p>
-                    </div>
+            {/* Informações do Capacitor */}
+            <div className="rounded-xl bg-gradient-to-r from-primary to-primary-light p-6 text-white shadow-sm">
+              <div className="flex flex-wrap justify-between items-center gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold">{selectedCapacitorData.codigo_identificacao}</h2>
+                  <p className="text-white/70">{selectedCapacitorData.bancos_capacitores?.nome_banco}</p>
+                </div>
+                <div className="flex gap-6">
+                  <div className="text-center">
+                    <p className="text-xs text-white/50">TENSÃO</p>
+                    <p className="text-xl font-bold">{selectedCapacitorData.tensao_nominal_v}V</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-white/50">POTÊNCIA</p>
+                    <p className="text-xl font-bold">{selectedCapacitorData.potencia_kvar} kVAr</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-white/50">CAPACITÂNCIA</p>
+                    <p className="text-xl font-bold">{selectedCapacitorData.capacitancia_nominal_uf} µF</p>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-                    <div className="rounded-lg bg-slate-50 p-4">
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Degradação Mensal</p>
-                      <p className={cn(
-                        "text-xl font-bold",
-                        degradacaoMensal > 2 ? "text-red-600" : degradacaoMensal > 1 ? "text-amber-600" : "text-green-600"
-                      )}>
-                        {degradacaoMensal > 0 ? '+' : ''}{degradacaoMensal?.toFixed(2)}% / mês
-                      </p>
+            <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+              {/* Main Chart */}
+              <div className="lg:col-span-2 rounded-xl bg-white p-6 shadow-sm border border-slate-100">
+                <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-primary">Evolução do Desvio</h2>
+                    <p className="text-xs text-slate-400">Linhas vermelhas indicam os limites de tolerância (-5% e +10%)</p>
+                  </div>
+                  <button 
+                    onClick={exportarGrafico}
+                    className="flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200"
+                  >
+                    <Download size={16} />
+                    Exportar
+                  </button>
+                </div>
+                <div className="h-[400px]">
+                  {history.length > 0 ? (
+                    <Line ref={chartRef} data={chartData} options={chartOptions} />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-slate-400">
+                      Nenhuma medição encontrada para este capacitor
                     </div>
+                  )}
+                </div>
+              </div>
 
-                    {previsao && previsao.atingir15 && previsao.atingir15 > 0 && (
-                      <div className="rounded-lg bg-amber-50 p-4 border border-amber-200">
-                        <p className="text-xs font-bold uppercase tracking-wider text-amber-600">Previsão de Substituição</p>
-                        <p className="text-xl font-bold text-amber-700">~{previsao.atingir15} meses</p>
-                        <p className="text-xs text-amber-600 mt-1">Baseado na tendência atual de degradação</p>
+              {/* Analysis Sidebar */}
+              <div className="space-y-6">
+                <section className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
+                  <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-primary">
+                    <TrendingUp size={20} className="text-secondary" />
+                    Análise de Tendência
+                  </h3>
+                  
+                  {history.length >= 2 ? (
+                    <div className="space-y-6">
+                      <div className="rounded-lg bg-slate-50 p-4">
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Degradação Total</p>
+                        <p className={cn(
+                          "text-2xl font-black",
+                          degradation > 10 ? "text-red-600" : degradation > 5 ? "text-amber-600" : "text-green-600"
+                        )}>
+                          {degradation > 0 ? '+' : ''}{degradation?.toFixed(2)}%
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">Comparação entre 1ª e última medição</p>
                       </div>
-                    )}
 
-                    {degradation > 10 && (
-                      <div className="flex gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-red-600">
-                        <AlertCircle className="shrink-0" size={20} />
-                        <div>
-                          <p className="text-sm font-bold">Alerta de Degradação!</p>
-                          <p className="text-xs">A degradação ultrapassou 10%. Recomenda-se substituição preventiva.</p>
+                      <div className="rounded-lg bg-slate-50 p-4">
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Degradação Mensal</p>
+                        <p className={cn(
+                          "text-xl font-bold",
+                          degradacaoMensal > 2 ? "text-red-600" : degradacaoMensal > 1 ? "text-amber-600" : "text-green-600"
+                        )}>
+                          {degradacaoMensal > 0 ? '+' : ''}{degradacaoMensal?.toFixed(2)}% / mês
+                        </p>
+                      </div>
+
+                      {previsao && previsao.atingir15 && previsao.atingir15 > 0 && (
+                        <div className="rounded-lg bg-amber-50 p-4 border border-amber-200">
+                          <p className="text-xs font-bold uppercase tracking-wider text-amber-600">Previsão de Substituição</p>
+                          <p className="text-xl font-bold text-amber-700">~{previsao.atingir15} meses</p>
+                          <p className="text-xs text-amber-600 mt-1">Baseado na tendência atual de degradação</p>
+                        </div>
+                      )}
+
+                      {degradation > 10 && (
+                        <div className="flex gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-red-600">
+                          <AlertCircle className="shrink-0" size={20} />
+                          <div>
+                            <p className="text-sm font-bold">Alerta de Degradação!</p>
+                            <p className="text-xs">A degradação ultrapassou 10%. Recomenda-se substituição preventiva.</p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-3 border-t border-slate-100 pt-4">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-500">Primeira Medição:</span>
+                          <span className="font-medium">{new Date(firstMed.created_at).toLocaleDateString()}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-500">Última Medição:</span>
+                          <span className="font-medium">{new Date(lastMed.created_at).toLocaleDateString()}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-500">Total de Testes:</span>
+                          <span className="font-medium">{history.length}</span>
                         </div>
                       </div>
-                    )}
-
-                    <div className="space-y-3 border-t border-slate-100 pt-4">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-500">Primeira Medição:</span>
-                        <span className="font-medium">{new Date(firstMed.created_at).toLocaleDateString()}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-500">Última Medição:</span>
-                        <span className="font-medium">{new Date(lastMed.created_at).toLocaleDateString()}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-500">Total de Testes:</span>
-                        <span className="font-medium">{history.length}</span>
-                      </div>
                     </div>
+                  ) : (
+                    <p className="text-center text-sm text-slate-400 py-8">
+                      São necessárias pelo menos 2 medições para análise de tendência.
+                    </p>
+                  )}
+                </section>
+
+                <section className="rounded-xl bg-primary p-6 text-white shadow-sm">
+                  <div className="mb-4 flex items-center gap-2">
+                    <Zap className="text-secondary" size={20} />
+                    <h3 className="font-bold">Info do Capacitor</h3>
                   </div>
-                ) : (
-                  <p className="text-center text-sm text-slate-400 py-8">
-                    São necessárias pelo menos 2 medições para análise de tendência.
-                  </p>
-                )}
-              </section>
-
-              <section className="rounded-xl bg-primary p-6 text-white shadow-sm">
-                <div className="mb-4 flex items-center gap-2">
-                  <Zap className="text-secondary" size={20} />
-                  <h3 className="font-bold">Info do Capacitor</h3>
-                </div>
-                <div className="space-y-2 text-sm text-white/70">
-                  <p>• Tensão: {selectedCapacitorData.tensao_nominal_v}V</p>
-                  <p>• Potência: {selectedCapacitorData.potencia_kvar} kVAr</p>
-                  <p>• Capacitância: {selectedCapacitorData.capacitancia_nominal_uf} µF</p>
-                  <p className="mt-3">Mantenha os testes em dia para garantir a eficiência energética do banco.</p>
-                </div>
-              </section>
-            </div>
-          </div>
-
-          {/* Previsão Futura */}
-          {previsao && history.length >= 3 && (
-            <div className="rounded-xl bg-white p-6 shadow-sm">
-              <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-primary">
-                <Calendar size={20} className="text-secondary" />
-                Projeção Futura
-              </h3>
-              <div className="h-[300px]">
-                <Line data={chartDataPrevisao!} options={chartOptions} />
+                  <div className="space-y-2 text-sm text-white/70">
+                    <p>• Tensão: {selectedCapacitorData.tensao_nominal_v}V</p>
+                    <p>• Potência: {selectedCapacitorData.potencia_kvar} kVAr</p>
+                    <p>• Capacitância: {selectedCapacitorData.capacitancia_nominal_uf} µF</p>
+                    <p className="mt-3">Mantenha os testes em dia para garantir a eficiência energética do banco.</p>
+                  </div>
+                </section>
               </div>
-              <p className="mt-4 text-center text-xs text-slate-400">
-                * Projeção baseada em regressão linear das últimas {history.length} medições. 
-                {previsao.tendencia === 'alta' ? ' Tendência de degradação acelerada detectada.' : ' Tendência de degradação controlada.'}
-              </p>
             </div>
-          )}
 
-          {/* Comparação com outros capacitores do mesmo banco */}
-          {comparacaoCapacitores.length > 1 && (
-            <div className="rounded-xl bg-white p-6 shadow-sm">
-              <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-primary">
-                <BarChart3 size={20} className="text-secondary" />
-                Comparação com outros capacitores do banco
-              </h3>
-              <div className="h-[300px]">
-                <Bar data={comparacaoChartData} options={comparacaoOptions} />
+            {/* Previsão Futura */}
+            {previsao && history.length >= 3 && (
+              <div className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
+                <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-primary">
+                  <Calendar size={20} className="text-secondary" />
+                  Projeção Futura
+                </h3>
+                <div className="h-[300px]">
+                  <Line data={chartDataPrevisao!} options={chartOptions} />
+                </div>
+                <p className="mt-4 text-center text-xs text-slate-400">
+                  * Projeção baseada em regressão linear das últimas {history.length} medições. 
+                  {previsao.tendencia === 'alta' ? ' Tendência de degradação acelerada detectada.' : ' Tendência de degradação controlada.'}
+                </p>
               </div>
-              <p className="mt-4 text-center text-xs text-slate-400">
-                * Barras verdes: dentro da tolerância | Amarelas: atenção | Vermelhas: reprovado
-              </p>
-            </div>
-          )}
+            )}
 
-          {/* Footer para o PDF */}
-          <div className="hidden pdf-footer mt-auto border-t-4 pt-8 text-center" style={{ borderColor: '#EAB308', backgroundColor: '#f8fafc', margin: '24px -24px -24px -24px', padding: '24px' }}>
-            <p className="text-xs font-bold text-slate-700">Este documento é uma análise gráfica técnica oficial gerada pelo sistema CapacitorManager.</p>
-            <p className="text-[10px] text-slate-600 mt-2 font-medium">JM ELETRO SERVICE | contato@jmeletroservice.com.br</p>
-          </div>
+            {/* Comparação com outros capacitores do mesmo banco */}
+            {comparacaoCapacitores.length > 1 && (
+              <div className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
+                <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-primary">
+                  <BarChart3 size={20} className="text-secondary" />
+                  Comparação com outros capacitores do banco
+                </h3>
+                <div className="h-[300px]">
+                  <Bar data={comparacaoChartData} options={comparacaoOptions} />
+                </div>
+                <p className="mt-4 text-center text-xs text-slate-400">
+                  * Barras verdes: dentro da tolerância | Amarelas: atenção | Vermelhas: reprovado
+                </p>
+              </div>
+            )}
+
+            {/* Footer para o PDF */}
+            <div className="pdf-footer hidden mt-auto border-t-4 pt-8 text-center" style={{ borderColor: '#EAB308', backgroundColor: '#f8fafc', margin: '24px -24px -24px -24px', padding: '24px' }}>
+              <p className="text-xs font-bold text-slate-700">Este documento é uma análise gráfica técnica oficial gerada pelo sistema CapacitorManager.</p>
+              <p className="text-[10px] text-slate-600 mt-2 font-medium">CapacitorManager | Gestão Inteligente de Capacitores</p>
+            </div>
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center rounded-xl bg-white py-24 shadow-sm text-slate-400">
+        <div className="flex flex-col items-center justify-center rounded-xl bg-white py-24 shadow-sm border border-slate-100 text-slate-400">
           <BarChart3 size={64} className="mb-4 opacity-10" />
           <p className="text-lg">Selecione um capacitor para visualizar os gráficos</p>
         </div>
