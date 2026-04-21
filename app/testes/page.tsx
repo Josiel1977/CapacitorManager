@@ -214,12 +214,8 @@ export default function RealizarTestePage() {
         confirmButtonColor: '#0a2b3c'
       });
       
-      // Limpar formulário após salvar
       setResultado(null);
       setMedicao({ tensao_medida_v: '', corrente_medida_a: '', capacitancia_medida_uf: '' });
-      
-      // Opção: voltar para o histórico ou manter na página
-      // router.push(`/medicoes?capacitor_id=${selection.capacitor_id}`);
       
     } catch (error: any) {
       console.error('Erro ao salvar:', error);
@@ -266,7 +262,6 @@ export default function RealizarTestePage() {
       </header>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-        {/* Selection Form */}
         <div className="lg:col-span-2 space-y-6">
           <section className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
             <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-primary">
@@ -422,7 +417,6 @@ export default function RealizarTestePage() {
           </section>
         </div>
 
-        {/* Results Panel */}
         <div className="space-y-6">
           <section className="rounded-xl bg-white p-6 shadow-sm border border-slate-100 min-h-[400px] flex flex-col">
             <h2 className="mb-6 text-lg font-semibold text-primary">Resultado da Análise</h2>
