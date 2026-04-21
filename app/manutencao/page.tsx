@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import { 
   Wrench, TrendingUp, TrendingDown, Activity, AlertTriangle, 
   CheckCircle2, XCircle, Calendar, Clock, Zap, Droplets,
-  DollarSign, RefreshCw, Eye, FileText, Download, Shield
+  DollarSign, RefreshCw, Eye, FileText, Download, Shield, Filter
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Swal from 'sweetalert2';
@@ -16,6 +16,7 @@ interface CapacitorManutencao {
   codigo: string;
   banco: string;
   cliente: string;
+  cliente_id: string;
   potencia_kvar: number;
   tensao_nominal_v: number;
   data_instalacao: string;
@@ -69,8 +70,7 @@ export default function ManutencaoPage() {
           bancos_capacitores (
             id,
             nome_banco,
-            cliente_id,
-            clientes (id, nome)
+            cliente_id
           ),
           medicoes (
             id,
@@ -88,6 +88,15 @@ export default function ManutencaoPage() {
         setLoading(false);
         return;
       }
+
+      // Buscar nomes dos clientes separadamente
+      const { data: clientesData } = await supabase
+        .from('clientes')
+        .select('id, nome')
+        .eq('ativo', true);
+
+      const clientesMap = new Map();
+      clientesData?.forEach(c => clientesMap.set(c.id, c.nome));
 
       const processedData: CapacitorManutencao[] = [];
 
@@ -124,7 +133,7 @@ export default function ManutencaoPage() {
         
         // Calcular previsão de substituição
         const desvioRestante = 15 - desvio;
-        const taxaDegradacao = 0.5; // Taxa padrão de 0.5% por mês
+        const taxaDegradacao = 0.5;
         let mesesRestantes = 0;
         let urgente = false;
         
@@ -135,10 +144,11 @@ export default function ManutencaoPage() {
           urgente = true;
         }
 
-        // Aplicar filtro por cliente se necessário
-        const clienteNome = cap.bancos_capacitores?.clientes?.nome || 'N/A';
-        const clienteId = cap.bancos_capacitores?.cliente_id;
+        const banco = cap.bancos_capacitores;
+        const clienteId = banco?.cliente_id;
+        const clienteNome = clientesMap.get(clienteId) || 'N/A';
         
+        // Aplicar filtro por cliente
         if (clienteFiltro !== 'todos' && clienteId !== clienteFiltro) {
           continue;
         }
@@ -146,8 +156,9 @@ export default function ManutencaoPage() {
         processedData.push({
           id: cap.id,
           codigo: cap.codigo_identificacao || 'N/A',
-          banco: cap.bancos_capacitores?.nome_banco || 'N/A',
+          banco: banco?.nome_banco || 'N/A',
           cliente: clienteNome,
+          cliente_id: clienteId || '',
           potencia_kvar: cap.potencia_kvar || 0,
           tensao_nominal_v: cap.tensao_nominal_v || 0,
           data_instalacao: cap.data_instalacao || new Date().toISOString(),
@@ -174,6 +185,11 @@ export default function ManutencaoPage() {
       setLoading(false);
     }
   }
+
+  // Recarregar quando o filtro de cliente mudar
+  useEffect(() => {
+    fetchDadosManutencao();
+  }, [clienteFiltro]);
 
   // Filtrar capacitores
   const filteredCapacitores = capacitores.filter(cap => {
@@ -254,10 +270,7 @@ export default function ManutencaoPage() {
           <select 
             className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2 outline-none focus:border-primary"
             value={clienteFiltro}
-            onChange={(e) => {
-              setClienteFiltro(e.target.value);
-              fetchDadosManutencao();
-            }}
+            onChange={(e) => setClienteFiltro(e.target.value)}
           >
             <option value="todos">📋 Todos os clientes</option>
             {clientes.map(c => (
@@ -384,8 +397,8 @@ export default function ManutencaoPage() {
                     <Wrench size={32} className="mx-auto mb-2 opacity-50" />
                     <p>Nenhum capacitor encontrado</p>
                     <p className="text-xs mt-1">Cadastre medições para começar a análise</p>
-                  </td>
-                </tr>
+                   </td>
+                 </tr>
               ) : (
                 filteredCapacitores.map((cap) => (
                   <tr key={cap.id} className="text-sm hover:bg-slate-50 transition-colors">
