@@ -11,6 +11,57 @@ import { supabase } from '@/lib/supabase';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 
+// ============================================
+// FUNÇÕES DE CÁLCULO (MESMAS DO RELATÓRIO)
+// ============================================
+function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
+    if (!tensaoNominal || tensaoNominal === 0) return 0;
+    return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
+}
+
+function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
+    return capacitanciaNominalFase * 1.5;
+}
+
+function getStatusValidacao(desvio: number): string {
+    if (desvio >= -5 && desvio <= 10) return 'aprovado';
+    if (desvio >= -10 && desvio < -5) return 'atencao';
+    if (desvio > 10 && desvio <= 15) return 'atencao';
+    return 'reprovado';
+}
+
+// Função para calcular tendência de degradação (MESMA DO RELATÓRIO)
+function calcularTendenciaCapacitor(medicoes: any[]) {
+    if (medicoes.length < 2) return null;
+    
+    const primeira = medicoes[medicoes.length - 1];
+    const ultima = medicoes[0];
+    
+    const variacao = ultima.desvio_percentual - primeira.desvio_percentual;
+    const dias = (new Date(ultima.created_at).getTime() - new Date(primeira.created_at).getTime()) / (1000 * 3600 * 24);
+    const degradacaoPorMes = dias > 0 ? (variacao / dias) * 30 : 0;
+    
+    let previsao = null;
+    if (degradacaoPorMes > 0 && ultima.desvio_percentual < 15) {
+        const mesesRestantes = (15 - ultima.desvio_percentual) / degradacaoPorMes;
+        previsao = {
+            meses: mesesRestantes.toFixed(1),
+            data: new Date(Date.now() + mesesRestantes * 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR')
+        };
+    }
+    
+    return {
+        variacao: variacao.toFixed(2),
+        degradacaoPorMes: degradacaoPorMes.toFixed(2),
+        tendencia: variacao > 0 ? 'piorando' : variacao < 0 ? 'melhorando' : 'estavel',
+        primeiraData: new Date(primeira.created_at).toLocaleDateString('pt-BR'),
+        ultimaData: new Date(ultima.created_at).toLocaleDateString('pt-BR'),
+        primeiraDesvio: primeira.desvio_percentual?.toFixed(2) || '0',
+        ultimaDesvio: ultima.desvio_percentual?.toFixed(2) || '0',
+        previsao
+    };
+}
+
 interface CapacitorManutencao {
   id: string;
   codigo: string;
@@ -19,14 +70,15 @@ interface CapacitorManutencao {
   cliente_id: string;
   potencia_kvar: number;
   tensao_nominal_v: number;
-  data_instalacao: string;
+  capacitancia_nominal_uf: number;
   ultimo_desvio: number;
   ultimo_status: string;
   ultima_data: string;
-  tendencia: 'degradando' | 'estavel' | 'melhorando';
-  previsao_meses: number;
-  previsao_urgente: boolean;
+  tendencia: 'piorando' | 'melhorando' | 'estavel';
+  previsao_meses: string | null;
+  previsao_data: string | null;
   medicoes_count: number;
+  variacao: string;
 }
 
 export default function ManutencaoPage() {
@@ -57,121 +109,106 @@ export default function ManutencaoPage() {
   async function fetchDadosManutencao() {
     setLoading(true);
     try {
-      // Buscar todos os bancos primeiro
-      const { data: bancosData, error: bancosError } = await supabase
-        .from('bancos_capacitores')
-        .select('id, nome_banco, cliente_id')
-        .eq('ativo', true);
-
-      if (bancosError) throw bancosError;
-
-      // Criar mapa de bancos
-      const bancosMap = new Map();
-      bancosData?.forEach(banco => {
-        bancosMap.set(banco.id, {
-          nome: banco.nome_banco,
-          cliente_id: banco.cliente_id
-        });
-      });
-
-      // Buscar capacitores
-      const { data: capacitoresData, error: capacitoresError } = await supabase
-        .from('capacitores')
-        .select(`
-          id,
-          codigo_identificacao,
-          potencia_kvar,
-          tensao_nominal_v,
-          data_instalacao,
-          banco_id
-        `)
-        .eq('ativo', true);
-
-      if (capacitoresError) throw capacitoresError;
-
-      // Buscar todas as medições
-      const { data: medicoesData, error: medicoesError } = await supabase
+      // Buscar todas as medições com dados relacionados
+      const { data: medicoesData, error } = await supabase
         .from('medicoes')
         .select(`
-          id,
-          capacitor_id,
-          desvio_percentual,
-          status_validacao,
-          data_medicao,
-          created_at
+          *,
+          bancos_capacitores (
+            id,
+            nome_banco,
+            cliente_id,
+            clientes (id, nome)
+          ),
+          capacitores (
+            id,
+            codigo_identificacao,
+            potencia_kvar,
+            capacitancia_nominal_uf,
+            tensao_nominal_v
+          )
         `)
         .order('created_at', { ascending: false });
 
-      if (medicoesError) throw medicoesError;
+      if (error) throw error;
+      if (!medicoesData || medicoesData.length === 0) {
+        setCapacitores([]);
+        setLoading(false);
+        return;
+      }
 
-      // Agrupar medições por capacitor
-      const medicoesPorCapacitor = new Map();
-      medicoesData?.forEach(med => {
-        if (!medicoesPorCapacitor.has(med.capacitor_id)) {
-          medicoesPorCapacitor.set(med.capacitor_id, []);
+      // Recalcular desvios usando as mesmas funções do relatório
+      const medicoesCorrigidas = medicoesData.map(med => {
+        let desvio = med.desvio_percentual;
+        let status = med.status_validacao;
+        
+        if (med.capacitores) {
+          const tensaoNominal = med.capacitores.tensao_nominal_v;
+          
+          if (med.tipo_teste === 'corrente' && med.corrente_medida_a) {
+            const correnteTeorica = calcularCorrenteTeorica(med.capacitores.potencia_kvar, tensaoNominal);
+            if (correnteTeorica > 0) {
+              desvio = ((med.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
+              status = getStatusValidacao(desvio);
+            }
+          } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf) {
+            const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
+            if (capacitanciaTeorica > 0) {
+              desvio = ((med.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
+              status = getStatusValidacao(desvio);
+            }
+          }
         }
-        medicoesPorCapacitor.get(med.capacitor_id).push(med);
+        
+        return {
+          ...med,
+          desvio_percentual: desvio,
+          status_validacao: status
+        };
       });
 
-      // Buscar nomes dos clientes
-      const { data: clientesData } = await supabase
-        .from('clientes')
-        .select('id, nome')
-        .eq('ativo', true);
+      // Agrupar por capacitor
+      const gruposPorCapacitor: { [key: string]: any[] } = {};
+      medicoesCorrigidas.forEach(med => {
+        const key = med.capacitores?.id;
+        if (!key) return;
+        if (!gruposPorCapacitor[key]) {
+          gruposPorCapacitor[key] = [];
+        }
+        gruposPorCapacitor[key].push(med);
+      });
 
-      const clientesMap = new Map();
-      clientesData?.forEach(c => clientesMap.set(c.id, c.nome));
+      // Ordenar medições por data (mais antiga primeiro para tendência)
+      Object.keys(gruposPorCapacitor).forEach(key => {
+        gruposPorCapacitor[key].sort((a, b) => 
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+      });
 
       const processedData: CapacitorManutencao[] = [];
 
-      for (const cap of capacitoresData || []) {
-        const medicoes = medicoesPorCapacitor.get(cap.id) || [];
+      for (const [capId, medicoes] of Object.entries(gruposPorCapacitor)) {
         if (medicoes.length === 0) continue;
 
-        // Ordenar medições por data (mais recente primeiro)
-        const medicoesOrdenadas = [...medicoes].sort((a, b) => {
-          const dateA = a.data_medicao || a.created_at;
-          const dateB = b.data_medicao || b.created_at;
-          return new Date(dateB).getTime() - new Date(dateA).getTime();
-        });
+        const ultimaMedicao = medicoes[medicoes.length - 1];
+        const primeiraMedicao = medicoes[0];
+        const capacitor = ultimaMedicao.capacitores;
+        
+        if (!capacitor) continue;
 
-        const ultimaMedicao = medicoesOrdenadas[0];
         const desvio = Math.abs(ultimaMedicao.desvio_percentual || 0);
         
-        // Determinar status
+        // Determinar status (mesmo do relatório)
         let status = 'ok';
         if (desvio > 15) status = 'critical';
         else if (desvio > 10) status = 'warning';
         
-        // Calcular tendência
-        let tendencia: 'degradando' | 'estavel' | 'melhorando' = 'estavel';
-        if (medicoesOrdenadas.length >= 2) {
-          const ultima = medicoesOrdenadas[0];
-          const primeira = medicoesOrdenadas[medicoesOrdenadas.length - 1];
-          const desvioUltimo = Math.abs(ultima.desvio_percentual || 0);
-          const desvioPrimeiro = Math.abs(primeira.desvio_percentual || 0);
-          
-          if (desvioUltimo > desvioPrimeiro * 1.05) tendencia = 'degradando';
-          else if (desvioUltimo < desvioPrimeiro * 0.95) tendencia = 'melhorando';
-        }
+        // Calcular tendência usando a mesma função do relatório
+        const tendenciaData = calcularTendenciaCapacitor(medicoes);
         
-        // Calcular previsão de substituição
-        const desvioRestante = 15 - desvio;
-        const taxaDegradacao = 0.5;
-        let mesesRestantes = 0;
-        let urgente = false;
-        
-        if (desvioRestante > 0 && taxaDegradacao > 0) {
-          mesesRestantes = desvioRestante / taxaDegradacao;
-          urgente = mesesRestantes <= 3;
-        } else if (desvioRestante <= 0) {
-          urgente = true;
-        }
-
-        const bancoInfo = bancosMap.get(cap.banco_id);
-        const clienteId = bancoInfo?.cliente_id;
-        const clienteNome = clientesMap.get(clienteId) || 'N/A';
-        const bancoNome = bancoInfo?.nome || 'N/A';
+        const clienteNome = ultimaMedicao.bancos_capacitores?.clientes?.nome || 'N/A';
+        const clienteId = ultimaMedicao.bancos_capacitores?.cliente_id;
+        const bancoNome = ultimaMedicao.bancos_capacitores?.nome_banco || 'N/A';
         
         // Aplicar filtro por cliente
         if (clienteFiltro !== 'todos' && clienteId !== clienteFiltro) {
@@ -179,21 +216,22 @@ export default function ManutencaoPage() {
         }
 
         processedData.push({
-          id: cap.id,
-          codigo: cap.codigo_identificacao || 'N/A',
+          id: capId,
+          codigo: capacitor.codigo_identificacao || 'N/A',
           banco: bancoNome,
           cliente: clienteNome,
           cliente_id: clienteId || '',
-          potencia_kvar: cap.potencia_kvar || 0,
-          tensao_nominal_v: cap.tensao_nominal_v || 0,
-          data_instalacao: cap.data_instalacao || new Date().toISOString(),
+          potencia_kvar: capacitor.potencia_kvar || 0,
+          tensao_nominal_v: capacitor.tensao_nominal_v || 0,
+          capacitancia_nominal_uf: capacitor.capacitancia_nominal_uf || 0,
           ultimo_desvio: ultimaMedicao.desvio_percentual || 0,
           ultimo_status: status,
-          ultima_data: ultimaMedicao.data_medicao || ultimaMedicao.created_at,
-          tendencia,
-          previsao_meses: mesesRestantes,
-          previsao_urgente: urgente,
-          medicoes_count: medicoes.length
+          ultima_data: ultimaMedicao.created_at,
+          tendencia: (tendenciaData?.tendencia as 'piorando' | 'melhorando' | 'estavel') || 'estavel',
+          previsao_meses: tendenciaData?.previsao?.meses || null,
+          previsao_data: tendenciaData?.previsao?.data || null,
+          medicoes_count: medicoes.length,
+          variacao: tendenciaData?.variacao || '0'
         });
       }
 
@@ -218,14 +256,14 @@ export default function ManutencaoPage() {
 
   // Filtrar capacitores
   const filteredCapacitores = capacitores.filter(cap => {
-    if (filter === 'urgente') return cap.previsao_urgente;
+    if (filter === 'urgente') return cap.previsao_meses !== null && parseFloat(cap.previsao_meses) <= 3;
     if (filter === 'atencao') return cap.ultimo_status === 'warning';
     return true;
   });
 
-  const urgentes = capacitores.filter(c => c.previsao_urgente).length;
+  const urgentes = capacitores.filter(c => c.previsao_meses !== null && parseFloat(c.previsao_meses) <= 3).length;
   const atencao = capacitores.filter(c => c.ultimo_status === 'warning').length;
-  const saudaveis = capacitores.filter(c => c.ultimo_status === 'ok' && !c.previsao_urgente).length;
+  const saudaveis = capacitores.filter(c => c.ultimo_status === 'ok' && (c.previsao_meses === null || parseFloat(c.previsao_meses) > 3)).length;
 
   function handleGerarRelatorio() {
     Swal.fire({
@@ -341,7 +379,7 @@ export default function ManutencaoPage() {
             <div className="p-2 bg-red-50 rounded-lg text-red-600">
               <AlertTriangle size={22} />
             </div>
-            <span className="text-xs font-medium text-slate-500 uppercase">Urgentes</span>
+            <span className="text-xs font-medium text-slate-500 uppercase">Críticos</span>
           </div>
           <p className="text-3xl font-bold text-red-600">{urgentes}</p>
           <p className="text-xs text-red-500 mt-1">Substituir nos próximos 3 meses</p>
@@ -446,27 +484,27 @@ export default function ManutencaoPage() {
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-1">
-                        {cap.tendencia === 'degradando' && <TrendingDown size={14} className="text-red-500" />}
-                        {cap.tendencia === 'melhorando' && <TrendingUp size={14} className="text-green-500" />}
+                        {cap.tendencia === 'piorando' && <TrendingUp size={14} className="text-red-500" />}
+                        {cap.tendencia === 'melhorando' && <TrendingDown size={14} className="text-green-500" />}
                         {cap.tendencia === 'estavel' && <Activity size={14} className="text-slate-400" />}
                         <span className={cn(
                           "text-xs",
-                          cap.tendencia === 'degradando' ? "text-red-600" : 
+                          cap.tendencia === 'piorando' ? "text-red-600" : 
                           cap.tendencia === 'melhorando' ? "text-green-600" : "text-slate-500"
                         )}>
-                          {cap.tendencia === 'degradando' ? "Degradando" : 
+                          {cap.tendencia === 'piorando' ? "Degradando" : 
                            cap.tendencia === 'melhorando' ? "Melhorando" : "Estável"}
                         </span>
                       </div>
                     </td>
                     <td className="px-5 py-3">
-                      {cap.previsao_urgente ? (
+                      {cap.previsao_meses && parseFloat(cap.previsao_meses) <= 3 ? (
                         <span className="text-red-600 font-medium text-xs">
-                          Urgente! {cap.previsao_meses.toFixed(0)} meses
+                          Urgente! {cap.previsao_meses} meses
                         </span>
-                      ) : cap.previsao_meses > 0 ? (
+                      ) : cap.previsao_meses ? (
                         <span className="text-slate-500 text-xs">
-                          {cap.previsao_meses.toFixed(0)} meses
+                          {cap.previsao_meses} meses
                         </span>
                       ) : (
                         <span className="text-green-600 text-xs">Saudável</span>
@@ -475,11 +513,11 @@ export default function ManutencaoPage() {
                     <td className="px-5 py-3">
                       <span className={cn(
                         "px-2 py-1 text-xs font-bold rounded-full",
-                        cap.previsao_urgente ? "bg-red-100 text-red-700" :
+                        cap.previsao_meses && parseFloat(cap.previsao_meses) <= 3 ? "bg-red-100 text-red-700" :
                         cap.ultimo_status === 'warning' ? "bg-amber-100 text-amber-700" :
                         "bg-green-100 text-green-700"
                       )}>
-                        {cap.previsao_urgente ? "CRÍTICO" :
+                        {cap.previsao_meses && parseFloat(cap.previsao_meses) <= 3 ? "CRÍTICO" :
                          cap.ultimo_status === 'warning' ? "ATENÇÃO" : "OK"}
                       </span>
                     </td>
