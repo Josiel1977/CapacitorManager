@@ -13,7 +13,8 @@ import { supabase } from '@/lib/supabase';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
+import { AuthProvider } from '@/lib/AuthContext';
+import { useAuth } from '@/lib/AuthContext';
 import DemoBanner from '@/components/DemoBanner';
 
 // ============================================

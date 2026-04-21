@@ -1,6 +1,6 @@
 'use client';
 
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/lib/AuthContext';
 import DemoBanner from '@/components/DemoBanner';
 import DashboardReal from './dashboard-real/page';
 import DashboardDemo from './dashboard-demo/page';

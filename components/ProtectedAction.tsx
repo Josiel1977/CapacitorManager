@@ -1,6 +1,6 @@
 'use client';
 
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/lib/AuthContext';
 import { Lock } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';

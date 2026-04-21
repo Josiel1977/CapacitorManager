@@ -1,6 +1,6 @@
 'use client';
 
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/lib/AuthContext';
 import { Sparkles, ArrowRight } from 'lucide-react';
 
 export default function DemoBanner() {

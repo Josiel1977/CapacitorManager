@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
 import { Zap, Lock, Mail, ArrowRight, Eye, EyeOff, Sparkles } from 'lucide-react';
 import Swal from 'sweetalert2';
-import { useAuth } from '@/contexts/AuthContext';
+import { AuthProvider } from '@/lib/AuthContext';
+import { useAuth } from '@/lib/AuthContext';
 
 export default function LoginPage() {
   const router = useRouter();
