@@ -337,7 +337,7 @@ export default function DemoPage() {
                             : "border-slate-200 text-slate-600 hover:bg-slate-50"
                         )}
                       >
-                        ⚡ Teste por Corrente (Campo)
+                         Teste por Corrente (Campo)
                       </button>
                       <button
                         onClick={() => {
@@ -352,7 +352,7 @@ export default function DemoPage() {
                             : "border-slate-200 text-slate-600 hover:bg-slate-50"
                         )}
                       >
-                        🔋 Teste por Capacitância (Bancada)
+                         Teste por Capacitância (Bancada)
                       </button>
                     </div>
                   </div>
@@ -561,7 +561,7 @@ export default function DemoPage() {
           </div>
 
           <div className="rounded-2xl bg-primary/5 p-6 border border-primary/20">
-            <h3 className="font-bold text-primary mb-2">🚀 Versão Completa</h3>
+            <h3 className="font-bold text-primary mb-2"> Versão Completa</h3>
             <ul className="text-sm space-y-2 text-slate-600">
               <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Gestão completa de clientes</li>
               <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Bancos de capacitores ilimitados</li>
