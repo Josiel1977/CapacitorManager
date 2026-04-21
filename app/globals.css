@@ -1,0 +1,192 @@
+@import "tailwindcss";
+
+@theme {
+  /* ✅ Cores principais - mantidas */
+  --color-primary: #0a2b3c;
+  --color-primary-light: #1a4b6c;
+  --color-secondary: #f39c12;
+  --color-success: #2ecc71;
+  --color-error: #e74c3c;
+  --color-warning: #f39c12; /* ✅ Adicionado - faltava */
+  --color-info: #3b82f6;    /* ✅ Adicionado - para consistência */
+  
+  /* ✅ Slate colors - mantidas, boas para html2canvas */
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+  --color-slate-950: #020617;
+
+  /* ✅ Status colors - completas */
+  --color-green-50: #f0fdf4;
+  --color-green-100: #dcfce7;
+  --color-green-200: #bbf7d0;
+  --color-green-300: #86efac;  /* ✅ Adicionado */
+  --color-green-400: #4ade80;  /* ✅ Adicionado */
+  --color-green-500: #22c55e;  /* ✅ Adicionado - faltava */
+  --color-green-600: #16a34a;
+  --color-green-700: #15803d;
+  --color-green-800: #166534;  /* ✅ Adicionado */
+  --color-green-900: #14532d;  /* ✅ Adicionado */
+  
+  --color-amber-50: #fffbeb;
+  --color-amber-100: #fef3c7;
+  --color-amber-200: #fde68a;
+  --color-amber-300: #fcd34d;  /* ✅ Adicionado */
+  --color-amber-400: #fbbf24;  /* ✅ Adicionado */
+  --color-amber-500: #f59e0b;  /* ✅ Adicionado */
+  --color-amber-600: #d97706;
+  --color-amber-700: #b45309;
+  --color-amber-800: #92400e;  /* ✅ Adicionado */
+  --color-amber-900: #78350f;  /* ✅ Adicionado */
+  
+  --color-red-50: #fef2f2;
+  --color-red-100: #fee2e2;
+  --color-red-200: #fecaca;
+  --color-red-300: #fca5a5;    /* ✅ Adicionado */
+  --color-red-400: #f87171;    /* ✅ Adicionado */
+  --color-red-500: #ef4444;    /* ✅ Adicionado - faltava */
+  --color-red-600: #dc2626;
+  --color-red-700: #b91c1c;
+  --color-red-800: #991b1b;    /* ✅ Adicionado */
+  --color-red-900: #7f1d1d;    /* ✅ Adicionado */
+
+  --color-blue-50: #eff6ff;
+  --color-blue-100: #dbeafe;
+  --color-blue-200: #bfdbfe;
+  --color-blue-300: #93c5fd;   /* ✅ Adicionado */
+  --color-blue-400: #60a5fa;   /* ✅ Adicionado */
+  --color-blue-500: #3b82f6;
+  --color-blue-600: #2563eb;
+  --color-blue-700: #1d4ed8;
+  --color-blue-800: #1e40af;   /* ✅ Adicionado */
+  --color-blue-900: #1e3a8a;   /* ✅ Adicionado */
+
+  /* ✅ Removido duplicatas desnecessárias */
+  /* --color-yellow-500 já está no amber */
+  /* --color-gray-* já tem slate como substituto */
+  
+  /* ✅ Cores que você realmente precisa - simplificado */
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;   /* ✅ Adicionado */
+  --color-gray-400: #9ca3af;   /* ✅ Adicionado */
+  --color-gray-500: #6b7280;   /* ✅ Adicionado */
+  --color-gray-600: #4b5563;   /* ✅ Adicionado */
+  --color-gray-700: #374151;
+  --color-gray-800: #1f2937;   /* ✅ Adicionado */
+  --color-gray-900: #111827;   /* ✅ Adicionado */
+  
+  /* ✅ Sombras - boas, mas adicionei transparência consistente */
+  --shadow-color: 0 0 0; /* ✅ Base para sombras com variável */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --shadow-2xl: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  
+  /* ✅ Novas utilidades úteis */
+  --radius-sm: 0.125rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+  
+  /* ✅ Animações padrão */
+  --animate-fade-in: fade-in 0.3s ease-out;
+  --animate-slide-up: slide-up 0.3s ease-out;
+  --animate-pulse-slow: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ✅ Animações customizadas */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+}
+
+/* ✅ Suporte para tema escuro (opcional, mas bom ter) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0f172a;
+    --foreground: #f8fafc;
+  }
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased; /* ✅ Melhor renderização */
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ✅ Utilitários de scrollbar personalizada (opcional) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-slate-100);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-slate-300);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-slate-400);
+}
+
+/* ✅ Focus visible para acessibilidade */
+*:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+/* ✅ Prevenir zoom em inputs no mobile (opcional) */
+@media (max-width: 640px) {
+  input, select, textarea {
+    font-size: 16px;
+  }
+}
