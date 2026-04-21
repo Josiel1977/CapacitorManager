@@ -6,7 +6,7 @@ import {
   Plus, Search, Edit2, Trash2, X, Save, Database, Filter, ChevronDown, 
   RefreshCw, Calculator, TrendingUp, TrendingDown, AlertTriangle, 
   CheckCircle2, Zap, Eye, ArrowRight, LayoutGrid, List,
-  BarChart3, Activity, DollarSign, Clock
+  BarChart3, Activity, DollarSign, Clock, Building
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
@@ -51,42 +51,10 @@ export default function BancosPage() {
     const bancosCliente = bancos.filter(b => b.cliente_id === clienteFiltro);
     const totalKvarInstalado = bancosCliente.reduce((sum, b) => sum + (b.potencia_calculada || 0), 0);
     
-    // Calcular deficiência (baseado em capacitores com desvio > 10%)
-    let totalKvarEfetivo = 0;
-    let capacitoresProblema = 0;
-    
-    for (const banco of bancosCliente) {
-      const { data: capacitores } = await supabase
-        .from('capacitores')
-        .select(`
-          id,
-          potencia_kvar,
-          medicoes (desvio_percentual)
-        `)
-        .eq('banco_id', banco.id)
-        .eq('ativo', true);
-      
-      if (capacitores) {
-        for (const cap of capacitores) {
-          const ultimaMedicao = cap.medicoes?.[0];
-          const desvio = Math.abs(ultimaMedicao?.desvio_percentual || 0);
-          const eficiencia = Math.max(0, 100 - desvio);
-          totalKvarEfetivo += (cap.potencia_kvar * eficiencia) / 100;
-          if (desvio > 10) capacitoresProblema++;
-        }
-      }
-    }
-    
-    const deficienciaKvar = totalKvarInstalado - totalKvarEfetivo;
-    const eficienciaPercentual = totalKvarInstalado > 0 ? (totalKvarEfetivo / totalKvarInstalado) * 100 : 100;
-    
     setResumoCliente({
       totalKvarInstalado,
-      totalKvarEfetivo,
-      deficienciaKvar,
-      eficienciaPercentual,
-      capacitoresProblema,
-      totalBancos: bancosCliente.length
+      totalBancos: bancosCliente.length,
+      totalPotencia: totalKvarInstalado
     });
   }
 
@@ -94,6 +62,7 @@ export default function BancosPage() {
     try {
       setLoading(true);
       
+      // Buscar todos os bancos ativos
       const { data: bancosData, error: bancosError } = await supabase
         .from('bancos_capacitores')
         .select(`
@@ -103,20 +72,15 @@ export default function BancosPage() {
         .eq('ativo', true)
         .order('nome_banco');
       
-      const { data: clientesData, error: clientesError } = await supabase
-        .from('clientes')
-        .select('id, nome')
-        .eq('ativo', true)
-        .order('nome');
-
       if (bancosError) throw bancosError;
-      if (clientesError) throw clientesError;
 
+      // Buscar todos os capacitores ativos para calcular potência real
       const { data: capacitoresData } = await supabase
         .from('capacitores')
         .select('banco_id, potencia_kvar')
         .eq('ativo', true);
 
+      // Calcular potência total por banco SOMANDO os capacitores
       const potenciaPorBanco: { [key: string]: number } = {};
       capacitoresData?.forEach(cap => {
         if (cap.banco_id) {
@@ -124,6 +88,7 @@ export default function BancosPage() {
         }
       });
 
+      // Atualizar bancos com a potência calculada
       const bancosComPotenciaReal = (bancosData || []).map(banco => ({
         ...banco,
         potencia_calculada: potenciaPorBanco[banco.id] || 0,
@@ -131,7 +96,25 @@ export default function BancosPage() {
         potencia_divergente: Math.abs((banco.potencia_total_kvar || 0) - (potenciaPorBanco[banco.id] || 0)) > 1
       }));
 
+      // ATUALIZAR automaticamente os bancos com a potência correta
+      for (const banco of bancosComPotenciaReal) {
+        if (banco.potencia_divergente && banco.potencia_calculada > 0) {
+          await supabase
+            .from('bancos_capacitores')
+            .update({ potencia_total_kvar: banco.potencia_calculada })
+            .eq('id', banco.id);
+        }
+      }
+
       setBancos(bancosComPotenciaReal);
+      
+      // Buscar clientes
+      const { data: clientesData } = await supabase
+        .from('clientes')
+        .select('id, nome')
+        .eq('ativo', true)
+        .order('nome');
+
       setClientes(clientesData || []);
     } catch (error) {
       console.error('Error:', error);
@@ -166,7 +149,7 @@ export default function BancosPage() {
         html: `
           <div class="text-left">
             <p>Banco: <strong>${bancoNome}</strong></p>
-            <p>Potência total calculada: <strong class="text-primary">${potenciaTotal} kVAr</strong></p>
+            <p>Potência total calculada: <strong class="text-primary">${potenciaTotal.toFixed(1)} kVAr</strong></p>
             <p class="text-xs text-slate-500 mt-2">Baseado em ${capacitores?.length || 0} capacitor(es) ativo(s)</p>
           </div>
         `,
@@ -181,43 +164,6 @@ export default function BancosPage() {
     } finally {
       setCalculando(null);
     }
-  }
-
-  async function handleLoginRedirect() {
-    Swal.fire({
-      title: '🔐 Acesso Restrito',
-      html: `
-        <div class="text-left">
-          <p>Para visualizar os detalhes completos do cliente, você precisa estar logado.</p>
-          <div class="mt-4 p-3 bg-primary/10 rounded-lg">
-            <p class="text-sm font-bold text-primary">Área do Cliente</p>
-            <p class="text-xs text-slate-500 mt-1">Acesse com suas credenciais para ver:</p>
-            <ul class="text-xs text-slate-500 mt-2 list-disc pl-4">
-              <li>📊 Seus bancos de capacitores</li>
-              <li>⚡ Capacitores e medições</li>
-              <li>📈 Relatórios personalizados</li>
-              <li>🔧 Recomendações de manutenção</li>
-            </ul>
-          </div>
-          <p class="text-xs text-slate-400 mt-3">Entre em contato com o administrador para obter acesso.</p>
-        </div>
-      `,
-      icon: 'info',
-      showCancelButton: true,
-      confirmButtonText: 'Entrar na Área do Cliente',
-      cancelButtonText: 'Voltar',
-      confirmButtonColor: '#0a2b3c',
-      cancelButtonColor: '#e74c3c'
-    }).then((result) => {
-      if (result.isConfirmed) {
-        // Redirecionar para página de login do cliente
-        router.push('/cliente/login');
-      }
-    });
-  }
-
-  function handleVerCapacitores(bancoId: string) {
-    router.push(`/capacitores?banco_id=${bancoId}`);
   }
 
   const filteredBancos = useMemo(() => {
@@ -242,6 +188,116 @@ export default function BancosPage() {
     clientesAtendidos: new Set(filteredBancos.map(b => b.cliente_id)).size,
   };
 
+  function handleOpenModal(banco: any = null) {
+    if (banco) {
+      setEditingBanco(banco);
+      setFormData({
+        cliente_id: banco.cliente_id,
+        nome_banco: banco.nome_banco,
+        localizacao: banco.localizacao || '',
+        tensao_nominal: banco.tensao_nominal || '',
+        potencia_total_kvar: banco.potencia_calculada?.toString() || banco.potencia_total_kvar?.toString() || '',
+      });
+    } else {
+      setEditingBanco(null);
+      setFormData({
+        cliente_id: clienteFiltro !== 'todos' ? clienteFiltro : '',
+        nome_banco: '',
+        localizacao: '',
+        tensao_nominal: '',
+        potencia_total_kvar: '',
+      });
+    }
+    setIsModalOpen(true);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    
+    if (!formData.cliente_id) {
+      Swal.fire('Atenção', 'Selecione um cliente', 'warning');
+      return;
+    }
+    
+    try {
+      const data = {
+        cliente_id: formData.cliente_id,
+        nome_banco: formData.nome_banco,
+        localizacao: formData.localizacao || null,
+        tensao_nominal: formData.tensao_nominal ? parseNumber(formData.tensao_nominal) : null,
+        potencia_total_kvar: 0, // Começa com 0, será calculado depois
+      };
+
+      if (editingBanco) {
+        const { error } = await supabase
+          .from('bancos_capacitores')
+          .update(data)
+          .eq('id', editingBanco.id);
+        if (error) throw error;
+        Swal.fire('Sucesso', 'Banco atualizado com sucesso!', 'success');
+      } else {
+        const { error } = await supabase
+          .from('bancos_capacitores')
+          .insert([{ ...data, ativo: true }]);
+        if (error) throw error;
+        Swal.fire('Sucesso', 'Banco cadastrado com sucesso!', 'success');
+      }
+      setIsModalOpen(false);
+      fetchData();
+    } catch (error: any) {
+      Swal.fire('Erro', error.message, 'error');
+    }
+  }
+
+  async function handleDelete(id: string) {
+    const result = await Swal.fire({
+      title: 'Tem certeza?',
+      text: "O banco será desativado do sistema.",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#0a2b3c',
+      cancelButtonColor: '#e74c3c',
+      confirmButtonText: 'Sim, desativar',
+      cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        const { count: capacitoresCount } = await supabase
+          .from('capacitores')
+          .select('*', { count: 'exact', head: true })
+          .eq('banco_id', id)
+          .eq('ativo', true);
+        
+        if (capacitoresCount && capacitoresCount > 0) {
+          const confirm = await Swal.fire({
+            title: 'Atenção!',
+            text: `Este banco possui ${capacitoresCount} capacitor(es) vinculado(s). Desativar o banco irá desativar também seus capacitores. Deseja continuar?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#0a2b3c',
+            cancelButtonColor: '#e74c3c',
+            confirmButtonText: 'Sim, continuar',
+            cancelButtonText: 'Cancelar'
+          });
+          
+          if (!confirm.isConfirmed) return;
+        }
+        
+        const { error } = await supabase
+          .from('bancos_capacitores')
+          .update({ ativo: false })
+          .eq('id', id);
+        
+        if (error) throw error;
+        Swal.fire('Desativado!', 'Banco removido com sucesso.', 'success');
+        fetchData();
+      } catch (error: any) {
+        Swal.fire('Erro', error.message, 'error');
+      }
+    }
+  }
+
   const clienteSelecionado = clientes.find(c => c.id === clienteFiltro);
 
   if (loading) {
@@ -257,7 +313,7 @@ export default function BancosPage() {
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Hero Section - Chamativa */}
+      {/* Header */}
       <motion.section 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -302,14 +358,14 @@ export default function BancosPage() {
             </div>
             <span className="text-xs font-medium text-slate-500 uppercase">Potência Instalada</span>
           </div>
-          <p className="text-3xl font-bold text-amber-600">{stats.totalPotencia.toFixed(0)} kVAr</p>
+          <p className="text-3xl font-bold text-amber-600">{stats.totalPotencia.toFixed(1)} kVAr</p>
           <p className="text-xs text-slate-400 mt-1">Capacidade total</p>
         </div>
 
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 bg-green-50 rounded-lg text-green-600">
-              <CheckCircle2 size={22} />
+              <Building size={22} />
             </div>
             <span className="text-xs font-medium text-slate-500 uppercase">Clientes</span>
           </div>
@@ -324,9 +380,7 @@ export default function BancosPage() {
             </div>
             <span className="text-xs font-medium text-slate-500 uppercase">Eficiência Média</span>
           </div>
-          <p className="text-3xl font-bold text-primary">
-            {resumoCliente ? resumoCliente.eficienciaPercentual.toFixed(1) : '100'}%
-          </p>
+          <p className="text-3xl font-bold text-primary">--%</p>
           <p className="text-xs text-slate-400 mt-1">do sistema</p>
         </div>
       </div>
@@ -344,58 +398,23 @@ export default function BancosPage() {
               <p className="text-sm text-slate-500">Resumo do Cliente</p>
             </div>
             <button
-              onClick={handleLoginRedirect}
+              onClick={() => router.push(`/capacitores?cliente_id=${clienteFiltro}`)}
               className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition-colors"
             >
               <Eye size={16} />
-              Acessar Área do Cliente
+              Ver todos os capacitores
             </button>
           </div>
           
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
             <div className="text-center">
               <p className="text-xs text-slate-500">Bancos</p>
               <p className="text-xl font-bold text-primary">{resumoCliente.totalBancos}</p>
             </div>
             <div className="text-center">
               <p className="text-xs text-slate-500">kVAr Instalado</p>
-              <p className="text-xl font-bold text-amber-600">{resumoCliente.totalKvarInstalado.toFixed(0)}</p>
+              <p className="text-xl font-bold text-amber-600">{resumoCliente.totalKvarInstalado.toFixed(1)}</p>
             </div>
-            <div className="text-center">
-              <p className="text-xs text-slate-500">kVAr Efetivo</p>
-              <p className="text-xl font-bold text-green-600">{resumoCliente.totalKvarEfetivo.toFixed(0)}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-slate-500">Deficiência</p>
-              <p className="text-xl font-bold text-red-600">{resumoCliente.deficienciaKvar.toFixed(0)} kVAr</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-slate-500">Capacitores com Problema</p>
-              <p className="text-xl font-bold text-amber-600">{resumoCliente.capacitoresProblema}</p>
-            </div>
-          </div>
-          
-          <div className="mt-4">
-            <div className="flex justify-between text-sm mb-1">
-              <span>Eficiência do Sistema</span>
-              <span className="font-bold">{resumoCliente.eficienciaPercentual.toFixed(1)}%</span>
-            </div>
-            <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
-              <div 
-                className={cn(
-                  "h-full rounded-full",
-                  resumoCliente.eficienciaPercentual > 80 ? "bg-green-500" : 
-                  resumoCliente.eficienciaPercentual > 60 ? "bg-amber-500" : "bg-red-500"
-                )}
-                style={{ width: `${resumoCliente.eficienciaPercentual}%` }}
-              />
-            </div>
-            {resumoCliente.deficienciaKvar > 0 && (
-              <p className="text-xs text-red-500 mt-2">
-                ⚠️ Deficiência de {resumoCliente.deficienciaKvar.toFixed(0)} kVAr detectada. 
-                Recomenda-se manutenção para recuperar a eficiência.
-              </p>
-            )}
           </div>
         </motion.div>
       )}
@@ -437,7 +456,7 @@ export default function BancosPage() {
           <div className="lg:col-span-3 flex items-end gap-2">
             <div className="flex-1 bg-primary/5 rounded-lg p-2 text-center">
               <p className="text-[10px] text-slate-500">Potência Total</p>
-              <p className="text-lg font-bold text-primary">{stats.totalPotencia.toFixed(0)} kVAr</p>
+              <p className="text-lg font-bold text-primary">{stats.totalPotencia.toFixed(1)} kVAr</p>
             </div>
             <div className="flex gap-1">
               <button
@@ -550,7 +569,7 @@ export default function BancosPage() {
               </div>
 
               <button 
-                onClick={() => handleVerCapacitores(banco.id)}
+                onClick={() => router.push(`/capacitores?banco_id=${banco.id}`)}
                 className="mt-5 w-full flex items-center justify-center gap-2 rounded-xl bg-primary/10 py-2.5 text-primary font-medium hover:bg-primary/20 transition-colors"
               >
                 Ver Capacitores
@@ -580,11 +599,11 @@ export default function BancosPage() {
                     <td className="px-6 py-4">{banco.clientes?.nome}</td>
                     <td className="px-6 py-4 text-slate-500">{banco.localizacao || '-'}</td>
                     <td className="px-6 py-4">{banco.tensao_nominal || '-'} V</td>
-                    <td className="px-6 py-4 font-bold text-primary">{banco.potencia_calculada?.toFixed(0) || 0} kVAr</td>
+                    <td className="px-6 py-4 font-bold text-primary">{banco.potencia_calculada?.toFixed(1) || 0} kVAr</td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex justify-center gap-2">
                         <button 
-                          onClick={() => handleVerCapacitores(banco.id)}
+                          onClick={() => router.push(`/capacitores?banco_id=${banco.id}`)}
                           className="p-1.5 text-primary hover:bg-primary/10 rounded-lg transition-colors"
                           title="Ver capacitores"
                         >
@@ -604,7 +623,7 @@ export default function BancosPage() {
                         </button>
                       </div>
                     </td>
-                  </tr>
+                   </tr>
                 ))}
               </tbody>
             </table>
@@ -746,114 +765,4 @@ export default function BancosPage() {
       </AnimatePresence>
     </div>
   );
-
-  async function handleOpenModal(banco: any = null) {
-    if (banco) {
-      setEditingBanco(banco);
-      setFormData({
-        cliente_id: banco.cliente_id,
-        nome_banco: banco.nome_banco,
-        localizacao: banco.localizacao || '',
-        tensao_nominal: banco.tensao_nominal || '',
-        potencia_total_kvar: banco.potencia_calculada?.toString() || banco.potencia_total_kvar?.toString() || '',
-      });
-    } else {
-      setEditingBanco(null);
-      setFormData({
-        cliente_id: clienteFiltro !== 'todos' ? clienteFiltro : '',
-        nome_banco: '',
-        localizacao: '',
-        tensao_nominal: '',
-        potencia_total_kvar: '',
-      });
-    }
-    setIsModalOpen(true);
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    
-    if (!formData.cliente_id) {
-      Swal.fire('Atenção', 'Selecione um cliente', 'warning');
-      return;
-    }
-    
-    try {
-      const data = {
-        cliente_id: formData.cliente_id,
-        nome_banco: formData.nome_banco,
-        localizacao: formData.localizacao || null,
-        tensao_nominal: formData.tensao_nominal ? parseNumber(formData.tensao_nominal) : null,
-        potencia_total_kvar: 0, // Começa com 0, será calculado depois
-      };
-
-      if (editingBanco) {
-        const { error } = await supabase
-          .from('bancos_capacitores')
-          .update(data)
-          .eq('id', editingBanco.id);
-        if (error) throw error;
-        Swal.fire('Sucesso', 'Banco atualizado com sucesso!', 'success');
-      } else {
-        const { error } = await supabase
-          .from('bancos_capacitores')
-          .insert([{ ...data, ativo: true }]);
-        if (error) throw error;
-        Swal.fire('Sucesso', 'Banco cadastrado com sucesso!', 'success');
-      }
-      setIsModalOpen(false);
-      fetchData();
-    } catch (error: any) {
-      Swal.fire('Erro', error.message, 'error');
-    }
-  }
-
-  async function handleDelete(id: string) {
-    const result = await Swal.fire({
-      title: 'Tem certeza?',
-      text: "O banco será desativado do sistema.",
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#0a2b3c',
-      cancelButtonColor: '#e74c3c',
-      confirmButtonText: 'Sim, desativar',
-      cancelButtonText: 'Cancelar'
-    });
-
-    if (result.isConfirmed) {
-      try {
-        const { count: capacitoresCount } = await supabase
-          .from('capacitores')
-          .select('*', { count: 'exact', head: true })
-          .eq('banco_id', id)
-          .eq('ativo', true);
-        
-        if (capacitoresCount && capacitoresCount > 0) {
-          const confirm = await Swal.fire({
-            title: 'Atenção!',
-            text: `Este banco possui ${capacitoresCount} capacitor(es) vinculado(s). Desativar o banco irá desativar também seus capacitores. Deseja continuar?`,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#0a2b3c',
-            cancelButtonColor: '#e74c3c',
-            confirmButtonText: 'Sim, continuar',
-            cancelButtonText: 'Cancelar'
-          });
-          
-          if (!confirm.isConfirmed) return;
-        }
-        
-        const { error } = await supabase
-          .from('bancos_capacitores')
-          .update({ ativo: false })
-          .eq('id', id);
-        
-        if (error) throw error;
-        Swal.fire('Desativado!', 'Banco removido com sucesso.', 'success');
-        fetchData();
-      } catch (error: any) {
-        Swal.fire('Erro', error.message, 'error');
-      }
-    }
-  }
 }
