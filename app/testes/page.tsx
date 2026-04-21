@@ -1,17 +1,20 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { ClipboardCheck, Zap, Save, Calculator, AlertCircle } from 'lucide-react';
+import { ClipboardCheck, Zap, Save, Calculator, AlertCircle, ArrowLeft } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { calculateCorrenteTeorica, calculateCapacitanciaTeoricaDelta, getStatusValidacao, cn, parseNumber } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
 
 export default function RealizarTestePage() {
+  const router = useRouter();
   const [clientes, setClientes] = useState<any[]>([]);
   const [bancos, setBancos] = useState<any[]>([]);
   const [capacitores, setCapacitores] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [config, setConfig] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
 
   const [selection, setSelection] = useState({
     cliente_id: '',
@@ -32,22 +35,22 @@ export default function RealizarTestePage() {
     setResultado(null);
   }, [selection, medicao]);
 
-  const fetchClientes = React.useCallback(async () => {
+  const fetchClientes = useCallback(async () => {
     const { data } = await supabase.from('clientes').select('id, nome').eq('ativo', true).order('nome');
     setClientes(data || []);
   }, []);
 
-  const fetchBancos = React.useCallback(async (clienteId: string) => {
+  const fetchBancos = useCallback(async (clienteId: string) => {
     const { data } = await supabase.from('bancos_capacitores').select('id, nome_banco').eq('cliente_id', clienteId).eq('ativo', true).order('nome_banco');
     setBancos(data || []);
   }, []);
 
-  const fetchCapacitores = React.useCallback(async (bancoId: string) => {
+  const fetchCapacitores = useCallback(async (bancoId: string) => {
     const { data } = await supabase.from('capacitores').select('*').eq('banco_id', bancoId).eq('ativo', true).order('codigo_identificacao');
     setCapacitores(data || []);
   }, []);
 
-  const fetchConfig = React.useCallback(async () => {
+  const fetchConfig = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('configuracoes').select('*').eq('id', 'global').single();
       
@@ -128,16 +131,6 @@ export default function RealizarTestePage() {
       const status = getStatusValidacao(desvio, config);
       const desvioExibicao = Math.round(desvio * 100) / 100;
       
-      console.log(' Cálculo Corrente:', {
-        potencia: cap.potencia_kvar,
-        tensao: vMedida,
-        correnteMedida: iMedida,
-        correnteTeorica: correnteTeorica.toFixed(4),
-        desvioOriginal: desvio,
-        desvioExibicao,
-        status
-      });
-      
       setResultado({
         tipo: 'corrente',
         correnteTeorica,
@@ -146,7 +139,8 @@ export default function RealizarTestePage() {
         correnteMedida: iMedida,
         desvio: desvioExibicao,
         desvioOriginal: desvio,
-        status
+        status,
+        capacitor: cap
       });
       
     } else {
@@ -162,15 +156,6 @@ export default function RealizarTestePage() {
       const status = getStatusValidacao(desvio, config);
       const desvioExibicao = Math.round(desvio * 100) / 100;
       
-      console.log(' Cálculo Capacitância:', {
-        nominalFase: cap.capacitancia_nominal_uf,
-        teoricaEntreFases: capacitanciaTeorica,
-        medida: cMedida,
-        desvioOriginal: desvio,
-        desvioExibicao,
-        status
-      });
-      
       setResultado({
         tipo: 'capacitancia',
         capacitanciaTeorica,
@@ -178,23 +163,21 @@ export default function RealizarTestePage() {
         capacitanciaMedida: cMedida,
         desvio: desvioExibicao,
         desvioOriginal: desvio,
-        status
+        status,
+        capacitor: cap
       });
     }
   }
 
-  // ============================================
-  // 🔧 FUNÇÃO handleSalvar CORRIGIDA com LOGS
-  // ============================================
   async function handleSalvar() {
     if (!resultado) {
       Swal.fire('Atenção', 'Calcule o resultado antes de salvar', 'warning');
       return;
     }
 
+    setSaving(true);
+    
     try {
-      setLoading(true);
-      
       const vMedida = parseNumber(medicao.tensao_medida_v);
       const iMedida = parseNumber(medicao.corrente_medida_a);
       const cMedida = parseNumber(medicao.capacitancia_medida_uf);
@@ -218,39 +201,37 @@ export default function RealizarTestePage() {
         payload.capacitancia_teorica_uf = resultado.capacitanciaTeorica;
       }
 
-      //  LOG EXTREMAMENTE DETALHADO
-      console.log('========== DEBUG SALVAMENTO ==========');
-      console.log('1. Status calculado:', resultado.status);
-      console.log('2. Desvio calculado:', resultado.desvioOriginal || resultado.desvio);
-      console.log('3. Corrente medida:', iMedida);
-      console.log('4. Corrente teórica:', resultado.correnteTeorica);
-      console.log('5. Payload completo:', JSON.stringify(payload, null, 2));
-      console.log('======================================');
-
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('medicoes')
-        .insert([payload])
-        .select();
+        .insert([payload]);
 
       if (error) throw error;
-      
-      console.log('✅ MEDIÇÃO SALVA COM SUCESSO:', data);
 
       Swal.fire({
         title: 'Sucesso!',
         text: `Medição salva como ${resultado.status.toUpperCase()}`,
-        icon: 'success'
+        icon: 'success',
+        confirmButtonColor: '#0a2b3c'
       });
       
+      // Limpar formulário após salvar
       setResultado(null);
       setMedicao({ tensao_medida_v: '', corrente_medida_a: '', capacitancia_medida_uf: '' });
       
+      // Opção: voltar para o histórico ou manter na página
+      // router.push(`/medicoes?capacitor_id=${selection.capacitor_id}`);
+      
     } catch (error: any) {
-      console.error('❌ Erro CRÍTICO:', error);
+      console.error('Erro ao salvar:', error);
       Swal.fire('Erro', error.message, 'error');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
+  }
+
+  function handleNovoTeste() {
+    setResultado(null);
+    setMedicao({ tensao_medida_v: '', corrente_medida_a: '', capacitancia_medida_uf: '' });
   }
 
   function getRecomendacao(status: string): string {
@@ -266,17 +247,28 @@ export default function RealizarTestePage() {
     }
   }
 
+  const capacitorSelecionado = capacitores.find(c => c.id === selection.capacitor_id);
+
   return (
     <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <h1 className="text-3xl font-bold text-primary">Realizar Teste</h1>
-        <p className="text-slate-500">Execute testes de validação em campo ou bancada</p>
+      <header className="flex items-center gap-4">
+        <button
+          onClick={() => router.back()}
+          className="flex items-center gap-2 text-primary hover:underline"
+        >
+          <ArrowLeft size={20} />
+          Voltar
+        </button>
+        <div>
+          <h1 className="text-3xl font-bold text-primary">Realizar Teste</h1>
+          <p className="text-slate-500">Execute testes de validação em campo ou bancada</p>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         {/* Selection Form */}
         <div className="lg:col-span-2 space-y-6">
-          <section className="rounded-xl bg-white p-6 shadow-sm">
+          <section className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
             <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-primary">
               <Zap className="text-secondary" size={20} />
               Identificação
@@ -318,9 +310,20 @@ export default function RealizarTestePage() {
                 </select>
               </div>
             </div>
+            
+            {capacitorSelecionado && (
+              <div className="mt-4 p-3 bg-slate-50 rounded-lg">
+                <p className="text-xs text-slate-500">Informações do Capacitor Selecionado:</p>
+                <div className="grid grid-cols-3 gap-2 mt-1 text-sm">
+                  <div><span className="text-slate-500">Potência:</span> <strong>{capacitorSelecionado.potencia_kvar} kVAr</strong></div>
+                  <div><span className="text-slate-500">Tensão Nominal:</span> <strong>{capacitorSelecionado.tensao_nominal_v} V</strong></div>
+                  <div><span className="text-slate-500">Capacitância:</span> <strong>{capacitorSelecionado.capacitancia_nominal_uf || '-'} µF</strong></div>
+                </div>
+              </div>
+            )}
           </section>
 
-          <section className="rounded-xl bg-white p-6 shadow-sm">
+          <section className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
             <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-primary">
               <ClipboardCheck className="text-secondary" size={20} />
               Medições
@@ -328,22 +331,28 @@ export default function RealizarTestePage() {
             
             <div className="mb-6 flex gap-4">
               <button 
-                onClick={() => setSelection({...selection, tipo_teste: 'corrente'})}
+                onClick={() => {
+                  setSelection({...selection, tipo_teste: 'corrente'});
+                  setResultado(null);
+                }}
                 className={cn(
                   "flex-1 rounded-lg border py-3 text-sm font-medium transition-all",
                   selection.tipo_teste === 'corrente' ? "border-primary bg-primary text-white" : "border-slate-200 text-slate-600 hover:border-primary/50"
                 )}
               >
-                 Teste por Corrente (Campo)
+                ⚡ Teste por Corrente (Campo)
               </button>
               <button 
-                onClick={() => setSelection({...selection, tipo_teste: 'capacitancia'})}
+                onClick={() => {
+                  setSelection({...selection, tipo_teste: 'capacitancia'});
+                  setResultado(null);
+                }}
                 className={cn(
                   "flex-1 rounded-lg border py-3 text-sm font-medium transition-all",
                   selection.tipo_teste === 'capacitancia' ? "border-primary bg-primary text-white" : "border-slate-200 text-slate-600 hover:border-primary/50"
                 )}
               >
-                 Teste por Capacitância (Bancada)
+                🔋 Teste por Capacitância (Bancada)
               </button>
             </div>
 
@@ -403,10 +412,10 @@ export default function RealizarTestePage() {
             {config && (
               <div className="mt-4 rounded-lg bg-slate-50 p-3 text-[10px] text-slate-500">
                 <p className="mb-1 font-bold uppercase tracking-wider">Tolerâncias IEC 60831-1:</p>
-                <div className="flex justify-between">
-                  <span>✅ Aprovado: {config.tolerancia_min_aprovado}% a {config.tolerancia_max_aprovado}%</span>
-                  <span>⚠️ Atenção: {config.tolerancia_min_atencao}% a {config.tolerancia_max_atencao}%</span>
-                  <span>❌ Reprovado: {'<'} {config.tolerancia_min_atencao}% ou {'>'} {config.tolerancia_max_atencao}%</span>
+                <div className="flex justify-between flex-wrap gap-2">
+                  <span className="text-green-600">✅ Aprovado: {config.tolerancia_min_aprovado}% a {config.tolerancia_max_aprovado}%</span>
+                  <span className="text-amber-600">⚠️ Atenção: {config.tolerancia_min_atencao}% a {config.tolerancia_max_atencao}%</span>
+                  <span className="text-red-600">❌ Reprovado: {'<'} {config.tolerancia_min_atencao}% ou {'>'} {config.tolerancia_max_atencao}%</span>
                 </div>
               </div>
             )}
@@ -415,7 +424,7 @@ export default function RealizarTestePage() {
 
         {/* Results Panel */}
         <div className="space-y-6">
-          <section className="rounded-xl bg-white p-6 shadow-sm min-h-[400px] flex flex-col">
+          <section className="rounded-xl bg-white p-6 shadow-sm border border-slate-100 min-h-[400px] flex flex-col">
             <h2 className="mb-6 text-lg font-semibold text-primary">Resultado da Análise</h2>
             
             {resultado ? (
@@ -448,7 +457,7 @@ export default function RealizarTestePage() {
                     {resultado.tipo === 'corrente' ? (
                       <>
                         <div className="flex justify-between border-t border-slate-200 pt-2">
-                          <span className="text-slate-500">Corrente Nominal ({capacitores.find(c => c.id === selection.capacitor_id)?.tensao_nominal_v}V):</span>
+                          <span className="text-slate-500">Corrente Nominal ({resultado.capacitor?.tensao_nominal_v}V):</span>
                           <span className="font-medium text-primary">{resultado.correnteNominal?.toFixed(2)} A</span>
                         </div>
                         <div className="flex justify-between">
@@ -489,14 +498,23 @@ export default function RealizarTestePage() {
                   </div>
                 </div>
 
-                <button 
-                  onClick={handleSalvar}
-                  disabled={loading}
-                  className="mt-8 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 font-bold text-white transition-all hover:bg-primary/90 disabled:opacity-50"
-                >
-                  <Save size={20} />
-                  {loading ? 'Salvando...' : 'Salvar Medição'}
-                </button>
+                <div className="flex gap-3 mt-8">
+                  <button 
+                    onClick={handleNovoTeste}
+                    className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-slate-200 py-3 font-medium text-slate-600 transition-all hover:bg-slate-50"
+                  >
+                    <Calculator size={20} />
+                    Novo Teste
+                  </button>
+                  <button 
+                    onClick={handleSalvar}
+                    disabled={saving}
+                    className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-primary py-3 font-bold text-white transition-all hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    <Save size={20} />
+                    {saving ? 'Salvando...' : 'Salvar Medição'}
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center text-center text-slate-400">
