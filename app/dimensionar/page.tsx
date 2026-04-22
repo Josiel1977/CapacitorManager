@@ -4,7 +4,7 @@ import React, { useState, useRef } from 'react';
 import { 
   Calculator, Zap, TrendingUp, DollarSign, CheckCircle2, 
   FileText, Loader2, AlertTriangle, Package, History,
-  Calendar, Download, Printer, Activity, Layers
+  Calendar, Download, Printer, Activity, Layers, Upload, X
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
