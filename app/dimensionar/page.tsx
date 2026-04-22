@@ -1,29 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
-  Calculator, 
-  Zap, 
-  ArrowRight, 
-  Info, 
-  CheckCircle2, 
-  AlertTriangle, 
-  Download, 
-  FileText, 
-  History, 
-  Plus, 
-  Trash2,
-  Settings2,
-  Activity,
-  TrendingUp,
-  Layers,
-  Printer,
-  ShoppingCart,
-  DollarSign,
-  Package,
-  Upload,
-  X,
-  Loader2
+  Calculator, Zap, TrendingUp, DollarSign, CheckCircle2, 
+  Upload, FileText, X, Loader2, AlertTriangle, Plus,
+  Trash2, Download, Printer, Package, Layers, History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -34,16 +15,14 @@ import { toPng } from 'html-to-image';
 // ============================================
 // TIPOS
 // ============================================
-interface MonthlyData {
-  month: string;
-  activeEnergy: number; // kWh
-  reactiveEnergy: number; // kVArh
-  demand?: number; // kW
-}
-
-interface PhaseData {
-  kw: string;
-  fp: string;
+interface FaturaData {
+  mes: string;
+  consumoAtivoPonta: number;
+  consumoAtivoForaPonta: number;
+  demandaPonta: number;
+  energiaReativaPonta: number;
+  energiaReativaForaPonta: number;
+  totalPagar: number;
 }
 
 interface TransformadorConfig {
@@ -51,169 +30,87 @@ interface TransformadorConfig {
   quantidade: number;
 }
 
-interface FaturaData {
-  consumoAtivoPonta: number;
-  consumoAtivoForaPonta: number;
-  demandaPonta: number;
-  energiaReativaExcPonta: number;
-  energiaReativaExcForaPonta: number;
-  totalPagar: number;
-  mesReferencia: string;
+interface ResultadoDimensionamento {
+  totalKvar: number;
+  kvarPorTrafo: number[];
+  economiaMensal: number;
+  investimentoTotal: number;
+  paybackMeses: number;
+  fpAtual: number;
+  fpProjetado: number;
+  reducaoCorrentePercentual: number;
+  distribuicao: { potencia: number; quantidade: number }[];
 }
 
 // ============================================
-// TABELAS DE REFERÊNCIA
+// COMPONENTE DE UPLOAD DE FATURA INDIVIDUAL
 // ============================================
-const precosMateriais = {
-  capacitor: { unidade: 'kVAr', precoPorUnidade: 89.90, descricao: 'Capacitor trifásico' },
-  disjuntor: { unidade: 'peça', precoPorUnidade: 45.90, descricao: 'Disjuntor termomagnético' },
-  contator: { unidade: 'peça', precoPorUnidade: 120.00, descricao: 'Contator AC-6b' },
-  cabo: { unidade: 'metro', precoPorUnidade: 18.50, descricao: 'Cabo de cobre' },
-  relogioFP: { unidade: 'peça', precoPorUnidade: 350.00, descricao: 'Relé controlador de FP' },
-  conjuntoMontagem: { unidade: 'peça', precoPorUnidade: 450.00, descricao: 'Montagem e instalação' }
-};
-
-const tabelaFatores: { [key: string]: { [key: string]: number } } = {
-  '0.50': { '0.92': 1.732, '0.95': 1.982, '0.98': 2.208, '1.00': 2.354 },
-  '0.55': { '0.92': 1.515, '0.95': 1.765, '0.98': 1.991, '1.00': 2.137 },
-  '0.60': { '0.92': 1.333, '0.95': 1.583, '0.98': 1.809, '1.00': 1.955 },
-  '0.65': { '0.92': 1.169, '0.95': 1.419, '0.98': 1.645, '1.00': 1.791 },
-  '0.70': { '0.92': 1.020, '0.95': 1.270, '0.98': 1.496, '1.00': 1.642 },
-  '0.75': { '0.92': 0.882, '0.95': 1.132, '0.98': 1.358, '1.00': 1.504 },
-  '0.80': { '0.92': 0.750, '0.95': 1.000, '0.98': 1.226, '1.00': 1.372 },
-  '0.85': { '0.92': 0.620, '0.95': 0.870, '0.98': 1.096, '1.00': 1.242 },
-  '0.90': { '0.92': 0.484, '0.95': 0.734, '0.98': 0.960, '1.00': 1.106 },
-  '0.92': { '0.92': 0.426, '0.95': 0.676, '0.98': 0.902, '1.00': 1.048 }
-};
-
-const tabelaCondutores = [
-  { corrente: 30, secao: 6, iz: 41, disjuntor: 32 },
-  { corrente: 40, secao: 10, iz: 57, disjuntor: 40 },
-  { corrente: 55, secao: 16, iz: 76, disjuntor: 50 },
-  { corrente: 70, secao: 25, iz: 101, disjuntor: 63 },
-  { corrente: 90, secao: 35, iz: 125, disjuntor: 80 },
-  { corrente: 110, secao: 50, iz: 151, disjuntor: 100 },
-  { corrente: 150, secao: 70, iz: 192, disjuntor: 125 },
-  { corrente: 180, secao: 95, iz: 232, disjuntor: 160 },
-  { corrente: 220, secao: 120, iz: 269, disjuntor: 200 },
-  { corrente: 270, secao: 150, iz: 317, disjuntor: 250 },
-  { corrente: 330, secao: 185, iz: 362, disjuntor: 315 },
-  { corrente: 390, secao: 240, iz: 424, disjuntor: 350 }
-];
-
-const tabelaContatores = [
-  { correnteMax: 12, modelo: 'CWM-12', correnteNominal: 12, preco: 120 },
-  { correnteMax: 18, modelo: 'CWM-18', correnteNominal: 18, preco: 150 },
-  { correnteMax: 25, modelo: 'CWM-25', correnteNominal: 25, preco: 180 },
-  { correnteMax: 32, modelo: 'CWM-32', correnteNominal: 32, preco: 210 },
-  { correnteMax: 40, modelo: 'CWM-40', correnteNominal: 40, preco: 250 },
-  { correnteMax: 50, modelo: 'CWM-50', correnteNominal: 50, preco: 290 },
-  { correnteMax: 65, modelo: 'CWM-65', correnteNominal: 65, preco: 350 },
-  { correnteMax: 80, modelo: 'CWM-80', correnteNominal: 80, preco: 420 },
-  { correnteMax: 95, modelo: 'CWM-95', correnteNominal: 95, preco: 500 },
-  { correnteMax: 115, modelo: 'CWM-115', correnteNominal: 115, preco: 580 },
-  { correnteMax: 150, modelo: 'CWM-150', correnteNominal: 150, preco: 680 },
-  { correnteMax: 185, modelo: 'CWM-185', correnteNominal: 185, preco: 780 },
-  { correnteMax: 225, modelo: 'CWM-225', correnteNominal: 225, preco: 890 },
-  { correnteMax: 265, modelo: 'CWM-265', correnteNominal: 265, preco: 1050 },
-  { correnteMax: 330, modelo: 'CWM-330', correnteNominal: 330, preco: 1250 },
-  { correnteMax: 400, modelo: 'CWM-400', correnteNominal: 400, preco: 1450 }
-];
-
-// ============================================
-// COMPONENTE DE UPLOAD DE FATURA
-// ============================================
-function FaturaUpload({ onDataExtracted }: { onDataExtracted: (data: FaturaData) => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [extracting, setExtracting] = useState(false);
-  const [extractedData, setExtractedData] = useState<FaturaData | null>(null);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      extractDataFromPDF(selectedFile);
-    }
-  };
-
-  const extractDataFromPDF = async (file: File) => {
-    setExtracting(true);
-    
-    // Simulação de extração (em produção, integrar com OCR/PDF parser)
-    setTimeout(() => {
-      const extracted: FaturaData = {
-        consumoAtivoPonta: 2610,
-        consumoAtivoForaPonta: 40616,
-        demandaPonta: 293,
-        energiaReativaExcPonta: 732,
-        energiaReativaExcForaPonta: 5129,
-        totalPagar: 34464.69,
-        mesReferencia: '01/2026'
-      };
-      
-      setExtractedData(extracted);
-      onDataExtracted(extracted);
-      setExtracting(false);
-      
-      Swal.fire({
-        title: 'Fatura processada!',
-        text: `Dados extraídos com sucesso para ${extracted.mesReferencia}`,
-        icon: 'success',
-        timer: 2000,
-        showConfirmButton: false
-      });
-    }, 1500);
-  };
-
+function FaturaInput({ fatura, index, onUpdate, onRemove }: { 
+  fatura: FaturaData; 
+  index: number; 
+  onUpdate: (index: number, field: keyof FaturaData, value: any) => void;
+  onRemove: (index: number) => void;
+}) {
   return (
-    <div className="space-y-4">
-      <div className={cn(
-        "border-2 border-dashed rounded-2xl p-6 text-center transition-all",
-        file ? "border-green-300 bg-green-50" : "border-slate-200 hover:border-primary/50"
-      )}>
-        {!file ? (
-          <>
-            <Upload className="w-10 h-10 mx-auto text-slate-400 mb-3" />
-            <p className="text-sm text-slate-500 mb-2">Clique ou arraste o PDF da fatura</p>
-            <p className="text-xs text-slate-400">Suporta arquivos .pdf (máx. 5MB)</p>
-            <input type="file" accept=".pdf" onChange={handleFileChange} className="hidden" id="fatura-upload" />
-            <label htmlFor="fatura-upload" className="inline-block mt-4 px-4 py-2 bg-primary text-white rounded-lg text-sm cursor-pointer hover:bg-primary/90">
-              Selecionar PDF
-            </label>
-          </>
-        ) : (
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <FileText className="text-primary" size={24} />
-              <div className="text-left">
-                <p className="text-sm font-medium">{file.name}</p>
-                <p className="text-xs text-slate-400">{(file.size / 1024).toFixed(0)} KB</p>
-              </div>
-            </div>
-            {extracting ? (
-              <Loader2 className="animate-spin text-primary" size={20} />
-            ) : extractedData ? (
-              <CheckCircle2 className="text-green-500" size={20} />
-            ) : null}
-            <button onClick={() => { setFile(null); setExtractedData(null); }} className="p-1 hover:bg-slate-100 rounded-full">
-              <X size={16} />
-            </button>
-          </div>
-        )}
+    <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-bold text-primary">{fatura.mes}</span>
+        <button onClick={() => onRemove(index)} className="text-red-400 hover:text-red-600">
+          <Trash2 size={14} />
+        </button>
       </div>
-
-      {extractedData && (
-        <div className="bg-green-50 rounded-xl p-4 border border-green-200">
-          <p className="text-xs font-bold text-green-700 mb-2">📊 Dados Extraídos da Fatura</p>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="flex justify-between"><span>Consumo Ponta:</span><strong>{extractedData.consumoAtivoPonta} kWh</strong></div>
-            <div className="flex justify-between"><span>Consumo Fora Ponta:</span><strong>{extractedData.consumoAtivoForaPonta} kWh</strong></div>
-            <div className="flex justify-between"><span>Demanda Ponta:</span><strong>{extractedData.demandaPonta} kW</strong></div>
-            <div className="flex justify-between"><span>Energia Reativa:</span><strong>{extractedData.energiaReativaExcPonta + extractedData.energiaReativaExcForaPonta} kVArh</strong></div>
-            <div className="flex justify-between col-span-2 pt-2 border-t border-green-200"><span>Total da Fatura:</span><strong className="text-primary">R$ {extractedData.totalPagar.toFixed(2)}</strong></div>
-          </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[8px] font-black text-slate-400">kWh Ponta</label>
+          <input 
+            type="number" 
+            value={fatura.consumoAtivoPonta || ''} 
+            onChange={(e) => onUpdate(index, 'consumoAtivoPonta', parseFloat(e.target.value) || 0)}
+            className="w-full rounded-lg border border-slate-200 p-2 text-xs"
+            placeholder="Ex: 2610"
+          />
         </div>
-      )}
+        <div>
+          <label className="text-[8px] font-black text-slate-400">kWh Fora Ponta</label>
+          <input 
+            type="number" 
+            value={fatura.consumoAtivoForaPonta || ''} 
+            onChange={(e) => onUpdate(index, 'consumoAtivoForaPonta', parseFloat(e.target.value) || 0)}
+            className="w-full rounded-lg border border-slate-200 p-2 text-xs"
+            placeholder="Ex: 40616"
+          />
+        </div>
+        <div>
+          <label className="text-[8px] font-black text-slate-400">Demanda (kW)</label>
+          <input 
+            type="number" 
+            value={fatura.demandaPonta || ''} 
+            onChange={(e) => onUpdate(index, 'demandaPonta', parseFloat(e.target.value) || 0)}
+            className="w-full rounded-lg border border-slate-200 p-2 text-xs"
+            placeholder="Ex: 293"
+          />
+        </div>
+        <div>
+          <label className="text-[8px] font-black text-slate-400">kVArh Ponta</label>
+          <input 
+            type="number" 
+            value={fatura.energiaReativaPonta || ''} 
+            onChange={(e) => onUpdate(index, 'energiaReativaPonta', parseFloat(e.target.value) || 0)}
+            className="w-full rounded-lg border border-slate-200 p-2 text-xs"
+            placeholder="Ex: 732"
+          />
+        </div>
+        <div className="col-span-2">
+          <label className="text-[8px] font-black text-slate-400">kVArh Fora Ponta</label>
+          <input 
+            type="number" 
+            value={fatura.energiaReativaForaPonta || ''} 
+            onChange={(e) => onUpdate(index, 'energiaReativaForaPonta', parseFloat(e.target.value) || 0)}
+            className="w-full rounded-lg border border-slate-200 p-2 text-xs"
+            placeholder="Ex: 5129"
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -222,354 +119,198 @@ function FaturaUpload({ onDataExtracted }: { onDataExtracted: (data: FaturaData)
 // COMPONENTE PRINCIPAL
 // ============================================
 export default function DimensionarPage() {
-  const [method, setMethod] = useState<'analyzer' | 'bills' | 'threePhase'>('bills');
-  const [showBudget, setShowBudget] = useState(false);
-  const [budgetItems, setBudgetItems] = useState<{ descricao: string; quantidade: number; precoUnitario: number; total: number }[]>([]);
-  const reportRef = useRef<HTMLDivElement>(null);
-  
-  // Estado do método analyzer
-  const [activePower, setActivePower] = useState<string>('');
-  const [currentFP, setCurrentFP] = useState<string>('0.80');
-  const [targetFP, setTargetFP] = useState<string>('0.92');
-  
-  // Estado do método trifásico
-  const [phases, setPhases] = useState<{A: PhaseData, B: PhaseData, C: PhaseData}>({
-    A: { kw: '', fp: '0.80' },
-    B: { kw: '', fp: '0.80' },
-    C: { kw: '', fp: '0.80' }
-  });
-
-  // Estado dos transformadores
   const [transformadores, setTransformadores] = useState<TransformadorConfig[]>([
     { potencia: 225, quantidade: 7 },
     { potencia: 75, quantidade: 1 }
   ]);
-
-  // Estado da fatura
-  const [faturaData, setFaturaData] = useState<FaturaData | null>(null);
-
-  // Estado do sistema
-  const [systemVoltage, setSystemVoltage] = useState<string>('380');
-  const [workHours, setWorkHours] = useState<string>('220');
-
-  // Estado de faturas mensais
-  const [monthlyBills, setMonthlyBills] = useState<MonthlyData[]>([
-    { month: 'Jan', activeEnergy: 0, reactiveEnergy: 0 },
+  
+  const [faturas, setFaturas] = useState<FaturaData[]>([
+    { mes: 'Jan/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
+    { mes: 'Fev/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
+    { mes: 'Mar/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
+    { mes: 'Abr/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
+    { mes: 'Mai/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
+    { mes: 'Jun/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
+    { mes: 'Jul/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
+    { mes: 'Ago/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
+    { mes: 'Set/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
+    { mes: 'Out/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
+    { mes: 'Nov/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
+    { mes: 'Dez/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 }
   ]);
 
-  const [result, setResult] = useState<{
-    totalKvar: number;
-    fixedKvar: number;
-    autoKvar: number;
-    stages: number[];
-    kVA_atual: number;
-    kVA_novo: number;
-    reducaoPercentual: number;
-    trafoLossesKvar: number;
-    estimatedCurrentAtual: number;
-    estimatedCurrentNovo: number;
-    disjuntorRecomendado: number;
-    caboRecomendado: string;
-    secaoCabo: number;
-    correnteCabo: number;
-    observacaoProtecao: string;
-    contatoresRecomendados?: { modelo: string; correnteNominal: number; quantidade: number; preco: number; observacao: string }[];
-    phaseResults?: { phase: string, kvar: number }[];
-    economiaMensal?: number;
-    paybackMeses?: number;
-    investimentoEstimado?: number;
-  } | null>(null);
+  const [targetFP, setTargetFP] = useState<number>(0.92);
+  const [resultado, setResultado] = useState<ResultadoDimensionamento | null>(null);
+  const [calculando, setCalculando] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
 
-  // ============================================
-  // FUNÇÕES AUXILIARES
-  // ============================================
+  // Calcular potência total dos transformadores
   const potenciaTotalTransformadores = transformadores.reduce((acc, t) => acc + (t.potencia * t.quantidade), 0);
-  const capacitorRecomendadoPorTrafo = potenciaTotalTransformadores * 0.3;
 
-  const updateTransformador = (index: number, field: 'potencia' | 'quantidade', value: number) => {
-    const novos = [...transformadores];
-    novos[index][field] = value;
-    setTransformadores(novos);
+  // Função para adicionar nova fatura
+  const addFatura = () => {
+    const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const ano = new Date().getFullYear();
+    const newMes = `${meses[faturas.length % 12]}/${ano}`;
+    setFaturas([...faturas, { 
+      mes: newMes, 
+      consumoAtivoPonta: 0, 
+      consumoAtivoForaPonta: 0, 
+      demandaPonta: 0, 
+      energiaReativaPonta: 0, 
+      energiaReativaForaPonta: 0, 
+      totalPagar: 0 
+    }]);
   };
 
-  const addTransformador = () => {
-    setTransformadores([...transformadores, { potencia: 100, quantidade: 1 }]);
+  // Função para remover fatura
+  const removeFatura = (index: number) => {
+    setFaturas(faturas.filter((_, i) => i !== index));
   };
 
-  const removeTransformador = (index: number) => {
-    setTransformadores(transformadores.filter((_, i) => i !== index));
+  // Função para atualizar fatura
+  const updateFatura = (index: number, field: keyof FaturaData, value: any) => {
+    const novasFaturas = [...faturas];
+    novasFaturas[index] = { ...novasFaturas[index], [field]: value };
+    setFaturas(novasFaturas);
   };
 
-  const addMonth = () => {
-    if (monthlyBills.length >= 12) return;
-    const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-    setMonthlyBills([...monthlyBills, { month: months[monthlyBills.length], activeEnergy: 0, reactiveEnergy: 0 }]);
+  // Função para carregar dados da fatura exemplo
+  const carregarFaturaExemplo = () => {
+    const faturasExemplo: FaturaData[] = [
+      { mes: 'Jan/2025', consumoAtivoPonta: 2610, consumoAtivoForaPonta: 40616, demandaPonta: 293, energiaReativaPonta: 732, energiaReativaForaPonta: 5129, totalPagar: 34464.69 },
+      { mes: 'Fev/2025', consumoAtivoPonta: 2750, consumoAtivoForaPonta: 39800, demandaPonta: 301, energiaReativaPonta: 756, energiaReativaForaPonta: 4980, totalPagar: 34123.45 },
+      { mes: 'Mar/2025', consumoAtivoPonta: 2680, consumoAtivoForaPonta: 42100, demandaPonta: 288, energiaReativaPonta: 712, energiaReativaForaPonta: 5350, totalPagar: 35789.23 },
+      { mes: 'Abr/2025', consumoAtivoPonta: 2590, consumoAtivoForaPonta: 38900, demandaPonta: 285, energiaReativaPonta: 698, energiaReativaForaPonta: 4920, totalPagar: 33456.78 },
+      { mes: 'Mai/2025', consumoAtivoPonta: 2710, consumoAtivoForaPonta: 41200, demandaPonta: 295, energiaReativaPonta: 745, energiaReativaForaPonta: 5210, totalPagar: 35123.12 },
+      { mes: 'Jun/2025', consumoAtivoPonta: 2650, consumoAtivoForaPonta: 40500, demandaPonta: 290, energiaReativaPonta: 728, energiaReativaForaPonta: 5080, totalPagar: 34789.56 },
+      { mes: 'Jul/2025', consumoAtivoPonta: 2800, consumoAtivoForaPonta: 43000, demandaPonta: 310, energiaReativaPonta: 790, energiaReativaForaPonta: 5450, totalPagar: 36890.34 },
+      { mes: 'Ago/2025', consumoAtivoPonta: 2720, consumoAtivoForaPonta: 41800, demandaPonta: 298, energiaReativaPonta: 760, energiaReativaForaPonta: 5300, totalPagar: 36234.67 },
+      { mes: 'Set/2025', consumoAtivoPonta: 2580, consumoAtivoForaPonta: 39500, demandaPonta: 282, energiaReativaPonta: 690, energiaReativaForaPonta: 4880, totalPagar: 33234.89 },
+      { mes: 'Out/2025', consumoAtivoPonta: 2630, consumoAtivoForaPonta: 40800, demandaPonta: 287, energiaReativaPonta: 715, energiaReativaForaPonta: 5150, totalPagar: 34567.90 },
+      { mes: 'Nov/2025', consumoAtivoPonta: 2770, consumoAtivoForaPonta: 42500, demandaPonta: 305, energiaReativaPonta: 780, energiaReativaForaPonta: 5380, totalPagar: 36567.23 },
+      { mes: 'Dez/2025', consumoAtivoPonta: 2850, consumoAtivoForaPonta: 44000, demandaPonta: 315, energiaReativaPonta: 810, energiaReativaForaPonta: 5600, totalPagar: 37890.45 }
+    ];
+    setFaturas(faturasExemplo);
+    Swal.fire('Dados carregados!', 'Faturas exemplo preenchidas com sucesso.', 'success');
   };
 
-  const removeMonth = (index: number) => {
-    setMonthlyBills(monthlyBills.filter((_, i) => i !== index));
-  };
-
-  const updateMonth = (index: number, field: keyof MonthlyData, value: string) => {
-    const newBills = [...monthlyBills];
-    newBills[index] = { ...newBills[index], [field]: parseFloat(value) || 0 };
-    setMonthlyBills(newBills);
-  };
-
-  const updatePhase = (phase: 'A' | 'B' | 'C', field: keyof PhaseData, value: string) => {
-    setPhases({ ...phases, [phase]: { ...phases[phase], [field]: value } });
-  };
-
-  const tratarFatorPotencia = (fp: number): number => {
-    let fpTratado = Math.abs(fp);
-    if (fpTratado > 1) fpTratado = 1;
-    if (fpTratado < 0) fpTratado = 0;
-    return fpTratado;
-  };
-
-  const recomendarProtecao = (correnteNominal: number) => {
-    const candidato = tabelaCondutores.find(c => c.iz >= correnteNominal);
-    if (!candidato) {
-      return {
-        disjuntorRecomendado: Math.ceil(correnteNominal * 1.3),
-        secaoCabo: 300,
-        correnteCabo: 0,
-        observacaoProtecao: "Consultar engenheiro para dimensionamento específico conforme NBR 5410",
-        descricaoCabo: "Consultar engenheiro"
-      };
-    }
-    return {
-      disjuntorRecomendado: candidato.disjuntor,
-      secaoCabo: candidato.secao,
-      correnteCabo: candidato.iz,
-      observacaoProtecao: `Dimensionado conforme NBR 5410 (Iz = ${candidato.iz}A ≥ In = ${candidato.disjuntor}A)`,
-      descricaoCabo: `${candidato.secao} mm² (para ${candidato.iz}A)`
-    };
-  };
-
-  const recomendarContatores = (estagios: number[], tensao: number) => {
-    const fatorSeguranca = 1.43;
-    return estagios.map(kvar => {
-      const correnteEstagio = (kvar * 1000) / (Math.sqrt(3) * tensao);
-      const correnteContator = correnteEstagio * fatorSeguranca;
-      let contator = tabelaContatores.find(c => c.correnteMax >= correnteContator);
-      if (!contator) contator = tabelaContatores[tabelaContatores.length - 1];
-      return {
-        modelo: contator.modelo,
-        correnteNominal: contator.correnteNominal,
-        quantidade: 1,
-        preco: contator.preco,
-        observacao: `Para estágio de ${kvar} kVAr (${correnteEstagio.toFixed(1)}A) → Contator ${contator.modelo} (${contator.correnteNominal}A)`
-      };
-    });
-  };
-
-  const validarEntradas = (): boolean => {
-    if (method === 'analyzer') {
-      const p = parseFloat(activePower);
-      if (!activePower || isNaN(p) || p <= 0) {
-        Swal.fire('Atenção', 'Informe a potência ativa (kW)', 'warning');
-        return false;
-      }
-      const fp = parseFloat(currentFP);
-      if (isNaN(fp) || fp <= 0 || fp > 1) {
-        Swal.fire('Atenção', 'Informe um fator de potência válido (entre 0 e 1)', 'warning');
-        return false;
-      }
-    }
+  // Função principal de dimensionamento
+  const calcularDimensionamento = () => {
+    setCalculando(true);
     
-    if (method === 'threePhase') {
-      const pA = parseFloat(phases.A.kw);
-      const pB = parseFloat(phases.B.kw);
-      const pC = parseFloat(phases.C.kw);
-      if ((!pA && !pB && !pC) || (pA <= 0 && pB <= 0 && pC <= 0)) {
-        Swal.fire('Atenção', 'Informe a potência de pelo menos uma fase', 'warning');
-        return false;
-      }
-    }
-    
-    const fp2 = parseFloat(targetFP);
-    if (isNaN(fp2) || fp2 <= 0 || fp2 > 1) {
-      Swal.fire('Atenção', 'Informe um fator de potência desejado válido (entre 0 e 1)', 'warning');
-      return false;
-    }
-    
-    return true;
-  };
-
-  const calculate = () => {
-    if (!validarEntradas()) return;
-
-    let P = 0;
-    let fp1 = 0;
-    const fp2 = parseFloat(targetFP);
-    const hours = parseFloat(workHours) || 220;
-    let phaseResults: { phase: string, kvar: number }[] = [];
-
-    if (method === 'analyzer') {
-      P = parseFloat(activePower);
-      let fp = parseFloat(currentFP);
-      fp = tratarFatorPotencia(fp);
-      fp1 = fp;
-    } else if (method === 'threePhase') {
-      const pA = parseFloat(phases.A.kw) || 0;
-      const pB = parseFloat(phases.B.kw) || 0;
-      const pC = parseFloat(phases.C.kw) || 0;
-      let fpA = parseFloat(phases.A.fp) || 0.8;
-      let fpB = parseFloat(phases.B.fp) || 0.8;
-      let fpC = parseFloat(phases.C.fp) || 0.8;
+    try {
+      // Filtrar faturas com dados válidos
+      const faturasValidas = faturas.filter(f => f.consumoAtivoPonta > 0 || f.consumoAtivoForaPonta > 0);
       
-      fpA = tratarFatorPotencia(fpA);
-      fpB = tratarFatorPotencia(fpB);
-      fpC = tratarFatorPotencia(fpC);
-
-      P = pA + pB + pC;
-      
-      const qA = pA * Math.tan(Math.acos(fpA));
-      const qB = pB * Math.tan(Math.acos(fpB));
-      const qC = pC * Math.tan(Math.acos(fpC));
-      const qTotal = qA + qB + qC;
-      const sTotal = Math.sqrt(Math.pow(P, 2) + Math.pow(qTotal, 2));
-      fp1 = P / sTotal;
-
-      phaseResults = [
-        { phase: 'A', kvar: pA * (Math.tan(Math.acos(fpA)) - Math.tan(Math.acos(fp2))) },
-        { phase: 'B', kvar: pB * (Math.tan(Math.acos(fpB)) - Math.tan(Math.acos(fp2))) },
-        { phase: 'C', kvar: pC * (Math.tan(Math.acos(fpC)) - Math.tan(Math.acos(fp2))) }
-      ];
-    } else {
-      // Método faturas - usa a fatura carregada ou dados manuais
-      if (faturaData) {
-        // Usa dados da fatura para calcular P médio
-        const consumoTotal = faturaData.consumoAtivoPonta + faturaData.consumoAtivoForaPonta;
-        P = consumoTotal / hours;
-        
-        const energiaReativaTotal = faturaData.energiaReativaExcPonta + faturaData.energiaReativaExcForaPonta;
-        const fp = consumoTotal / Math.sqrt(Math.pow(consumoTotal, 2) + Math.pow(energiaReativaTotal, 2));
-        fp1 = tratarFatorPotencia(fp);
-      } else if (monthlyBills.some(b => b.activeEnergy > 0)) {
-        const worstMonth = monthlyBills.reduce((prev, curr) => {
-          const fpPrev = prev.activeEnergy / Math.sqrt(Math.pow(prev.activeEnergy, 2) + Math.pow(prev.reactiveEnergy, 2)) || 1;
-          const fpCurr = curr.activeEnergy / Math.sqrt(Math.pow(curr.activeEnergy, 2) + Math.pow(curr.reactiveEnergy, 2)) || 1;
-          return fpCurr < fpPrev ? curr : prev;
-        });
-        P = worstMonth.activeEnergy / hours;
-        let fp = worstMonth.activeEnergy / Math.sqrt(Math.pow(worstMonth.activeEnergy, 2) + Math.pow(worstMonth.reactiveEnergy, 2)) || 0.8;
-        fp = tratarFatorPotencia(fp);
-        fp1 = fp;
-      } else {
-        Swal.fire('Atenção', 'Carregue uma fatura ou informe dados de consumo', 'warning');
+      if (faturasValidas.length === 0) {
+        Swal.fire('Atenção', 'Preencha pelo menos uma fatura com dados válidos', 'warning');
+        setCalculando(false);
         return;
       }
+
+      // Calcular médias dos 3 piores meses (FP mais baixo)
+      const faturasComFP = faturasValidas.map(f => {
+        const consumoTotal = f.consumoAtivoPonta + f.consumoAtivoForaPonta;
+        const reativoTotal = f.energiaReativaPonta + f.energiaReativaForaPonta;
+        const fp = consumoTotal / Math.sqrt(Math.pow(consumoTotal, 2) + Math.pow(reativoTotal, 2));
+        const potenciaMedia = consumoTotal / 220; // 220 horas/mês típico
+        return { ...f, fp, potenciaMedia };
+      });
+
+      // Ordenar por pior FP e pegar os 3 piores
+      const pioresFaturas = [...faturasComFP].sort((a, b) => a.fp - b.fp).slice(0, 3);
+      
+      // Calcular médias dos piores meses
+      const mediaPotencia = pioresFaturas.reduce((acc, f) => acc + f.potenciaMedia, 0) / pioresFaturas.length;
+      const mediaFP = pioresFaturas.reduce((acc, f) => acc + f.fp, 0) / pioresFaturas.length;
+      
+      // Cálculo do capacitor necessário
+      const phi1 = Math.acos(mediaFP);
+      const phi2 = Math.acos(targetFP);
+      const kvarProcesso = mediaPotencia * (Math.tan(phi1) - Math.tan(phi2));
+      
+      // Perdas no transformador (2.5% da potência total)
+      const kvarTrafo = potenciaTotalTransformadores * 0.025;
+      
+      // Total de kVAr necessário
+      let totalKvar = kvarProcesso + kvarTrafo;
+      
+      // Ajustar para o padrão de mercado (múltiplos de 5)
+      totalKvar = Math.ceil(totalKvar / 5) * 5;
+      
+      // Distribuir entre os transformadores proporcionalmente
+      const kvarPorTrafo: number[] = [];
+      let kvarRestante = totalKvar;
+      
+      // Distribuir primeiro para os transformadores maiores
+      const trafosOrdenados = [...transformadores].sort((a, b) => b.potencia - a.potencia);
+      for (const trafo of trafosOrdenados) {
+        let kvarParaTrafo = Math.floor(totalKvar * (trafo.potencia * trafo.quantidade) / potenciaTotalTransformadores);
+        kvarParaTrafo = Math.ceil(kvarParaTrafo / 5) * 5; // Múltiplo de 5
+        for (let i = 0; i < trafo.quantidade; i++) {
+          kvarPorTrafo.push(kvarParaTrafo);
+        }
+        kvarRestante -= kvarParaTrafo * trafo.quantidade;
+      }
+      
+      // Distribuir resto
+      if (kvarRestante > 0) {
+        const restoPorTrafo = Math.ceil(kvarRestante / kvarPorTrafo.length / 5) * 5;
+        for (let i = 0; i < kvarPorTrafo.length; i++) {
+          kvarPorTrafo[i] += restoPorTrafo;
+        }
+      }
+      
+      // Criar distribuição final (agrupar por potência)
+      const distribuicaoMap = new Map<number, number>();
+      for (const kvar of kvarPorTrafo) {
+        distribuicaoMap.set(kvar, (distribuicaoMap.get(kvar) || 0) + 1);
+      }
+      const distribuicao = Array.from(distribuicaoMap.entries()).map(([potencia, quantidade]) => ({ potencia, quantidade }));
+      
+      // Calcular economia
+      const energiaReativaMedia = pioresFaturas.reduce((acc, f) => acc + f.energiaReativaPonta + f.energiaReativaForaPonta, 0) / pioresFaturas.length;
+      const economiaMensal = energiaReativaMedia * 0.31; // R$ 0,31 por kVArh
+      const investimentoTotal = totalKvar * 89.9; // R$ 89,90 por kVAr
+      const paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoTotal / economiaMensal) : 0;
+      
+      // Redução de corrente
+      const reducaoCorrentePercentual = ((mediaFP - targetFP) / mediaFP) * 100;
+      
+      setResultado({
+        totalKvar,
+        kvarPorTrafo,
+        economiaMensal,
+        investimentoTotal,
+        paybackMeses,
+        fpAtual: mediaFP,
+        fpProjetado: targetFP,
+        reducaoCorrentePercentual,
+        distribuicao
+      });
+      
+      Swal.fire({
+        title: 'Dimensionamento Concluído!',
+        html: `<p>Banco de capacitores recomendado: <strong>${totalKvar} kVAr</strong></p>
+               <p>FP atual: ${(mediaFP * 100).toFixed(1)}% → FP projetado: ${(targetFP * 100).toFixed(0)}%</p>
+               <p>Economia mensal estimada: <strong>R$ ${economiaMensal.toFixed(2)}</strong></p>`,
+        icon: 'success',
+        confirmButtonColor: '#0a2b3c'
+      });
+      
+    } catch (error) {
+      console.error(error);
+      Swal.fire('Erro', 'Erro ao calcular dimensionamento', 'error');
+    } finally {
+      setCalculando(false);
     }
-
-    if (isNaN(P) || isNaN(fp1) || isNaN(fp2)) {
-      Swal.fire('Erro', 'Por favor, insira valores válidos.', 'error');
-      return;
-    }
-
-    // Cálculo baseado nos transformadores (30% da potência total)
-    const trafoKvar = potenciaTotalTransformadores * 0.025;
-    const phi1 = Math.acos(fp1);
-    const phi2 = Math.acos(fp2);
-    const processKvar = P * (Math.tan(phi1) - Math.tan(phi2));
-    
-    // Ajuste: usar o dimensionamento baseado nos transformadores como referência principal
-    const totalKvar = Math.max(processKvar + trafoKvar, capacitorRecomendadoPorTrafo);
-    const fixedKvar = trafoKvar + (totalKvar * 0.1);
-    const autoKvar = totalKvar - fixedKvar;
-
-    const standardSizes = [60, 50, 40, 30, 25, 20, 15, 12.5, 10, 7.5, 5, 2.5];
-    const stages = [];
-    let remaining = autoKvar;
-    
-    while (remaining > 1.25 && stages.length < 8) {
-      const bestSize = standardSizes.find(s => s <= remaining + 0.5) || 2.5;
-      stages.push(bestSize);
-      remaining -= bestSize;
-    }
-    stages.sort((a, b) => a - b);
-
-    const kvaAtual = P / fp1;
-    const kvaNovo = P / fp2;
-    const voltage = parseFloat(systemVoltage);
-    const currentAtual = (kvaAtual * 1000) / (voltage * Math.sqrt(3));
-    const currentNovo = (kvaNovo * 1000) / (voltage * Math.sqrt(3));
-
-    const protecao = recomendarProtecao(currentNovo);
-    const contatoresRecomendados = recomendarContatores(stages, voltage);
-    
-    // Cálculo de economia
-    const energiaReativaExcedente = faturaData ? (faturaData.energiaReativaExcPonta + faturaData.energiaReativaExcForaPonta) : 5000;
-    const economiaMensal = energiaReativaExcedente * 0.31;
-    const investimentoEstimado = totalKvar * 89.90 + 2000;
-    const paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoEstimado / economiaMensal) : 0;
-
-    setResult({
-      totalKvar: Math.round(totalKvar * 10) / 10,
-      fixedKvar: Math.round(fixedKvar * 10) / 10,
-      autoKvar: Math.round(autoKvar * 10) / 10,
-      stages,
-      kVA_atual: Math.round(kvaAtual * 10) / 10,
-      kVA_novo: Math.round(kvaNovo * 10) / 10,
-      reducaoPercentual: Math.round(((kvaAtual - kvaNovo) / kvaAtual) * 1000) / 10,
-      trafoLossesKvar: Math.round(trafoKvar * 10) / 10,
-      estimatedCurrentAtual: Math.round(currentAtual * 10) / 10,
-      estimatedCurrentNovo: Math.round(currentNovo * 10) / 10,
-      disjuntorRecomendado: protecao.disjuntorRecomendado,
-      caboRecomendado: protecao.descricaoCabo,
-      secaoCabo: protecao.secaoCabo,
-      correnteCabo: protecao.correnteCabo,
-      observacaoProtecao: protecao.observacaoProtecao,
-      contatoresRecomendados,
-      phaseResults: phaseResults.length > 0 ? phaseResults : undefined,
-      economiaMensal,
-      paybackMeses,
-      investimentoEstimado
-    });
   };
 
-  const gerarOrcamento = () => {
-    if (!result) return;
-    
-    const quantidadeCapacitores = result.stages.length;
-    const potenciaTotal = result.totalKvar;
-    const valorCapacitores = potenciaTotal * precosMateriais.capacitor.precoPorUnidade;
-    const valorDisjuntores = result.disjuntorRecomendado ? 1 * precosMateriais.disjuntor.precoPorUnidade : 0;
-    const valorContatores = (result.contatoresRecomendados || []).reduce((acc, c) => acc + c.preco, 0);
-    const valorCabo = 20 * precosMateriais.cabo.precoPorUnidade;
-    const valorRelogioFP = result.autoKvar > 0 ? precosMateriais.relogioFP.precoPorUnidade : 0;
-    const valorMontagem = precosMateriais.conjuntoMontagem.precoPorUnidade;
-    
-    const subtotal = valorCapacitores + valorDisjuntores + valorContatores + valorCabo + valorRelogioFP + valorMontagem;
-    const desconto = subtotal * 0.05;
-    const total = subtotal - desconto;
-    
-    const itens = [
-      { descricao: `${potenciaTotal} kVAr em ${quantidadeCapacitores} estágios`, quantidade: potenciaTotal, precoUnitario: precosMateriais.capacitor.precoPorUnidade, total: valorCapacitores },
-      { descricao: `Disjuntor geral ${result.disjuntorRecomendado}A`, quantidade: 1, precoUnitario: precosMateriais.disjuntor.precoPorUnidade, total: valorDisjuntores },
-      ...(result.contatoresRecomendados || []).map(c => ({ descricao: `Contator ${c.modelo} (${c.correnteNominal}A)`, quantidade: c.quantidade, precoUnitario: c.preco, total: c.preco })),
-      { descricao: `Cabo ${result.caboRecomendado} (20m estimado)`, quantidade: 20, precoUnitario: precosMateriais.cabo.precoPorUnidade, total: valorCabo },
-      ...(result.autoKvar > 0 ? [{ descricao: `Relé controlador de FP`, quantidade: 1, precoUnitario: precosMateriais.relogioFP.precoPorUnidade, total: valorRelogioFP }] : []),
-      { descricao: `Montagem e instalação`, quantidade: 1, precoUnitario: precosMateriais.conjuntoMontagem.precoPorUnidade, total: valorMontagem }
-    ];
-    
-    setBudgetItems(itens);
-    setShowBudget(true);
-    
-    Swal.fire({
-      title: '💰 Orçamento Gerado',
-      html: `<div style="text-align: left;"><p><strong>Resumo do Orçamento:</strong></p><p>📦 Banco de ${potenciaTotal} kVAr</p><p>⚡ ${quantidadeCapacitores} estágios automáticos</p><p>🔧 Disjuntor ${result.disjuntorRecomendado}A</p><p>📐 Cabo ${result.caboRecomendado}</p><p style="margin-top: 12px;"><strong>Valor Total:</strong> R$ ${total.toFixed(2)}</p><p style="font-size: 12px; color: #666;">* Valores estimados, sujeitos à confirmação</p></div>`,
-      icon: 'success',
-      confirmButtonText: 'Fechar',
-      confirmButtonColor: '#0a2b3c'
-    });
-  };
-
-  const exportMemorial = async () => {
+  const exportarPDF = async () => {
     if (!reportRef.current) return;
     try {
-      Swal.fire({ title: 'Gerando Memorial...', text: 'Aguarde um momento.', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+      Swal.fire({ title: 'Gerando PDF...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
       const dataUrl = await toPng(reportRef.current, { quality: 1.0, backgroundColor: '#ffffff', pixelRatio: 2 });
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
@@ -578,55 +319,30 @@ export default function DimensionarPage() {
       await new Promise((resolve) => { img.onload = resolve; });
       const pdfHeight = (img.height * pdfWidth) / img.width;
       pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Memorial_Dimensionamento_${new Date().getTime()}.pdf`);
+      pdf.save(`Dimensionamento_Capacitores_${new Date().toISOString().slice(0,10)}.pdf`);
       Swal.close();
-      Swal.fire('Sucesso', 'Memorial exportado com sucesso!', 'success');
+      Swal.fire('PDF gerado!', 'Memorial exportado com sucesso.', 'success');
     } catch (error) {
-      console.error('PDF Export Error:', error);
       Swal.close();
-      Swal.fire('Erro', 'Falha ao exportar o memorial.', 'error');
+      Swal.fire('Erro', 'Falha ao gerar PDF', 'error');
     }
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 pb-12">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-primary">Dimensionamento Avançado</h1>
-          <p className="text-slate-500">Cálculo normatizado para bancos fixos e automáticos com base em faturas e transformadores</p>
-        </div>
-        <div className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
-          <button onClick={() => setMethod('analyzer')} className={cn("px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", method === 'analyzer' ? "bg-primary text-white" : "text-slate-500 hover:bg-slate-50")}>
-            <Activity size={16} /> Analisador
-          </button>
-          <button onClick={() => setMethod('threePhase')} className={cn("px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", method === 'threePhase' ? "bg-primary text-white" : "text-slate-500 hover:bg-slate-50")}>
-            <Layers size={16} /> Trifásico
-          </button>
-          <button onClick={() => setMethod('bills')} className={cn("px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", method === 'bills' ? "bg-primary text-white" : "text-slate-500 hover:bg-slate-50")}>
-            <History size={16} /> Fatura + Transformadores
-          </button>
-        </div>
+    <div className="max-w-7xl mx-auto space-y-8 pb-12">
+      <header className="text-center">
+        <h1 className="text-3xl font-bold text-primary">Dimensionamento de Banco de Capacitores</h1>
+        <p className="text-slate-500 mt-2">Baseado em 12 faturas e configuração dos transformadores</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Coluna de Entrada */}
         <div className="lg:col-span-5 space-y-6">
-          {/* Upload da Fatura */}
-          {method === 'bills' && (
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-              <h2 className="text-lg font-bold text-primary mb-6 flex items-center gap-2">
-                <FileText size={20} className="text-secondary" />
-                Upload da Fatura de Energia
-              </h2>
-              <FaturaUpload onDataExtracted={setFaturaData} />
-            </div>
-          )}
-
           {/* Configuração dos Transformadores */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-            <h2 className="text-lg font-bold text-primary mb-6 flex items-center gap-2">
+            <h2 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
               <Package size={20} className="text-secondary" />
-              Transformadores da Instalação
+              Transformadores
             </h2>
             <div className="space-y-3">
               {transformadores.map((trafo, idx) => (
@@ -634,160 +350,171 @@ export default function DimensionarPage() {
                   <div className="flex-1 flex gap-2">
                     <div className="flex-1">
                       <label className="text-[8px] font-black text-slate-400 uppercase">Potência (kVA)</label>
-                      <input type="number" value={trafo.potencia} onChange={(e) => updateTransformador(idx, 'potencia', parseFloat(e.target.value) || 0)} className="w-full rounded-lg border border-slate-200 p-2 text-sm" />
+                      <input type="number" value={trafo.potencia} onChange={(e) => {
+                        const novos = [...transformadores];
+                        novos[idx].potencia = parseFloat(e.target.value) || 0;
+                        setTransformadores(novos);
+                      }} className="w-full rounded-lg border border-slate-200 p-2 text-sm" />
                     </div>
-                    <div className="w-24">
-                      <label className="text-[8px] font-black text-slate-400 uppercase">Quantidade</label>
-                      <input type="number" value={trafo.quantidade} onChange={(e) => updateTransformador(idx, 'quantidade', parseInt(e.target.value) || 0)} className="w-full rounded-lg border border-slate-200 p-2 text-sm" />
+                    <div className="w-20">
+                      <label className="text-[8px] font-black text-slate-400 uppercase">Qtde</label>
+                      <input type="number" value={trafo.quantidade} onChange={(e) => {
+                        const novos = [...transformadores];
+                        novos[idx].quantidade = parseInt(e.target.value) || 0;
+                        setTransformadores(novos);
+                      }} className="w-full rounded-lg border border-slate-200 p-2 text-sm" />
                     </div>
                   </div>
-                  {transformadores.length > 1 && (
-                    <button onClick={() => removeTransformador(idx)} className="p-2 text-red-400 hover:text-red-600"><Trash2 size={16} /></button>
-                  )}
                 </div>
               ))}
-              <button onClick={addTransformador} className="w-full py-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-bold hover:border-secondary hover:text-secondary transition-all flex items-center justify-center gap-2">
-                <Plus size={14} /> Adicionar Transformador
-              </button>
             </div>
             <div className="mt-4 p-3 bg-primary/5 rounded-xl">
-              <div className="flex justify-between text-sm"><span className="text-slate-500">Potência Total Instalada:</span><span className="font-bold text-primary">{potenciaTotalTransformadores} kVA</span></div>
-              <div className="flex justify-between text-sm mt-1"><span className="text-slate-500">Capacitor Recomendado (30%):</span><span className="font-bold text-secondary">{capacitorRecomendadoPorTrafo.toFixed(0)} kVAr</span></div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Potência Total:</span>
+                <span className="font-bold text-primary">{potenciaTotalTransformadores} kVA</span>
+              </div>
+              <div className="flex justify-between text-sm mt-1">
+                <span className="text-slate-500">Referência:</span>
+                <span className="font-bold text-secondary">7 x 225 kVA + 1 x 75 kVA</span>
+              </div>
             </div>
           </div>
 
-          {/* Dados do Sistema */}
+          {/* Faturas (12 meses) */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-            <h2 className="text-lg font-bold text-primary mb-6 flex items-center gap-2">
-              <Settings2 size={20} className="text-secondary" />
-              Dados da Instalação
-            </h2>
-            <div className="grid grid-cols-2 gap-4">
-              <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Tensão (V)</label><select value={systemVoltage} onChange={(e) => setSystemVoltage(e.target.value)} className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:border-secondary outline-none bg-white"><option value="220">220V</option><option value="380">380V</option><option value="440">440V</option></select></div>
-              <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Horas Trabalho/Mês</label><input type="number" value={workHours} onChange={(e) => setWorkHours(e.target.value)} className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:border-secondary outline-none" /></div>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold text-primary flex items-center gap-2">
+                <History size={20} className="text-secondary" />
+                Faturas (12 meses)
+              </h2>
+              <div className="flex gap-2">
+                <button onClick={carregarFaturaExemplo} className="text-xs bg-primary/10 text-primary px-3 py-1 rounded-lg hover:bg-primary/20">
+                  Carregar Exemplo
+                </button>
+              </div>
             </div>
+            
+            <div className="max-h-[400px] overflow-y-auto space-y-3 pr-2">
+              {faturas.map((fatura, idx) => (
+                <FaturaInput key={idx} fatura={fatura} index={idx} onUpdate={updateFatura} onRemove={removeFatura} />
+              ))}
+            </div>
+            
+            <button onClick={addFatura} className="w-full mt-4 py-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-bold hover:border-secondary hover:text-secondary transition-all flex items-center justify-center gap-2">
+              <Plus size={14} /> Adicionar Mês
+            </button>
           </div>
 
-          {/* Dados de Carga - depende do método */}
+          {/* Meta e Calcular */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-            <h2 className="text-lg font-bold text-primary mb-6 flex items-center gap-2">
-              <Calculator size={20} className="text-secondary" />
-              {method === 'analyzer' ? 'Dados do Analisador' : method === 'threePhase' ? 'Dados por Fase' : 'Meta de Correção'}
-            </h2>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Fator de Potência Desejado</label>
+            <select 
+              value={targetFP} 
+              onChange={(e) => setTargetFP(parseFloat(e.target.value))}
+              className="w-full rounded-xl border border-slate-200 p-3 mb-6"
+            >
+              <option value={0.92}>0.92 (mínimo regulamentar)</option>
+              <option value={0.95}>0.95 (recomendado)</option>
+              <option value={0.98}>0.98 (excelente)</option>
+            </select>
 
-            <AnimatePresence mode="wait">
-              {method === 'analyzer' && (
-                <motion.div key="analyzer" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
-                  <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Potência Ativa de Pico (kW)</label><input type="number" value={activePower} onChange={(e) => setActivePower(e.target.value)} className="w-full rounded-xl border border-slate-200 p-3 focus:border-secondary outline-none" /></div>
-                  <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Fator de Potência Atual</label><input type="number" step="0.01" value={currentFP} onChange={(e) => setCurrentFP(e.target.value)} className="w-full rounded-xl border border-slate-200 p-3 focus:border-secondary outline-none" /></div>
-                </motion.div>
-              )}
-
-              {method === 'threePhase' && (
-                <motion.div key="threePhase" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
-                  {['A', 'B', 'C'].map((phase) => (
-                    <div key={phase} className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                      <p className="text-xs font-black text-primary mb-3">FASE {phase}</p>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div><label className="block text-[8px] font-black text-slate-400 uppercase mb-1">Potência (kW)</label><input type="number" value={phases[phase as 'A'|'B'|'C'].kw} onChange={(e) => updatePhase(phase as 'A'|'B'|'C', 'kw', e.target.value)} className="w-full rounded-lg border border-slate-200 p-2 text-xs outline-none focus:border-secondary" /></div>
-                        <div><label className="block text-[8px] font-black text-slate-400 uppercase mb-1">Fator de Potência</label><input type="number" step="0.01" value={phases[phase as 'A'|'B'|'C'].fp} onChange={(e) => updatePhase(phase as 'A'|'B'|'C', 'fp', e.target.value)} className="w-full rounded-lg border border-slate-200 p-2 text-xs outline-none focus:border-secondary" /></div>
-                      </div>
-                    </div>
-                  ))}
-                </motion.div>
-              )}
-
-              {method === 'bills' && (
-                <motion.div key="bills" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
-                  <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Meta de Fator de Potência</label><input type="number" step="0.01" value={targetFP} onChange={(e) => setTargetFP(e.target.value)} className="w-full rounded-xl border border-primary/20 p-3 font-bold text-primary focus:border-secondary outline-none" /></div>
-                  {!faturaData && (
-                    <div className="max-h-[300px] overflow-y-auto pr-2 space-y-3">
-                      {monthlyBills.map((bill, index) => (
-                        <div key={index} className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                          <span className="w-10 font-bold text-xs text-slate-400">{bill.month}</span>
-                          <input type="number" placeholder="kWh" value={bill.activeEnergy || ''} onChange={(e) => updateMonth(index, 'activeEnergy', e.target.value)} className="flex-1 min-w-0 bg-white rounded-lg border border-slate-200 p-2 text-xs outline-none focus:border-secondary" />
-                          <input type="number" placeholder="kVArh" value={bill.reactiveEnergy || ''} onChange={(e) => updateMonth(index, 'reactiveEnergy', e.target.value)} className="flex-1 min-w-0 bg-white rounded-lg border border-slate-200 p-2 text-xs outline-none focus:border-secondary" />
-                          <button onClick={() => removeMonth(index)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
-                        </div>
-                      ))}
-                      <button onClick={addMonth} className="w-full py-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-bold hover:border-secondary hover:text-secondary transition-all flex items-center justify-center gap-2"><Plus size={14} /> Adicionar Mês</button>
-                    </div>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <button onClick={calculate} className="w-full mt-6 bg-primary text-white font-bold py-4 rounded-xl hover:bg-primary-light transition-all shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
-              <Zap size={20} className="text-secondary" /> Calcular Dimensionamento
+            <button 
+              onClick={calcularDimensionamento}
+              disabled={calculando}
+              className="w-full bg-primary text-white py-3 rounded-xl font-bold hover:bg-primary/90 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />}
+              Dimensionar Banco de Capacitores
             </button>
           </div>
         </div>
 
         {/* Coluna de Resultados */}
         <div className="lg:col-span-7">
-          {result ? (
+          {resultado ? (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-              {/* Memorial Visual */}
+              {/* Memorial */}
               <div ref={reportRef} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100">
-                <div className="bg-slate-900 p-8 flex flex-col md:flex-row items-center justify-between gap-6">
-                  <div className="text-center md:text-left">
-                    <div className="flex items-center gap-2 mb-2"><Zap size={24} className="text-secondary" /><h2 className="text-white font-black tracking-tighter uppercase">Capacitor<span className="text-secondary">Manager</span></h2></div>
-                    <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">Potência Total do Banco</p>
-                    <div className="flex items-baseline gap-2"><span className="text-5xl font-black text-white">{result.totalKvar}</span><span className="text-xl font-bold text-secondary">kVAr</span></div>
-                  </div>
-                  <div className="h-12 w-px bg-white/10 hidden md:block" />
-                  <div className="flex gap-8">
-                    <div className="text-center"><p className="text-slate-400 text-[10px] font-black uppercase mb-1">Fixo</p><p className="text-2xl font-bold text-white">{result.fixedKvar}<span className="text-xs ml-1 text-slate-500">kVAr</span></p></div>
-                    <div className="text-center"><p className="text-slate-400 text-[10px] font-black uppercase mb-1">Automático</p><p className="text-2xl font-bold text-secondary">{result.autoKvar}<span className="text-xs ml-1 text-slate-500">kVAr</span></p></div>
-                  </div>
+                <div className="bg-slate-900 p-6 text-white text-center">
+                  <Zap size={32} className="mx-auto text-secondary mb-2" />
+                  <h2 className="text-2xl font-black">CapacitorManager</h2>
+                  <p className="text-slate-400 text-sm">Memorial de Dimensionamento</p>
                 </div>
+                
+                <div className="p-6 space-y-6">
+                  <div className="text-center">
+                    <p className="text-sm text-slate-500">Potência Total Recomendada</p>
+                    <p className="text-5xl font-bold text-primary">{resultado.totalKvar} <span className="text-2xl">kVAr</span></p>
+                  </div>
 
-                <div className="p-8 space-y-8">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <div className="space-y-4">
-                      <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b pb-2">Detalhamento Técnico</h3>
-                      <div className="flex justify-between text-sm"><span className="text-slate-500">Compensação Trafo:</span><span className="font-bold text-primary">{result.trafoLossesKvar} kVAr</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-500">Redução de Corrente:</span><span className="font-bold text-emerald-600">~{result.reducaoPercentual}%</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-500">kVA Liberado:</span><span className="font-bold text-secondary">{(result.kVA_atual - result.kVA_novo).toFixed(1)} kVA</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-500">Corrente Atual:</span><span className="font-bold text-primary">{result.estimatedCurrentAtual} A</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-500">Corrente Projetada:</span><span className="font-bold text-emerald-600">{result.estimatedCurrentNovo} A</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-500">Disjuntor Recomendado:</span><span className="font-bold text-primary">{result.disjuntorRecomendado} A</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-500">Cabo Recomendado:</span><span className="font-bold text-primary">{result.caboRecomendado}</span></div>
-                      {result.economiaMensal && (<div className="flex justify-between text-sm pt-2 border-t border-slate-100"><span className="text-slate-500">💰 Economia Mensal:</span><span className="font-bold text-emerald-600">R$ {result.economiaMensal.toFixed(2)}</span></div>)}
-                      {result.paybackMeses && (<div className="flex justify-between text-sm"><span className="text-slate-500">⏱️ Payback:</span><span className="font-bold text-primary">~{result.paybackMeses} meses</span></div>)}
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="bg-emerald-50 rounded-xl p-3 text-center">
+                      <TrendingUp size={20} className="mx-auto text-emerald-600 mb-1" />
+                      <p className="text-xs text-slate-500">FP Atual</p>
+                      <p className="text-xl font-bold text-emerald-700">{(resultado.fpAtual * 100).toFixed(1)}%</p>
                     </div>
-
-                    <div className="bg-slate-50 rounded-2xl p-6">
-                      <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Distribuição de Estágios</h3>
-                      <div className="flex flex-wrap gap-2">{result.stages.map((s, i) => (<div key={i} className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-center min-w-[60px]"><p className="text-[8px] font-bold text-slate-400 uppercase mb-1">E{i+1}</p><p className="text-sm font-black text-primary">{s}</p></div>))}</div>
+                    <div className="bg-primary/10 rounded-xl p-3 text-center">
+                      <CheckCircle2 size={20} className="mx-auto text-primary mb-1" />
+                      <p className="text-xs text-slate-500">FP Projetado</p>
+                      <p className="text-xl font-bold text-primary">{(resultado.fpProjetado * 100).toFixed(0)}%</p>
+                    </div>
+                    <div className="bg-amber-50 rounded-xl p-3 text-center">
+                      <Zap size={20} className="mx-auto text-amber-600 mb-1" />
+                      <p className="text-xs text-slate-500">Redução Corrente</p>
+                      <p className="text-xl font-bold text-amber-700">{Math.abs(resultado.reducaoCorrentePercentual).toFixed(0)}%</p>
                     </div>
                   </div>
 
-                  {result.contatoresRecomendados && result.contatoresRecomendados.length > 0 && (
-                    <div className="space-y-4"><h3 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b pb-2">Contatores Recomendados (IEC 60947-4-1 - AC-6b)</h3><div className="space-y-2">{result.contatoresRecomendados.map((cont, idx) => (<div key={idx} className="flex justify-between items-center text-sm p-3 bg-slate-50 rounded-lg"><div><span className="font-bold text-primary">{cont.modelo}</span><span className="text-xs text-slate-500 ml-2">({cont.correnteNominal}A)</span></div><div className="text-xs text-slate-500">Estágio {idx + 1}: {result.stages[idx]} kVAr</div></div>))}</div></div>
-                  )}
+                  <div className="border-t border-slate-100 pt-4">
+                    <h3 className="font-bold text-primary mb-3">📦 Distribuição dos Capacitores</h3>
+                    <div className="space-y-2">
+                      {resultado.distribuicao.map((item, idx) => (
+                        <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
+                          <span className="font-medium">{item.quantidade} bancos</span>
+                          <span className="font-bold text-primary">{item.potencia} kVAr cada</span>
+                          <span className="text-sm text-slate-500">Total: {item.quantidade * item.potencia} kVAr</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
-                  {result.phaseResults && (
-                    <div className="space-y-4"><h3 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b pb-2">Análise por Fase (Trifásico)</h3><div className="grid grid-cols-3 gap-4">{result.phaseResults.map((pr) => (<div key={pr.phase} className="p-4 bg-slate-50 rounded-xl text-center"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">Fase {pr.phase}</p><p className="text-lg font-bold text-primary">{pr.kvar.toFixed(1)} <span className="text-xs">kVAr</span></p></div>))}</div></div>
-                  )}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-green-50 rounded-xl p-4 text-center">
+                      <DollarSign size={20} className="mx-auto text-green-600 mb-1" />
+                      <p className="text-xs text-slate-500">Economia Mensal</p>
+                      <p className="text-xl font-bold text-green-700">R$ {resultado.economiaMensal.toFixed(2)}</p>
+                    </div>
+                    <div className="bg-blue-50 rounded-xl p-4 text-center">
+                      <DollarSign size={20} className="mx-auto text-blue-600 mb-1" />
+                      <p className="text-xs text-slate-500">Investimento Estimado</p>
+                      <p className="text-xl font-bold text-blue-700">R$ {resultado.investimentoTotal.toFixed(2)}</p>
+                    </div>
+                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
-                    <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-6"><div className="flex items-center gap-2 text-emerald-700 mb-3"><CheckCircle2 size={20} /><h4 className="font-bold">Conformidade</h4></div><ul className="text-xs text-emerald-600 space-y-2"><li>• Atende requisitos da Resolução 414 ANEEL.</li><li>• Dimensionamento para FP {targetFP} garantido.</li><li>• Proteção contra sobrecorreção no Trafo.</li></ul></div>
-                    <div className="bg-amber-50 border border-amber-100 rounded-2xl p-6"><div className="flex items-center gap-2 text-amber-700 mb-3"><AlertTriangle size={20} /><h4 className="font-bold">Observações</h4></div><ul className="text-xs text-amber-600 space-y-2"><li>• Verificar presença de harmônicas no local.</li><li>• Recomenda-se contatores específicos para capacitores.</li><li>• Fusíveis tipo NH ou Disjuntores adequados.</li></ul></div>
+                  <div className="bg-primary/5 rounded-xl p-4 text-center">
+                    <p className="text-sm text-slate-500">⏱️ Payback Estimado</p>
+                    <p className="text-2xl font-bold text-primary">{resultado.paybackMeses} meses</p>
+                    <p className="text-xs text-slate-400">(~{(resultado.paybackMeses / 12).toFixed(1)} anos)</p>
                   </div>
                 </div>
               </div>
 
               <div className="flex gap-4">
-                <button onClick={exportMemorial} className="flex-1 bg-white border border-slate-200 text-slate-700 font-bold py-4 rounded-xl hover:bg-slate-50 transition-all flex items-center justify-center gap-2 shadow-sm"><Printer size={20} /> Exportar Memorial (PDF)</button>
-                <button onClick={gerarOrcamento} className="flex-1 bg-primary text-white font-bold py-4 rounded-xl hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/20"><DollarSign size={20} className="text-secondary" /> Gerar Orçamento</button>
+                <button onClick={exportarPDF} className="flex-1 bg-white border border-slate-200 text-slate-700 py-3 rounded-xl font-medium hover:bg-slate-50 flex items-center justify-center gap-2">
+                  <Printer size={18} /> Exportar PDF
+                </button>
+                <button onClick={calcularDimensionamento} className="flex-1 bg-primary text-white py-3 rounded-xl font-medium hover:bg-primary/90 flex items-center justify-center gap-2">
+                  <Calculator size={18} /> Recalcular
+                </button>
               </div>
             </motion.div>
           ) : (
-            <div className="h-full min-h-[500px] flex flex-col items-center justify-center text-center p-12 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 text-slate-400">
-              <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-sm mb-6"><Calculator size={40} className="opacity-20" /></div>
-              <h3 className="text-xl font-bold text-slate-500 mb-2">Aguardando Parâmetros</h3>
-              <p className="max-w-sm text-sm leading-relaxed">Configure os transformadores, carregue a fatura e clique em "Calcular Dimensionamento" para gerar o memorial técnico completo.</p>
+            <div className="h-full min-h-[500px] flex flex-col items-center justify-center text-center p-12 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+              <Calculator size={64} className="text-slate-300 mb-4" />
+              <h3 className="text-xl font-bold text-slate-500">Aguardando Dimensionamento</h3>
+              <p className="text-sm text-slate-400 mt-2 max-w-md">
+                Preencha os dados dos transformadores e das 12 faturas, depois clique em "Dimensionar".
+              </p>
             </div>
           )}
         </div>
