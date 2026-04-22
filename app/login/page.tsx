@@ -1,8 +1,13 @@
+<<<<<<< HEAD
+=======
+// app/login/page.tsx
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
 'use client';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
+<<<<<<< HEAD
 import { Zap, Lock, Mail, ArrowRight, Eye, EyeOff, Sparkles } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { AuthProvider } from '@/lib/AuthContext';
@@ -11,11 +16,21 @@ import { useAuth } from '@/lib/AuthContext';
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
+=======
+import { Zap, Lock, Mail, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import Swal from 'sweetalert2';
+import { useAuth } from '@/contexts/AuthContext';
+
+export default function LoginPage() {
+  const router = useRouter();
+  const { login, mode } = useAuth();
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
+<<<<<<< HEAD
   // Preencher com as credenciais padrão
   const preencherCredenciais = () => {
     setEmail('suporte@jmeletroservice.com.br');
@@ -26,6 +41,14 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     const success = await login(email, senha);
+=======
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    const success = await login(email, senha);
+    
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
     if (success) {
       Swal.fire({
         title: 'Bem-vindo!',
@@ -46,6 +69,15 @@ export default function LoginPage() {
     setLoading(false);
   };
 
+<<<<<<< HEAD
+=======
+  // Credenciais de demonstração
+  const preencherDemo = () => {
+    setEmail('demo@capacitormanager.com');
+    setSenha('demo123');
+  };
+
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 to-secondary/10 p-4">
       <motion.div 
@@ -71,7 +103,11 @@ export default function LoginPage() {
               <input
                 type="email"
                 required
+<<<<<<< HEAD
                 placeholder="suporte@jmeletroservice.com.br"
+=======
+                placeholder="seu@email.com"
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
                 className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:border-primary outline-none"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -129,11 +165,19 @@ export default function LoginPage() {
 
           <button
             type="button"
+<<<<<<< HEAD
             onClick={preencherCredenciais}
             className="w-full border border-slate-200 text-slate-600 py-2 rounded-lg font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
           >
             <Sparkles size={18} />
             Preencher credenciais de teste
+=======
+            onClick={preencherDemo}
+            className="w-full border border-slate-200 text-slate-600 py-2 rounded-lg font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
+          >
+            <Sparkles size={18} />
+            Continuar em Modo Demonstração
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
           </button>
 
           <p className="text-center text-xs text-slate-400 mt-4">
@@ -143,4 +187,8 @@ export default function LoginPage() {
       </motion.div>
     </div>
   );
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf

@@ -13,9 +13,12 @@ import { supabase } from '@/lib/supabase';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
+<<<<<<< HEAD
 import { AuthProvider } from '@/lib/AuthContext';
 import { useAuth } from '@/lib/AuthContext';
 import DemoBanner from '@/components/DemoBanner';
+=======
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
 
 // ============================================
 // FUNÇÕES DE CÁLCULO
@@ -106,6 +109,7 @@ interface ClienteResumo {
   capacitores_sem_medicao: CapacitorInfo[];
 }
 
+<<<<<<< HEAD
 // ============================================
 // DADOS MOCK PARA MODO DEMONSTRAÇÃO
 // ============================================
@@ -241,6 +245,10 @@ const MOCK_CAPACITORES: CapacitorInfo[] = [
 export default function ManutencaoPage() {
   const router = useRouter();
   const { mode, isLoading: authLoading } = useAuth();
+=======
+export default function ManutencaoPage() {
+  const router = useRouter();
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
   const [capacitores, setCapacitores] = useState<CapacitorInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'todos' | 'reprovado' | 'atencao' | 'sem_medicao'>('todos');
@@ -249,9 +257,17 @@ export default function ManutencaoPage() {
   const [resumoClientes, setResumoClientes] = useState<ClienteResumo[]>([]);
   const [clienteSelecionadoResumo, setClienteSelecionadoResumo] = useState<ClienteResumo | null>(null);
 
+<<<<<<< HEAD
   // ============================================
   // FUNÇÃO PARA CARREGAR DADOS REAIS (MODO AUTENTICADO)
   // ============================================
+=======
+  useEffect(() => {
+    fetchClientes();
+    fetchDadosManutencao();
+  }, []);
+
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
   async function fetchClientes() {
     try {
       const { data } = await supabase
@@ -265,7 +281,11 @@ export default function ManutencaoPage() {
     }
   }
 
+<<<<<<< HEAD
   async function fetchDadosReais() {
+=======
+  async function fetchDadosManutencao() {
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
     setLoading(true);
     try {
       // Buscar todos os bancos
@@ -384,7 +404,84 @@ export default function ManutencaoPage() {
       }
 
       setCapacitores(processedData);
+<<<<<<< HEAD
       processarResumo(processedData);
+=======
+
+      // Calcular resumo por cliente
+      const clientesResumo: Map<string, ClienteResumo> = new Map();
+
+      for (const cap of processedData) {
+        if (!clientesResumo.has(cap.cliente_id)) {
+          clientesResumo.set(cap.cliente_id, {
+            id: cap.cliente_id,
+            nome: cap.cliente,
+            total_kvar_instalado: 0,
+            total_testado_kvar: 0,
+            aprovados: 0,
+            atencao: 0,
+            reprovados: 0,
+            sem_medicao: 0,
+            bancos: [],
+            capacitores_sem_medicao: []
+          });
+        }
+
+        const resumo = clientesResumo.get(cap.cliente_id)!;
+        resumo.total_kvar_instalado += cap.potencia_kvar;
+        
+        if (cap.tem_medicao) {
+          resumo.total_testado_kvar += cap.potencia_kvar;
+          if (cap.status_validacao === 'aprovado') resumo.aprovados++;
+          else if (cap.status_validacao === 'atencao') resumo.atencao++;
+          else if (cap.status_validacao === 'reprovado') resumo.reprovados++;
+        } else {
+          resumo.sem_medicao++;
+          resumo.capacitores_sem_medicao.push(cap);
+        }
+      }
+
+      // Adicionar bancos ao resumo
+      for (const [clienteId, resumo] of clientesResumo) {
+        const bancosDoCliente = new Map();
+        for (const cap of processedData.filter(c => c.cliente_id === clienteId)) {
+          if (!bancosDoCliente.has(cap.banco_id)) {
+            bancosDoCliente.set(cap.banco_id, {
+              id: cap.banco_id,
+              nome: cap.banco,
+              kvar_instalado: 0,
+              aprovados: 0,
+              atencao: 0,
+              reprovados: 0,
+              sem_medicao: 0
+            });
+          }
+          const bancoResumo = bancosDoCliente.get(cap.banco_id);
+          bancoResumo.kvar_instalado += cap.potencia_kvar;
+          
+          if (!cap.tem_medicao) {
+            bancoResumo.sem_medicao++;
+          } else if (cap.status_validacao === 'aprovado') {
+            bancoResumo.aprovados++;
+          } else if (cap.status_validacao === 'atencao') {
+            bancoResumo.atencao++;
+          } else if (cap.status_validacao === 'reprovado') {
+            bancoResumo.reprovados++;
+          }
+        }
+        resumo.bancos = Array.from(bancosDoCliente.values());
+      }
+
+      const resumoArray = Array.from(clientesResumo.values()).filter(r => r.total_kvar_instalado > 0);
+      setResumoClientes(resumoArray);
+
+      if (clienteFiltro !== 'todos') {
+        const clienteResumo = resumoArray.find(r => r.id === clienteFiltro);
+        setClienteSelecionadoResumo(clienteResumo || null);
+      } else {
+        setClienteSelecionadoResumo(null);
+      }
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
       
     } catch (error) {
       console.error('Erro ao buscar dados:', error);
@@ -399,6 +496,7 @@ export default function ManutencaoPage() {
     }
   }
 
+<<<<<<< HEAD
   // ============================================
   // FUNÇÃO PARA CARREGAR DADOS MOCK (MODO DEMONSTRAÇÃO)
   // ============================================
@@ -516,6 +614,10 @@ export default function ManutencaoPage() {
         setClienteSelecionadoResumo(null);
       }
     }
+=======
+  useEffect(() => {
+    fetchDadosManutencao();
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
   }, [clienteFiltro]);
 
   // Filtrar capacitores
@@ -532,7 +634,11 @@ export default function ManutencaoPage() {
   const aprovados = capacitores.filter(c => c.status_validacao === 'aprovado').length;
   const semMedicao = capacitores.filter(c => !c.tem_medicao).length;
 
+<<<<<<< HEAD
   if (authLoading || loading) {
+=======
+  if (loading) {
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
     return (
       <div className="space-y-8 pb-12">
         <div className="h-40 animate-pulse rounded-3xl bg-slate-100" />
@@ -546,9 +652,12 @@ export default function ManutencaoPage() {
 
   return (
     <div className="space-y-8 pb-12">
+<<<<<<< HEAD
       {/* Banner Modo Demonstração */}
       <DemoBanner />
 
+=======
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
       {/* Header */}
       <motion.section 
         initial={{ opacity: 0, y: -20 }}
@@ -806,7 +915,11 @@ export default function ManutencaoPage() {
                     </tr>
                   ))}
                 </tbody>
+<<<<<<< HEAD
               </table>
+=======
+               </table>
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
             </div>
           </div>
         </motion.div>
@@ -1006,7 +1119,11 @@ export default function ManutencaoPage() {
       {/* Ações */}
       <div className="flex justify-end gap-2">
         <button
+<<<<<<< HEAD
           onClick={mode === 'authenticated' ? fetchDadosReais : carregarDadosMock}
+=======
+          onClick={fetchDadosManutencao}
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
           className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
         >
           <RefreshCw size={16} />
@@ -1015,4 +1132,8 @@ export default function ManutencaoPage() {
       </div>
     </div>
   );
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf

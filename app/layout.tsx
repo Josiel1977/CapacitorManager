@@ -3,7 +3,10 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import Sidebar from '@/components/Sidebar';
 import BackToTopButton from '@/components/BackToTopButton';
+<<<<<<< HEAD
 import { AuthProvider } from '@/lib/AuthContext';  // ← ADICIONE ESTA LINHA
+=======
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
 
 const inter = Inter({ 
   subsets: ['latin'], 
@@ -77,6 +80,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         suppressHydrationWarning 
         className="flex min-h-screen bg-slate-50 antialiased"
       >
+<<<<<<< HEAD
         <AuthProvider>  {/* ← ENVOLVA TUDO COM AuthProvider */}
           <Sidebar />
           <main className="flex-1 overflow-y-auto p-4 md:p-8">
@@ -88,3 +92,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+=======
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto p-4 md:p-8">
+          {children}
+        </main>
+        <BackToTopButton />
+      </body>
+    </html>
+  );
+}
+>>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
