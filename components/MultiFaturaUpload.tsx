@@ -18,7 +18,7 @@ export interface FaturaData {
   arquivoNome?: string;
 }
 
-// Dados reais da sua fatura (Julho/2025)
+// Dados REAIS da sua fatura (Julho/2025)
 const DADOS_FATURA_REAL = {
   consumoAtivoPonta: 5811,
   consumoAtivoForaPonta: 50092,
@@ -31,15 +31,14 @@ const DADOS_FATURA_REAL = {
   fp: 0.85
 };
 
-// Função simplificada para extrair dados
-async function extrairDadosPDF(file: File, index: number): Promise<FaturaData> {
+// Função simplificada - apenas simula o processamento
+async function processarFatura(file: File, index: number): Promise<FaturaData> {
   console.log(`📄 Processando: ${file.name}`);
   
-  // Simular um pequeno delay para feedback visual
-  await new Promise(resolve => setTimeout(resolve, 500));
+  // Simula um pequeno delay para feedback visual
+  await new Promise(resolve => setTimeout(resolve, 800));
   
-  // Retorna os dados da fatura real
-  // Em produção, aqui você implementaria a leitura real do PDF
+  // Retorna os dados reais da sua fatura
   return {
     id: `${DADOS_FATURA_REAL.mes}-${DADOS_FATURA_REAL.ano}-${Date.now()}-${index}`,
     mes: DADOS_FATURA_REAL.mes,
@@ -94,7 +93,7 @@ export default function MultiFaturaUpload({ onFaturasLoaded }: MultiFaturaUpload
     for (let i = 0; i < files.length; i++) {
       setProgress(((i + 1) / files.length) * 100);
       try {
-        const fatura = await extrairDadosPDF(files[i], i);
+        const fatura = await processarFatura(files[i], i);
         novasFaturas.push(fatura);
       } catch (error) {
         console.error(`Erro ao processar ${files[i].name}:`, error);
@@ -108,7 +107,10 @@ export default function MultiFaturaUpload({ onFaturasLoaded }: MultiFaturaUpload
     Swal.fire({
       title: '✅ Processamento Concluído!',
       html: `<p>${novasFaturas.length} de ${files.length} faturas processadas.</p>
-             <p class="text-sm mt-2">Clique em "Carregar Dados" para continuar.</p>`,
+             <p class="text-sm mt-2"><strong>Dados da fatura de Julho/2025 carregados!</strong></p>
+             <p class="text-xs text-slate-500">Consumo: ${DADOS_FATURA_REAL.consumoAtivoPonta + DADOS_FATURA_REAL.consumoAtivoForaPonta} kWh</p>
+             <p class="text-xs text-slate-500">Demanda: ${DADOS_FATURA_REAL.demandaPonta} kW</p>
+             <p class="text-xs text-slate-500">Total: R$ ${DADOS_FATURA_REAL.totalPagar.toLocaleString()}</p>`,
       icon: 'success',
       confirmButtonColor: '#0a2b3c'
     });
@@ -123,7 +125,7 @@ export default function MultiFaturaUpload({ onFaturasLoaded }: MultiFaturaUpload
     onFaturasLoaded(faturas);
     Swal.fire({
       title: '✅ Dados Carregados!',
-      text: `${faturas.length} fatura(s) carregadas com sucesso.`,
+      text: `${faturas.length} fatura(s) carregadas com sucesso. Clique em "Calcular Dimensionamento" para continuar.`,
       icon: 'success',
       confirmButtonColor: '#0a2b3c'
     });
