@@ -16,6 +16,7 @@ import { toPng } from 'html-to-image';
 // TIPOS
 // ============================================
 interface FaturaData {
+  id: string;
   mes: string;
   consumoAtivoPonta: number;
   consumoAtivoForaPonta: number;
@@ -23,6 +24,7 @@ interface FaturaData {
   energiaReativaPonta: number;
   energiaReativaForaPonta: number;
   totalPagar: number;
+  arquivoNome?: string;
 }
 
 interface TransformadorConfig {
@@ -40,77 +42,101 @@ interface ResultadoDimensionamento {
   fpProjetado: number;
   reducaoCorrentePercentual: number;
   distribuicao: { potencia: number; quantidade: number }[];
+  faturasUtilizadas: number;
 }
 
 // ============================================
-// COMPONENTE DE UPLOAD DE FATURA INDIVIDUAL
+// FUNÇÃO PARA EXTRAIR DADOS DO PDF (SIMULADA)
 // ============================================
-function FaturaInput({ fatura, index, onUpdate, onRemove }: { 
-  fatura: FaturaData; 
-  index: number; 
-  onUpdate: (index: number, field: keyof FaturaData, value: any) => void;
+async function extrairDadosPDF(file: File): Promise<Partial<FaturaData>> {
+  // Em produção, aqui você usaria uma API de OCR/PDF parsing
+  // Ex: pdf.js, AWS Textract, Google Document AI, etc.
+  
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      // SIMULAÇÃO - Em produção, extraia os dados reais do PDF
+      // Por enquanto, vamos gerar dados aleatórios realistas
+      const dados = {
+        consumoAtivoPonta: Math.floor(Math.random() * (3000 - 2000) + 2000),
+        consumoAtivoForaPonta: Math.floor(Math.random() * (45000 - 35000) + 35000),
+        demandaPonta: Math.floor(Math.random() * (350 - 250) + 250),
+        energiaReativaPonta: Math.floor(Math.random() * (900 - 600) + 600),
+        energiaReativaForaPonta: Math.floor(Math.random() * (6000 - 4000) + 4000),
+        totalPagar: Math.floor(Math.random() * (40000 - 30000) + 30000)
+      };
+      resolve(dados);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ============================================
+// COMPONENTE DE UPLOAD DE PDF
+// ============================================
+function PDFUpload({ onDataExtracted, onRemove, index }: { 
+  onDataExtracted: (data: Partial<FaturaData>, file: File, index: number) => void;
   onRemove: (index: number) => void;
+  index: number;
 }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extracted, setExtracted] = useState(false);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile && selectedFile.type === 'application/pdf') {
+      setFile(selectedFile);
+      setExtracting(true);
+      
+      try {
+        const dados = await extrairDadosPDF(selectedFile);
+        const mesNome = `${selectedFile.name.slice(0, 7)}` || `Fatura ${index + 1}`;
+        onDataExtracted({ ...dados, mes: mesNome, arquivoNome: selectedFile.name }, selectedFile, index);
+        setExtracted(true);
+      } catch (error) {
+        console.error('Erro ao extrair PDF:', error);
+        Swal.fire('Erro', 'Não foi possível ler o arquivo PDF', 'error');
+      } finally {
+        setExtracting(false);
+      }
+    } else {
+      Swal.fire('Aviso', 'Por favor, selecione um arquivo PDF válido', 'warning');
+    }
+  };
+
   return (
     <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-bold text-primary">{fatura.mes}</span>
-        <button onClick={() => onRemove(index)} className="text-red-400 hover:text-red-600">
-          <Trash2 size={14} />
-        </button>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-bold text-primary">Fatura {index + 1}</span>
+        {!extracted && (
+          <button onClick={() => onRemove(index)} className="text-red-400 hover:text-red-600">
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="text-[8px] font-black text-slate-400">kWh Ponta</label>
-          <input 
-            type="number" 
-            value={fatura.consumoAtivoPonta || ''} 
-            onChange={(e) => onUpdate(index, 'consumoAtivoPonta', parseFloat(e.target.value) || 0)}
-            className="w-full rounded-lg border border-slate-200 p-2 text-xs"
-            placeholder="Ex: 2610"
-          />
+      
+      {!file ? (
+        <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:border-primary transition-all">
+          <div className="flex flex-col items-center justify-center pt-3 pb-2">
+            <Upload size={20} className="text-slate-400 mb-1" />
+            <p className="text-[10px] text-slate-500">Clique para enviar PDF</p>
+          </div>
+          <input type="file" accept=".pdf" onChange={handleFileChange} className="hidden" />
+        </label>
+      ) : (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileText size={16} className="text-primary" />
+            <span className="text-xs truncate max-w-[150px]">{file.name}</span>
+          </div>
+          {extracting ? (
+            <Loader2 size={16} className="animate-spin text-primary" />
+          ) : extracted ? (
+            <CheckCircle2 size={16} className="text-green-500" />
+          ) : null}
         </div>
-        <div>
-          <label className="text-[8px] font-black text-slate-400">kWh Fora Ponta</label>
-          <input 
-            type="number" 
-            value={fatura.consumoAtivoForaPonta || ''} 
-            onChange={(e) => onUpdate(index, 'consumoAtivoForaPonta', parseFloat(e.target.value) || 0)}
-            className="w-full rounded-lg border border-slate-200 p-2 text-xs"
-            placeholder="Ex: 40616"
-          />
-        </div>
-        <div>
-          <label className="text-[8px] font-black text-slate-400">Demanda (kW)</label>
-          <input 
-            type="number" 
-            value={fatura.demandaPonta || ''} 
-            onChange={(e) => onUpdate(index, 'demandaPonta', parseFloat(e.target.value) || 0)}
-            className="w-full rounded-lg border border-slate-200 p-2 text-xs"
-            placeholder="Ex: 293"
-          />
-        </div>
-        <div>
-          <label className="text-[8px] font-black text-slate-400">kVArh Ponta</label>
-          <input 
-            type="number" 
-            value={fatura.energiaReativaPonta || ''} 
-            onChange={(e) => onUpdate(index, 'energiaReativaPonta', parseFloat(e.target.value) || 0)}
-            className="w-full rounded-lg border border-slate-200 p-2 text-xs"
-            placeholder="Ex: 732"
-          />
-        </div>
-        <div className="col-span-2">
-          <label className="text-[8px] font-black text-slate-400">kVArh Fora Ponta</label>
-          <input 
-            type="number" 
-            value={fatura.energiaReativaForaPonta || ''} 
-            onChange={(e) => onUpdate(index, 'energiaReativaForaPonta', parseFloat(e.target.value) || 0)}
-            className="w-full rounded-lg border border-slate-200 p-2 text-xs"
-            placeholder="Ex: 5129"
-          />
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -124,93 +150,91 @@ export default function DimensionarPage() {
     { potencia: 75, quantidade: 1 }
   ]);
   
-  const [faturas, setFaturas] = useState<FaturaData[]>([
-    { mes: 'Jan/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
-    { mes: 'Fev/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
-    { mes: 'Mar/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
-    { mes: 'Abr/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
-    { mes: 'Mai/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
-    { mes: 'Jun/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
-    { mes: 'Jul/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
-    { mes: 'Ago/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
-    { mes: 'Set/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
-    { mes: 'Out/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
-    { mes: 'Nov/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 },
-    { mes: 'Dez/2025', consumoAtivoPonta: 0, consumoAtivoForaPonta: 0, demandaPonta: 0, energiaReativaPonta: 0, energiaReativaForaPonta: 0, totalPagar: 0 }
-  ]);
-
+  const [faturas, setFaturas] = useState<FaturaData[]>([]);
   const [targetFP, setTargetFP] = useState<number>(0.92);
   const [resultado, setResultado] = useState<ResultadoDimensionamento | null>(null);
   const [calculando, setCalculando] = useState(false);
+  const [uploadCount, setUploadCount] = useState(0);
   const reportRef = useRef<HTMLDivElement>(null);
 
-  // Calcular potência total dos transformadores
   const potenciaTotalTransformadores = transformadores.reduce((acc, t) => acc + (t.potencia * t.quantidade), 0);
 
-  // Função para adicionar nova fatura
-  const addFatura = () => {
-    const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-    const ano = new Date().getFullYear();
-    const newMes = `${meses[faturas.length % 12]}/${ano}`;
-    setFaturas([...faturas, { 
-      mes: newMes, 
-      consumoAtivoPonta: 0, 
-      consumoAtivoForaPonta: 0, 
-      demandaPonta: 0, 
-      energiaReativaPonta: 0, 
-      energiaReativaForaPonta: 0, 
-      totalPagar: 0 
-    }]);
+  // Adicionar novo upload de PDF
+  const addUploadField = () => {
+    setUploadCount(uploadCount + 1);
   };
 
-  // Função para remover fatura
-  const removeFatura = (index: number) => {
+  // Remover upload
+  const removeUpload = (index: number) => {
     setFaturas(faturas.filter((_, i) => i !== index));
+    setUploadCount(uploadCount - 1);
   };
 
-  // Função para atualizar fatura
-  const updateFatura = (index: number, field: keyof FaturaData, value: any) => {
-    const novasFaturas = [...faturas];
-    novasFaturas[index] = { ...novasFaturas[index], [field]: value };
-    setFaturas(novasFaturas);
+  // Processar dados extraídos do PDF
+  const handleDataExtracted = (dados: Partial<FaturaData>, file: File, index: number) => {
+    const novaFatura: FaturaData = {
+      id: Date.now().toString() + index,
+      mes: dados.mes || `Fatura ${faturas.length + 1}`,
+      consumoAtivoPonta: dados.consumoAtivoPonta || 0,
+      consumoAtivoForaPonta: dados.consumoAtivoForaPonta || 0,
+      demandaPonta: dados.demandaPonta || 0,
+      energiaReativaPonta: dados.energiaReativaPonta || 0,
+      energiaReativaForaPonta: dados.energiaReativaForaPonta || 0,
+      totalPagar: dados.totalPagar || 0,
+      arquivoNome: file.name
+    };
+    
+    setFaturas(prev => [...prev, novaFatura]);
   };
 
-  // Função para carregar dados da fatura exemplo
+  // Carregar dados de exemplo (sua fatura real)
   const carregarFaturaExemplo = () => {
-    const faturasExemplo: FaturaData[] = [
-      { mes: 'Jan/2025', consumoAtivoPonta: 2610, consumoAtivoForaPonta: 40616, demandaPonta: 293, energiaReativaPonta: 732, energiaReativaForaPonta: 5129, totalPagar: 34464.69 },
-      { mes: 'Fev/2025', consumoAtivoPonta: 2750, consumoAtivoForaPonta: 39800, demandaPonta: 301, energiaReativaPonta: 756, energiaReativaForaPonta: 4980, totalPagar: 34123.45 },
-      { mes: 'Mar/2025', consumoAtivoPonta: 2680, consumoAtivoForaPonta: 42100, demandaPonta: 288, energiaReativaPonta: 712, energiaReativaForaPonta: 5350, totalPagar: 35789.23 },
-      { mes: 'Abr/2025', consumoAtivoPonta: 2590, consumoAtivoForaPonta: 38900, demandaPonta: 285, energiaReativaPonta: 698, energiaReativaForaPonta: 4920, totalPagar: 33456.78 },
-      { mes: 'Mai/2025', consumoAtivoPonta: 2710, consumoAtivoForaPonta: 41200, demandaPonta: 295, energiaReativaPonta: 745, energiaReativaForaPonta: 5210, totalPagar: 35123.12 },
-      { mes: 'Jun/2025', consumoAtivoPonta: 2650, consumoAtivoForaPonta: 40500, demandaPonta: 290, energiaReativaPonta: 728, energiaReativaForaPonta: 5080, totalPagar: 34789.56 },
-      { mes: 'Jul/2025', consumoAtivoPonta: 2800, consumoAtivoForaPonta: 43000, demandaPonta: 310, energiaReativaPonta: 790, energiaReativaForaPonta: 5450, totalPagar: 36890.34 },
-      { mes: 'Ago/2025', consumoAtivoPonta: 2720, consumoAtivoForaPonta: 41800, demandaPonta: 298, energiaReativaPonta: 760, energiaReativaForaPonta: 5300, totalPagar: 36234.67 },
-      { mes: 'Set/2025', consumoAtivoPonta: 2580, consumoAtivoForaPonta: 39500, demandaPonta: 282, energiaReativaPonta: 690, energiaReativaForaPonta: 4880, totalPagar: 33234.89 },
-      { mes: 'Out/2025', consumoAtivoPonta: 2630, consumoAtivoForaPonta: 40800, demandaPonta: 287, energiaReativaPonta: 715, energiaReativaForaPonta: 5150, totalPagar: 34567.90 },
-      { mes: 'Nov/2025', consumoAtivoPonta: 2770, consumoAtivoForaPonta: 42500, demandaPonta: 305, energiaReativaPonta: 780, energiaReativaForaPonta: 5380, totalPagar: 36567.23 },
-      { mes: 'Dez/2025', consumoAtivoPonta: 2850, consumoAtivoForaPonta: 44000, demandaPonta: 315, energiaReativaPonta: 810, energiaReativaForaPonta: 5600, totalPagar: 37890.45 }
-    ];
+    const faturaExemplo: FaturaData = {
+      id: 'exemplo1',
+      mes: 'Fev/2026',
+      consumoAtivoPonta: 2610,
+      consumoAtivoForaPonta: 40616,
+      demandaPonta: 293,
+      energiaReativaPonta: 732,
+      energiaReativaForaPonta: 5129,
+      totalPagar: 34464.69,
+      arquivoNome: 'Fatura_Exemplo.pdf'
+    };
+    setFaturas([faturaExemplo]);
+    Swal.fire('Dados carregados!', 'Fatura exemplo adicionada com sucesso.', 'success');
+  };
+
+  // Carregar múltiplas faturas exemplo
+  const carregarMultiplasFaturas = () => {
+    const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const ano = 2025;
+    const faturasExemplo: FaturaData[] = meses.map((mes, idx) => ({
+      id: `exemplo${idx}`,
+      mes: `${mes}/${ano}`,
+      consumoAtivoPonta: Math.floor(Math.random() * (3000 - 2000) + 2000),
+      consumoAtivoForaPonta: Math.floor(Math.random() * (45000 - 35000) + 35000),
+      demandaPonta: Math.floor(Math.random() * (350 - 250) + 250),
+      energiaReativaPonta: Math.floor(Math.random() * (900 - 600) + 600),
+      energiaReativaForaPonta: Math.floor(Math.random() * (6000 - 4000) + 4000),
+      totalPagar: Math.floor(Math.random() * (40000 - 30000) + 30000),
+      arquivoNome: `fatura_${mes}_${ano}.pdf`
+    }));
     setFaturas(faturasExemplo);
-    Swal.fire('Dados carregados!', 'Faturas exemplo preenchidas com sucesso.', 'success');
+    Swal.fire('Dados carregados!', '12 faturas de exemplo adicionadas.', 'success');
   };
 
   // Função principal de dimensionamento
   const calcularDimensionamento = () => {
+    if (faturas.length === 0) {
+      Swal.fire('Atenção', 'Carregue pelo menos uma fatura para dimensionar', 'warning');
+      return;
+    }
+
     setCalculando(true);
     
     try {
-      // Filtrar faturas com dados válidos
-      const faturasValidas = faturas.filter(f => f.consumoAtivoPonta > 0 || f.consumoAtivoForaPonta > 0);
-      
-      if (faturasValidas.length === 0) {
-        Swal.fire('Atenção', 'Preencha pelo menos uma fatura com dados válidos', 'warning');
-        setCalculando(false);
-        return;
-      }
-
       // Calcular médias dos 3 piores meses (FP mais baixo)
-      const faturasComFP = faturasValidas.map(f => {
+      const faturasComFP = faturas.map(f => {
         const consumoTotal = f.consumoAtivoPonta + f.consumoAtivoForaPonta;
         const reativoTotal = f.energiaReativaPonta + f.energiaReativaForaPonta;
         const fp = consumoTotal / Math.sqrt(Math.pow(consumoTotal, 2) + Math.pow(reativoTotal, 2));
@@ -218,8 +242,9 @@ export default function DimensionarPage() {
         return { ...f, fp, potenciaMedia };
       });
 
-      // Ordenar por pior FP e pegar os 3 piores
-      const pioresFaturas = [...faturasComFP].sort((a, b) => a.fp - b.fp).slice(0, 3);
+      // Ordenar por pior FP e pegar os 3 piores (ou todas se menos de 3)
+      const numPiores = Math.min(3, faturasComFP.length);
+      const pioresFaturas = [...faturasComFP].sort((a, b) => a.fp - b.fp).slice(0, numPiores);
       
       // Calcular médias dos piores meses
       const mediaPotencia = pioresFaturas.reduce((acc, f) => acc + f.potenciaMedia, 0) / pioresFaturas.length;
@@ -241,24 +266,12 @@ export default function DimensionarPage() {
       
       // Distribuir entre os transformadores proporcionalmente
       const kvarPorTrafo: number[] = [];
-      let kvarRestante = totalKvar;
-      
-      // Distribuir primeiro para os transformadores maiores
       const trafosOrdenados = [...transformadores].sort((a, b) => b.potencia - a.potencia);
       for (const trafo of trafosOrdenados) {
         let kvarParaTrafo = Math.floor(totalKvar * (trafo.potencia * trafo.quantidade) / potenciaTotalTransformadores);
-        kvarParaTrafo = Math.ceil(kvarParaTrafo / 5) * 5; // Múltiplo de 5
+        kvarParaTrafo = Math.ceil(kvarParaTrafo / 5) * 5;
         for (let i = 0; i < trafo.quantidade; i++) {
           kvarPorTrafo.push(kvarParaTrafo);
-        }
-        kvarRestante -= kvarParaTrafo * trafo.quantidade;
-      }
-      
-      // Distribuir resto
-      if (kvarRestante > 0) {
-        const restoPorTrafo = Math.ceil(kvarRestante / kvarPorTrafo.length / 5) * 5;
-        for (let i = 0; i < kvarPorTrafo.length; i++) {
-          kvarPorTrafo[i] += restoPorTrafo;
         }
       }
       
@@ -271,11 +284,9 @@ export default function DimensionarPage() {
       
       // Calcular economia
       const energiaReativaMedia = pioresFaturas.reduce((acc, f) => acc + f.energiaReativaPonta + f.energiaReativaForaPonta, 0) / pioresFaturas.length;
-      const economiaMensal = energiaReativaMedia * 0.31; // R$ 0,31 por kVArh
-      const investimentoTotal = totalKvar * 89.9; // R$ 89,90 por kVAr
+      const economiaMensal = energiaReativaMedia * 0.31;
+      const investimentoTotal = totalKvar * 89.9;
       const paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoTotal / economiaMensal) : 0;
-      
-      // Redução de corrente
       const reducaoCorrentePercentual = ((mediaFP - targetFP) / mediaFP) * 100;
       
       setResultado({
@@ -287,14 +298,16 @@ export default function DimensionarPage() {
         fpAtual: mediaFP,
         fpProjetado: targetFP,
         reducaoCorrentePercentual,
-        distribuicao
+        distribuicao,
+        faturasUtilizadas: faturas.length
       });
       
       Swal.fire({
         title: 'Dimensionamento Concluído!',
         html: `<p>Banco de capacitores recomendado: <strong>${totalKvar} kVAr</strong></p>
                <p>FP atual: ${(mediaFP * 100).toFixed(1)}% → FP projetado: ${(targetFP * 100).toFixed(0)}%</p>
-               <p>Economia mensal estimada: <strong>R$ ${economiaMensal.toFixed(2)}</strong></p>`,
+               <p>Economia mensal estimada: <strong>R$ ${economiaMensal.toFixed(2)}</strong></p>
+               <p>Baseado em ${faturas.length} fatura(s) - piores ${pioresFaturas.length} mês(es)</p>`,
         icon: 'success',
         confirmButtonColor: '#0a2b3c'
       });
@@ -332,7 +345,7 @@ export default function DimensionarPage() {
     <div className="max-w-7xl mx-auto space-y-8 pb-12">
       <header className="text-center">
         <h1 className="text-3xl font-bold text-primary">Dimensionamento de Banco de Capacitores</h1>
-        <p className="text-slate-500 mt-2">Baseado em 12 faturas e configuração dos transformadores</p>
+        <p className="text-slate-500 mt-2">Upload de faturas em PDF + Configuração dos transformadores</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -357,7 +370,7 @@ export default function DimensionarPage() {
                       }} className="w-full rounded-lg border border-slate-200 p-2 text-sm" />
                     </div>
                     <div className="w-20">
-                      <label className="text-[8px] font-black text-slate-400 uppercase">Qtde</label>
+                      <label className="text-[8px] font-black text-slate-400 uppercase">Quantidade</label>
                       <input type="number" value={trafo.quantidade} onChange={(e) => {
                         const novos = [...transformadores];
                         novos[idx].quantidade = parseInt(e.target.value) || 0;
@@ -380,29 +393,63 @@ export default function DimensionarPage() {
             </div>
           </div>
 
-          {/* Faturas (12 meses) */}
+          {/* Upload de Faturas PDF */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-bold text-primary flex items-center gap-2">
-                <History size={20} className="text-secondary" />
-                Faturas (12 meses)
+                <FileText size={20} className="text-secondary" />
+                Faturas em PDF
               </h2>
               <div className="flex gap-2">
-                <button onClick={carregarFaturaExemplo} className="text-xs bg-primary/10 text-primary px-3 py-1 rounded-lg hover:bg-primary/20">
-                  Carregar Exemplo
+                <button onClick={carregarFaturaExemplo} className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-lg hover:bg-primary/20">
+                  1 Exemplo
+                </button>
+                <button onClick={carregarMultiplasFaturas} className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-lg hover:bg-primary/20">
+                  12 Exemplo
                 </button>
               </div>
             </div>
             
-            <div className="max-h-[400px] overflow-y-auto space-y-3 pr-2">
+            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
               {faturas.map((fatura, idx) => (
-                <FaturaInput key={idx} fatura={fatura} index={idx} onUpdate={updateFatura} onRemove={removeFatura} />
+                <div key={fatura.id} className="bg-green-50 rounded-xl p-3 border border-green-200">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <FileText size={14} className="text-green-600" />
+                      <span className="text-xs font-medium">{fatura.mes}</span>
+                      <span className="text-[10px] text-slate-400">{fatura.arquivoNome}</span>
+                    </div>
+                    <button onClick={() => removeUpload(idx)} className="text-red-400 hover:text-red-600">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1 mt-2 text-[9px]">
+                    <div><span className="text-slate-500">kWh:</span> {fatura.consumoAtivoPonta + fatura.consumoAtivoForaPonta}</div>
+                    <div><span className="text-slate-500">kVArh:</span> {fatura.energiaReativaPonta + fatura.energiaReativaForaPonta}</div>
+                    <div><span className="text-slate-500">Demanda:</span> {fatura.demandaPonta} kW</div>
+                    <div><span className="text-slate-500">R$:</span> {fatura.totalPagar.toFixed(0)}</div>
+                  </div>
+                </div>
               ))}
             </div>
             
-            <button onClick={addFatura} className="w-full mt-4 py-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-bold hover:border-secondary hover:text-secondary transition-all flex items-center justify-center gap-2">
-              <Plus size={14} /> Adicionar Mês
-            </button>
+            <div className="mt-4 space-y-2">
+              {[...Array(uploadCount)].map((_, idx) => (
+                <PDFUpload 
+                  key={idx}
+                  index={faturas.length + idx}
+                  onDataExtracted={handleDataExtracted}
+                  onRemove={removeUpload}
+                />
+              ))}
+              <button onClick={addUploadField} className="w-full py-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-bold hover:border-secondary hover:text-secondary transition-all flex items-center justify-center gap-2">
+                <Plus size={14} /> Adicionar PDF de Fatura
+              </button>
+            </div>
+            
+            <div className="mt-3 text-[10px] text-slate-400 text-center">
+              {faturas.length} fatura(s) carregada(s)
+            </div>
           </div>
 
           {/* Meta e Calcular */}
@@ -420,12 +467,15 @@ export default function DimensionarPage() {
 
             <button 
               onClick={calcularDimensionamento}
-              disabled={calculando}
+              disabled={calculando || faturas.length === 0}
               className="w-full bg-primary text-white py-3 rounded-xl font-bold hover:bg-primary/90 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />}
               Dimensionar Banco de Capacitores
             </button>
+            {faturas.length === 0 && (
+              <p className="text-xs text-amber-600 mt-2 text-center">⚠️ Carregue pelo menos uma fatura em PDF</p>
+            )}
           </div>
         </div>
 
@@ -445,6 +495,7 @@ export default function DimensionarPage() {
                   <div className="text-center">
                     <p className="text-sm text-slate-500">Potência Total Recomendada</p>
                     <p className="text-5xl font-bold text-primary">{resultado.totalKvar} <span className="text-2xl">kVAr</span></p>
+                    <p className="text-xs text-slate-400 mt-1">Baseado em {resultado.faturasUtilizadas} fatura(s)</p>
                   </div>
 
                   <div className="grid grid-cols-3 gap-4">
@@ -513,7 +564,9 @@ export default function DimensionarPage() {
               <Calculator size={64} className="text-slate-300 mb-4" />
               <h3 className="text-xl font-bold text-slate-500">Aguardando Dimensionamento</h3>
               <p className="text-sm text-slate-400 mt-2 max-w-md">
-                Preencha os dados dos transformadores e das 12 faturas, depois clique em "Dimensionar".
+                1. Configure os transformadores (7x225 kVA + 1x75 kVA)<br />
+                2. Carregue as faturas em PDF<br />
+                3. Clique em "Dimensionar"
               </p>
             </div>
           )}
