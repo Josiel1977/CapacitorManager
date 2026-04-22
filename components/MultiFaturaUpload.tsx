@@ -24,7 +24,7 @@ export interface FaturaData {
   arquivoNome?: string;
 }
 
-aasync function extrairDadosPDF(file: File, index: number): Promise<FaturaData> {
+async function extrairDadosPDF(file: File, index: number): Promise<FaturaData> {
   try {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
