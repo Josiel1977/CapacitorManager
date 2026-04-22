@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   Calculator, Zap, TrendingUp, DollarSign, CheckCircle2, 
@@ -11,10 +11,6 @@ import { cn } from '@/lib/utils';
 import Swal from 'sweetalert2';
 import jsPDF from 'jspdf';
 import { toPng } from 'html-to-image';
-import * as pdfjsLib from 'pdfjs-dist';
-
-// Configurar o worker do PDF.js
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 // ============================================
 // TIPOS
@@ -50,9 +46,15 @@ interface ResultadoDimensionamento {
 }
 
 // ============================================
-// FUNÇÃO PARA EXTRAIR DADOS DO PDF REAL
+// FUNÇÃO PARA EXTRAIR DADOS DO PDF (CLIENT-SIDE ONLY)
 // ============================================
 async function extrairDadosPDFReal(file: File): Promise<Partial<FaturaData>> {
+  // Importa dinamicamente o pdf.js apenas no cliente
+  const pdfjsLib = await import('pdfjs-dist');
+  
+  // Configurar o worker
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+  
   try {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -174,9 +176,14 @@ export default function DimensionarPage() {
   const [targetFP, setTargetFP] = useState<number>(0.92);
   const [resultado, setResultado] = useState<ResultadoDimensionamento | null>(null);
   const [calculando, setCalculando] = useState(false);
+  const [isClient, setIsClient] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
 
   const potenciaTotalTransformadores = transformadores.reduce((acc, t) => acc + (t.potencia * t.quantidade), 0);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   const removeUpload = (index: number) => setFaturas(faturas.filter((_, i) => i !== index));
   const handleDataExtracted = (dados: Partial<FaturaData>, file: File, index: number) => {
@@ -246,6 +253,14 @@ export default function DimensionarPage() {
       Swal.fire('PDF gerado!', 'Memorial exportado com sucesso.', 'success');
     } catch (error) { Swal.close(); Swal.fire('Erro', 'Falha ao gerar PDF', 'error'); }
   };
+
+  if (!isClient) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-8 pb-12">
