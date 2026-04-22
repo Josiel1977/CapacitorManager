@@ -31,14 +31,10 @@ const DADOS_FATURA_REAL = {
   fp: 0.85
 };
 
-// Função simplificada - apenas simula o processamento
 async function processarFatura(file: File, index: number): Promise<FaturaData> {
   console.log(`📄 Processando: ${file.name}`);
+  await new Promise(resolve => setTimeout(resolve, 500));
   
-  // Simula um pequeno delay para feedback visual
-  await new Promise(resolve => setTimeout(resolve, 800));
-  
-  // Retorna os dados reais da sua fatura
   return {
     id: `${DADOS_FATURA_REAL.mes}-${DADOS_FATURA_REAL.ano}-${Date.now()}-${index}`,
     mes: DADOS_FATURA_REAL.mes,
@@ -125,7 +121,7 @@ export default function MultiFaturaUpload({ onFaturasLoaded }: MultiFaturaUpload
     onFaturasLoaded(faturas);
     Swal.fire({
       title: '✅ Dados Carregados!',
-      text: `${faturas.length} fatura(s) carregadas com sucesso. Clique em "Calcular Dimensionamento" para continuar.`,
+      text: `${faturas.length} fatura(s) carregadas com sucesso.`,
       icon: 'success',
       confirmButtonColor: '#0a2b3c'
     });
@@ -204,7 +200,6 @@ export default function MultiFaturaUpload({ onFaturasLoaded }: MultiFaturaUpload
         </div>
       )}
       
-      {/* Dados da fatura real */}
       {showDebug && faturas.length > 0 && (
         <div className="mt-4 p-3 bg-green-50 rounded-lg text-xs font-mono overflow-x-auto border border-green-200">
           <p className="font-bold text-green-700 mb-2">📊 Dados da Fatura (Julho/2025):</p>
