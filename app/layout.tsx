@@ -3,10 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import Sidebar from '@/components/Sidebar';
 import BackToTopButton from '@/components/BackToTopButton';
-<<<<<<< HEAD
-import { AuthProvider } from '@/lib/AuthContext';  // ← ADICIONE ESTA LINHA
-=======
->>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
+import { AuthProvider } from '@/lib/AuthContext';
 
 const inter = Inter({ 
   subsets: ['latin'], 
@@ -19,8 +16,8 @@ export const metadata: Metadata = {
     template: '%s | CapacitorManager',
     default: 'CapacitorManager - Gestão Inteligente de Capacitores',
   },
-  description: 'Sistema profissional para gestão, monitoramento e manutenção preditiva de bancos de capacitores. Validação automática, IA e relatórios técnicos.',
-  keywords: 'capacitores, banco de capacitores, gestão de energia, manutenção preditiva, fator de potência, engenharia elétrica',
+  description: 'Sistema profissional para gestão, monitoramento e manutenção preditiva de bancos de capacitores.',
+  keywords: 'capacitores, banco de capacitores, gestão de energia, manutenção preditiva, fator de potência',
   authors: [{ name: 'CapacitorManager' }],
   creator: 'CapacitorManager',
   publisher: 'CapacitorManager',
@@ -37,24 +34,17 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: 'CapacitorManager - Gestão Inteligente de Capacitores',
-    description: 'Monitore, valide e otimize seus bancos de capacitores com precisão técnica e inteligência artificial.',
+    description: 'Monitore, valide e otimize seus bancos de capacitores.',
     url: 'https://capacitor-manage.vercel.app',
     siteName: 'CapacitorManager',
-    images: [
-      {
-        url: '/og-image.png',
-        width: 1200,
-        height: 630,
-        alt: 'CapacitorManager Dashboard',
-      },
-    ],
+    images: [{ url: '/og-image.png', width: 1200, height: 630, alt: 'CapacitorManager Dashboard' }],
     locale: 'pt_BR',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'CapacitorManager - Gestão Inteligente de Capacitores',
-    description: 'Sistema profissional para gestão de bancos de capacitores com IA.',
+    description: 'Sistema profissional para gestão de bancos de capacitores.',
     images: ['/og-image.png'],
   },
   viewport: {
@@ -76,12 +66,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR" className={`${inter.variable}`} suppressHydrationWarning>
-      <body 
-        suppressHydrationWarning 
-        className="flex min-h-screen bg-slate-50 antialiased"
-      >
-<<<<<<< HEAD
-        <AuthProvider>  {/* ← ENVOLVA TUDO COM AuthProvider */}
+      <body suppressHydrationWarning className="flex min-h-screen bg-slate-50 antialiased">
+        <AuthProvider>
           <Sidebar />
           <main className="flex-1 overflow-y-auto p-4 md:p-8">
             {children}
@@ -92,14 +78,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-=======
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto p-4 md:p-8">
-          {children}
-        </main>
-        <BackToTopButton />
-      </body>
-    </html>
-  );
-}
->>>>>>> 57bd7c0653691ce7e3d82bebad72bd7cf89219cf
