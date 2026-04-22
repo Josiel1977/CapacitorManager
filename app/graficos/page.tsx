@@ -718,3 +718,4 @@ export default function GraficosPage() {
     </div>
   );
 }
+

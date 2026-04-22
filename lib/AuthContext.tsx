@@ -10,7 +10,6 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
-  usarModoDemo: () => void;
 }
 
 const AuthContext = createContext({} as AuthContextType);
@@ -29,9 +28,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (auth === 'true' && expires && new Date().getTime() < parseInt(expires)) {
       setMode('authenticated');
     } else {
-      localStorage.removeItem('capacitor_auth');
-      localStorage.removeItem('capacitor_user');
-      localStorage.removeItem('capacitor_expires');
       setMode('demo');
     }
     setIsLoading(false);
@@ -56,12 +52,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMode('demo');
   };
 
-  const usarModoDemo = () => {
-    setMode('demo');
-  };
-
   return (
-    <AuthContext.Provider value={{ mode, isAuthenticated: mode === 'authenticated', isLoading, login, logout, usarModoDemo }}>
+    <AuthContext.Provider value={{ mode, isAuthenticated: mode === 'authenticated', isLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

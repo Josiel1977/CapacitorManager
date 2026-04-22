@@ -1202,3 +1202,4 @@ export default function AnaliseFaturaPage() {
     </div>
   );
 }
+
