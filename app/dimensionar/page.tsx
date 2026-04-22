@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { 
   Calculator, Zap, TrendingUp, DollarSign, CheckCircle2, 
   Upload, FileText, X, Loader2, AlertTriangle, Plus,
@@ -335,4 +336,4 @@ export default function DimensionarPage() {
       </div>
     </div>
   );
-}C
+}
