@@ -41,6 +41,7 @@ const menuItems = [
   { name: 'Relatórios', href: '/relatorios', icon: FileText, badge: null },
   { name: 'Manutenção Preditiva', href: '/manutencao', icon: Wrench, badge: 'Premium' },
   { name: 'Configurações', href: '/configuracoes', icon: Settings, badge: null },
+  { name: 'Documentação', href: '/documentacao', icon: BookOpen, badge: null },
 ];
 
 // Seção de suporte/ajuda (separada visualmente)
