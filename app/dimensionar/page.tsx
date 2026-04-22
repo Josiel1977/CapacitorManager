@@ -6,11 +6,14 @@ import {
   Upload, FileText, X, Loader2, AlertTriangle, Plus,
   Trash2, Download, Printer, Package, Layers, History
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import Swal from 'sweetalert2';
 import jsPDF from 'jspdf';
 import { toPng } from 'html-to-image';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configurar o worker do PDF.js
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 // ============================================
 // TIPOS
@@ -46,29 +49,104 @@ interface ResultadoDimensionamento {
 }
 
 // ============================================
-// FUNÇÃO PARA EXTRAIR DADOS DO PDF (SIMULADA)
+// FUNÇÃO PARA EXTRAIR DADOS DO PDF REAL
 // ============================================
-async function extrairDadosPDF(file: File): Promise<Partial<FaturaData>> {
-  // Em produção, aqui você usaria uma API de OCR/PDF parsing
-  // Ex: pdf.js, AWS Textract, Google Document AI, etc.
-  
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      // SIMULAÇÃO - Em produção, extraia os dados reais do PDF
-      // Por enquanto, vamos gerar dados aleatórios realistas
-      const dados = {
-        consumoAtivoPonta: Math.floor(Math.random() * (3000 - 2000) + 2000),
-        consumoAtivoForaPonta: Math.floor(Math.random() * (45000 - 35000) + 35000),
-        demandaPonta: Math.floor(Math.random() * (350 - 250) + 250),
-        energiaReativaPonta: Math.floor(Math.random() * (900 - 600) + 600),
-        energiaReativaForaPonta: Math.floor(Math.random() * (6000 - 4000) + 4000),
-        totalPagar: Math.floor(Math.random() * (40000 - 30000) + 30000)
-      };
-      resolve(dados);
+async function extrairDadosPDFReal(file: File): Promise<Partial<FaturaData>> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const numPages = pdf.numPages;
+    let textoCompleto = '';
+    
+    // Extrair texto de todas as páginas
+    for (let i = 1; i <= numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map((item: any) => item.str).join(' ');
+      textoCompleto += pageText + ' ';
+    }
+    
+    console.log('Texto extraído do PDF:', textoCompleto);
+    
+    // Padrões de busca para sua fatura da Roraima Energia
+    const padroes = {
+      // Consumo Ponta (kWh) - normalmente vem depois de "Consumo Ponta"
+      consumoPonta: /Consumo\s+Ponta\s+(\d+)/i,
+      consumoPontaAlt: /Ponta\s+(\d+)\s+kWh/i,
+      
+      // Consumo Fora Ponta
+      consumoForaPonta: /Consumo\s+Fora\s+Ponta\s+(\d+)/i,
+      consumoForaPontaAlt: /Fora\s+Ponta\s+(\d+)\s+kWh/i,
+      
+      // Demanda Ponta (kW)
+      demandaPonta: /Demanda\s+Ponta\s+(\d+)/i,
+      demandaPontaAlt: /Demanda\s+Ponta\s+(\d+)\s+kw/i,
+      
+      // Energia Reativa Ponta
+      reativaPonta: /Energia\s+Reativa\s+Ponta\s+(\d+)/i,
+      reativaPontaAlt: /Reativa\s+Ponta\s+(\d+)/i,
+      
+      // Energia Reativa Fora Ponta
+      reativaForaPonta: /Energia\s+Reativa\s+Fora\s+Ponta\s+(\d+)/i,
+      reativaForaPontaAlt: /Reativa\s+Fora\s+Ponta\s+(\d+)/i,
+      
+      // Total a pagar
+      totalPagar: /Total\s+a\s+pagar\s+R\$\s*([\d\.,]+)/i,
+      totalPagarAlt: /Valor\s+documento\s+R\$\s*([\d\.,]+)/i,
+      
+      // Mês da fatura
+      mes: /(\w{3})\/(\d{4})/i,
     };
-    reader.readAsDataURL(file);
-  });
+    
+    // Função para extrair número
+    const extrairNumero = (padrao: RegExp, texto: string, padraoAlt?: RegExp): number => {
+      let match = texto.match(padrao);
+      if (!match && padraoAlt) {
+        match = texto.match(padraoAlt);
+      }
+      if (match) {
+        const valor = match[1].replace(/\./g, '').replace(',', '.');
+        return parseFloat(valor);
+      }
+      return 0;
+    };
+    
+    // Extrair dados
+    const consumoAtivoPonta = extrairNumero(padroes.consumoPonta, textoCompleto, padroes.consumoPontaAlt);
+    const consumoAtivoForaPonta = extrairNumero(padroes.consumoForaPonta, textoCompleto, padroes.consumoForaPontaAlt);
+    const demandaPonta = extrairNumero(padroes.demandaPonta, textoCompleto, padroes.demandaPontaAlt);
+    const energiaReativaPonta = extrairNumero(padroes.reativaPonta, textoCompleto, padroes.reativaPontaAlt);
+    const energiaReativaForaPonta = extrairNumero(padroes.reativaForaPonta, textoCompleto, padroes.reativaForaPontaAlt);
+    const totalPagar = extrairNumero(padroes.totalPagar, textoCompleto, padroes.totalPagarAlt);
+    
+    // Extrair mês da fatura
+    const mesMatch = textoCompleto.match(padroes.mes);
+    const mes = mesMatch ? `${mesMatch[1]}/${mesMatch[2]}` : `Fatura ${new Date().toLocaleDateString()}`;
+    
+    console.log('Dados extraídos:', {
+      consumoAtivoPonta,
+      consumoAtivoForaPonta,
+      demandaPonta,
+      energiaReativaPonta,
+      energiaReativaForaPonta,
+      totalPagar,
+      mes
+    });
+    
+    return {
+      mes,
+      consumoAtivoPonta,
+      consumoAtivoForaPonta,
+      demandaPonta,
+      energiaReativaPonta,
+      energiaReativaForaPonta,
+      totalPagar
+    };
+    
+  } catch (error) {
+    console.error('Erro ao extrair PDF:', error);
+    throw new Error('Não foi possível ler o arquivo PDF');
+  }
 }
 
 // ============================================
@@ -82,6 +160,7 @@ function PDFUpload({ onDataExtracted, onRemove, index }: {
   const [file, setFile] = useState<File | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [extracted, setExtracted] = useState(false);
+  const [extractedData, setExtractedData] = useState<Partial<FaturaData> | null>(null);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -90,13 +169,30 @@ function PDFUpload({ onDataExtracted, onRemove, index }: {
       setExtracting(true);
       
       try {
-        const dados = await extrairDadosPDF(selectedFile);
-        const mesNome = `${selectedFile.name.slice(0, 7)}` || `Fatura ${index + 1}`;
-        onDataExtracted({ ...dados, mes: mesNome, arquivoNome: selectedFile.name }, selectedFile, index);
+        const dados = await extrairDadosPDFReal(selectedFile);
+        setExtractedData(dados);
+        onDataExtracted(dados, selectedFile, index);
         setExtracted(true);
+        
+        Swal.fire({
+          title: '✅ Fatura processada!',
+          html: `
+            <div class="text-left text-sm">
+              <p><strong>Mês:</strong> ${dados.mes}</p>
+              <p><strong>Consumo kWh:</strong> ${(dados.consumoAtivoPonta || 0) + (dados.consumoAtivoForaPonta || 0)}</p>
+              <p><strong>Demanda:</strong> ${dados.demandaPonta || 0} kW</p>
+              <p><strong>Total:</strong> R$ ${(dados.totalPagar || 0).toFixed(2)}</p>
+            </div>
+          `,
+          icon: 'success',
+          timer: 3000,
+          showConfirmButton: false
+        });
+        
       } catch (error) {
         console.error('Erro ao extrair PDF:', error);
-        Swal.fire('Erro', 'Não foi possível ler o arquivo PDF', 'error');
+        Swal.fire('Erro', 'Não foi possível ler o arquivo PDF. Verifique se é uma fatura válida.', 'error');
+        setFile(null);
       } finally {
         setExtracting(false);
       }
@@ -109,7 +205,7 @@ function PDFUpload({ onDataExtracted, onRemove, index }: {
     <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-bold text-primary">Fatura {index + 1}</span>
-        {!extracted && (
+        {extracted && (
           <button onClick={() => onRemove(index)} className="text-red-400 hover:text-red-600">
             <Trash2 size={14} />
           </button>
@@ -120,21 +216,30 @@ function PDFUpload({ onDataExtracted, onRemove, index }: {
         <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:border-primary transition-all">
           <div className="flex flex-col items-center justify-center pt-3 pb-2">
             <Upload size={20} className="text-slate-400 mb-1" />
-            <p className="text-[10px] text-slate-500">Clique para enviar PDF</p>
+            <p className="text-[10px] text-slate-500">Clique para enviar PDF da fatura</p>
           </div>
           <input type="file" accept=".pdf" onChange={handleFileChange} className="hidden" />
         </label>
       ) : (
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <FileText size={16} className="text-primary" />
-            <span className="text-xs truncate max-w-[150px]">{file.name}</span>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <FileText size={16} className="text-primary flex-shrink-0" />
+            <span className="text-xs truncate">{file.name}</span>
           </div>
           {extracting ? (
-            <Loader2 size={16} className="animate-spin text-primary" />
+            <Loader2 size={16} className="animate-spin text-primary flex-shrink-0" />
           ) : extracted ? (
-            <CheckCircle2 size={16} className="text-green-500" />
+            <CheckCircle2 size={16} className="text-green-500 flex-shrink-0" />
           ) : null}
+        </div>
+      )}
+      
+      {extractedData && (
+        <div className="mt-2 text-[9px] text-green-600 bg-green-50 p-2 rounded-lg">
+          <div className="flex justify-between">
+            <span>Mês: {extractedData.mes}</span>
+            <span>R$ {extractedData.totalPagar?.toFixed(0)}</span>
+          </div>
         </div>
       )}
     </div>
@@ -154,20 +259,13 @@ export default function DimensionarPage() {
   const [targetFP, setTargetFP] = useState<number>(0.92);
   const [resultado, setResultado] = useState<ResultadoDimensionamento | null>(null);
   const [calculando, setCalculando] = useState(false);
-  const [uploadCount, setUploadCount] = useState(0);
   const reportRef = useRef<HTMLDivElement>(null);
 
   const potenciaTotalTransformadores = transformadores.reduce((acc, t) => acc + (t.potencia * t.quantidade), 0);
 
-  // Adicionar novo upload de PDF
-  const addUploadField = () => {
-    setUploadCount(uploadCount + 1);
-  };
-
   // Remover upload
   const removeUpload = (index: number) => {
     setFaturas(faturas.filter((_, i) => i !== index));
-    setUploadCount(uploadCount - 1);
   };
 
   // Processar dados extraídos do PDF
@@ -187,42 +285,6 @@ export default function DimensionarPage() {
     setFaturas(prev => [...prev, novaFatura]);
   };
 
-  // Carregar dados de exemplo (sua fatura real)
-  const carregarFaturaExemplo = () => {
-    const faturaExemplo: FaturaData = {
-      id: 'exemplo1',
-      mes: 'Fev/2026',
-      consumoAtivoPonta: 2610,
-      consumoAtivoForaPonta: 40616,
-      demandaPonta: 293,
-      energiaReativaPonta: 732,
-      energiaReativaForaPonta: 5129,
-      totalPagar: 34464.69,
-      arquivoNome: 'Fatura_Exemplo.pdf'
-    };
-    setFaturas([faturaExemplo]);
-    Swal.fire('Dados carregados!', 'Fatura exemplo adicionada com sucesso.', 'success');
-  };
-
-  // Carregar múltiplas faturas exemplo
-  const carregarMultiplasFaturas = () => {
-    const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-    const ano = 2025;
-    const faturasExemplo: FaturaData[] = meses.map((mes, idx) => ({
-      id: `exemplo${idx}`,
-      mes: `${mes}/${ano}`,
-      consumoAtivoPonta: Math.floor(Math.random() * (3000 - 2000) + 2000),
-      consumoAtivoForaPonta: Math.floor(Math.random() * (45000 - 35000) + 35000),
-      demandaPonta: Math.floor(Math.random() * (350 - 250) + 250),
-      energiaReativaPonta: Math.floor(Math.random() * (900 - 600) + 600),
-      energiaReativaForaPonta: Math.floor(Math.random() * (6000 - 4000) + 4000),
-      totalPagar: Math.floor(Math.random() * (40000 - 30000) + 30000),
-      arquivoNome: `fatura_${mes}_${ano}.pdf`
-    }));
-    setFaturas(faturasExemplo);
-    Swal.fire('Dados carregados!', '12 faturas de exemplo adicionadas.', 'success');
-  };
-
   // Função principal de dimensionamento
   const calcularDimensionamento = () => {
     if (faturas.length === 0) {
@@ -237,10 +299,16 @@ export default function DimensionarPage() {
       const faturasComFP = faturas.map(f => {
         const consumoTotal = f.consumoAtivoPonta + f.consumoAtivoForaPonta;
         const reativoTotal = f.energiaReativaPonta + f.energiaReativaForaPonta;
-        const fp = consumoTotal / Math.sqrt(Math.pow(consumoTotal, 2) + Math.pow(reativoTotal, 2));
-        const potenciaMedia = consumoTotal / 220; // 220 horas/mês típico
+        const fp = consumoTotal > 0 ? consumoTotal / Math.sqrt(Math.pow(consumoTotal, 2) + Math.pow(reativoTotal, 2)) : 0.8;
+        const potenciaMedia = consumoTotal > 0 ? consumoTotal / 220 : 0; // 220 horas/mês típico
         return { ...f, fp, potenciaMedia };
-      });
+      }).filter(f => f.consumoTotal > 0);
+      
+      if (faturasComFP.length === 0) {
+        Swal.fire('Atenção', 'Nenhuma fatura com dados válidos encontrada', 'warning');
+        setCalculando(false);
+        return;
+      }
 
       // Ordenar por pior FP e pegar os 3 piores (ou todas se menos de 3)
       const numPiores = Math.min(3, faturasComFP.length);
@@ -264,7 +332,7 @@ export default function DimensionarPage() {
       // Ajustar para o padrão de mercado (múltiplos de 5)
       totalKvar = Math.ceil(totalKvar / 5) * 5;
       
-      // Distribuir entre os transformadores proporcionalmente
+      // Distribuir entre os transformadores
       const kvarPorTrafo: number[] = [];
       const trafosOrdenados = [...transformadores].sort((a, b) => b.potencia - a.potencia);
       for (const trafo of trafosOrdenados) {
@@ -275,7 +343,7 @@ export default function DimensionarPage() {
         }
       }
       
-      // Criar distribuição final (agrupar por potência)
+      // Criar distribuição final
       const distribuicaoMap = new Map<number, number>();
       for (const kvar of kvarPorTrafo) {
         distribuicaoMap.set(kvar, (distribuicaoMap.get(kvar) || 0) + 1);
@@ -400,51 +468,36 @@ export default function DimensionarPage() {
                 <FileText size={20} className="text-secondary" />
                 Faturas em PDF
               </h2>
-              <div className="flex gap-2">
-                <button onClick={carregarFaturaExemplo} className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-lg hover:bg-primary/20">
-                  1 Exemplo
-                </button>
-                <button onClick={carregarMultiplasFaturas} className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-lg hover:bg-primary/20">
-                  12 Exemplo
-                </button>
-              </div>
             </div>
             
             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
               {faturas.map((fatura, idx) => (
                 <div key={fatura.id} className="bg-green-50 rounded-xl p-3 border border-green-200">
                   <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      <FileText size={14} className="text-green-600" />
-                      <span className="text-xs font-medium">{fatura.mes}</span>
-                      <span className="text-[10px] text-slate-400">{fatura.arquivoNome}</span>
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <FileText size={14} className="text-green-600 flex-shrink-0" />
+                      <span className="text-xs font-medium truncate">{fatura.mes}</span>
                     </div>
-                    <button onClick={() => removeUpload(idx)} className="text-red-400 hover:text-red-600">
+                    <button onClick={() => removeUpload(idx)} className="text-red-400 hover:text-red-600 flex-shrink-0">
                       <Trash2 size={14} />
                     </button>
                   </div>
-                  <div className="grid grid-cols-4 gap-1 mt-2 text-[9px]">
-                    <div><span className="text-slate-500">kWh:</span> {fatura.consumoAtivoPonta + fatura.consumoAtivoForaPonta}</div>
-                    <div><span className="text-slate-500">kVArh:</span> {fatura.energiaReativaPonta + fatura.energiaReativaForaPonta}</div>
+                  <div className="grid grid-cols-2 gap-1 mt-2 text-[9px]">
+                    <div><span className="text-slate-500">kWh:</span> {(fatura.consumoAtivoPonta + fatura.consumoAtivoForaPonta).toLocaleString()}</div>
+                    <div><span className="text-slate-500">kVArh:</span> {(fatura.energiaReativaPonta + fatura.energiaReativaForaPonta).toLocaleString()}</div>
                     <div><span className="text-slate-500">Demanda:</span> {fatura.demandaPonta} kW</div>
-                    <div><span className="text-slate-500">R$:</span> {fatura.totalPagar.toFixed(0)}</div>
+                    <div><span className="text-slate-500">R$:</span> {fatura.totalPagar.toLocaleString()}</div>
                   </div>
                 </div>
               ))}
             </div>
             
-            <div className="mt-4 space-y-2">
-              {[...Array(uploadCount)].map((_, idx) => (
-                <PDFUpload 
-                  key={idx}
-                  index={faturas.length + idx}
-                  onDataExtracted={handleDataExtracted}
-                  onRemove={removeUpload}
-                />
-              ))}
-              <button onClick={addUploadField} className="w-full py-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-bold hover:border-secondary hover:text-secondary transition-all flex items-center justify-center gap-2">
-                <Plus size={14} /> Adicionar PDF de Fatura
-              </button>
+            <div className="mt-4">
+              <PDFUpload 
+                index={faturas.length}
+                onDataExtracted={handleDataExtracted}
+                onRemove={removeUpload}
+              />
             </div>
             
             <div className="mt-3 text-[10px] text-slate-400 text-center">
