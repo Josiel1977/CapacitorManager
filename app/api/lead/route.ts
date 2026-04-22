@@ -19,7 +19,13 @@ export async function POST(request: Request) {
 
     const emailHtml = `<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;}.header{background:#0a2b3c;padding:20px;text-align:center;}.header h1{color:#f39c12;}</style></head><body><div class="header"><h1>CapacitorManager</h1><p>Nova Solicitação de Demonstração</p></div><div><p><strong>Nome:</strong> ${nome}</p><p><strong>E-mail:</strong> ${email}</p><p><strong>Telefone:</strong> ${telefone || 'N/A'}</p><p><strong>Empresa:</strong> ${empresa || 'N/A'}</p><p><strong>Plano:</strong> ${plano_interesse}</p><p><strong>Mensagem:</strong> ${mensagem || 'N/A'}</p></div></body></html>`;
 
-    await resend.emails.send({ from: 'CapacitorManager <onboarding@resend.dev>', to: ['suporte@jmeletroservice.com.br'], subject: `Nova solicitação - ${nome}`, html: emailHtml });
+    // ⚠️ ALTERAR ESTA LINHA APÓS VERIFICAR O DOMÍNIO:
+    await resend.emails.send({ 
+      from: 'CapacitorManager <contato@jmeletroservice.com.br>', 
+      to: ['suporte@jmeletroservice.com.br'], 
+      subject: `Nova solicitação - ${nome}`, 
+      html: emailHtml 
+    });
 
     return NextResponse.json({ message: 'Solicitação recebida com sucesso!', lead: data?.[0] }, { status: 201 });
   } catch (error) {
