@@ -377,208 +377,222 @@ export default function DimensionarPage() {
   };
 
   const calcularDimensionamento = () => {
-  if (faturas.length < 3) {
-    Swal.fire("Atenção", "Mínimo de 3 faturas", "warning");
-    return;
-  }
-
-  setCalculando(true);
-
-  try {
-    const potenciaTotal = potenciaTotalTransformadores;
-    const grupoTarifario: "A" | "B" = potenciaTotal >= 75 ? "A" : "B";
-
-    const faturasProcessadas = faturas.map((f) => {
-      const consumoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
-      const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
-      const fp = calcularFP(consumoTotal, reativoTotal);
-      const custoReativo = calcularCustoReativo(
-        f.reativo_ponta_kvarh,
-        f.reativo_fora_ponta_kvarh
-      );
-      const potenciaMedia = calcularPotenciaAtivaMedia(consumoTotal);
-
-      return {
-        ...f,
-        fp,
-        custoReativo,
-        consumoTotal,
-        reativoTotal,
-        potenciaMedia,
-      };
-    });
-
-    const totalFaturas = faturasProcessadas.length;
-
-    const mediaPotenciaAtiva =
-      faturasProcessadas.reduce((acc, f) => acc + f.potenciaMedia, 0) /
-      totalFaturas;
-
-    const mediaFP =
-      faturasProcessadas.reduce((acc, f) => acc + f.fp, 0) / totalFaturas;
-
-    const mediaConsumo =
-      faturasProcessadas.reduce((acc, f) => acc + f.consumoTotal, 0) /
-      totalFaturas;
-
-    const mediaCustoReativo =
-      faturasProcessadas.reduce((acc, f) => acc + f.custoReativo, 0) /
-      totalFaturas;
-
-    const piorMes = [...faturasProcessadas].sort((a, b) => a.fp - b.fp)[0];
-
-    // 🔥 BLOQUEIO INTELIGENTE
-    let bloqueioPorQualidade = false;
-    if (mediaFP > 0.98 && mediaCustoReativo < 100) {
-      bloqueioPorQualidade = true;
+    if (faturas.length < 3) {
+      Swal.fire("Atenção", "Mínimo de 3 faturas", "warning");
+      return;
     }
 
-    let precisaCapacitor = false;
-    let motivo = "";
-    let totalKvar = 0;
-    let stages: number[] = [];
-    let economiaMensal = 0;
-    let investimentoEstimado = 0;
-    let paybackMeses = 0;
-    let recomendacaoEstagios = "";
+    setCalculando(true);
 
-    // =========================
-    // GRUPO A (ALTA TENSÃO)
-    // =========================
-    if (grupoTarifario === "A") {
-      if (bloqueioPorQualidade) {
-        precisaCapacitor = false;
-        motivo = `FP excelente (>98%) e custo reativo irrelevante (R$ ${mediaCustoReativo.toFixed(
-          2
-        )})`;
-      } else {
-        precisaCapacitor = mediaCustoReativo > 50;
-        motivo = `Grupo A - Custo reativo médio: R$ ${mediaCustoReativo.toFixed(
-          2
-        )}`;
-      }
+    try {
+      const potenciaTotal = potenciaTotalTransformadores;
+      const grupoTarifario: "A" | "B" = potenciaTotal >= 75 ? "A" : "B";
 
-      if (precisaCapacitor) {
-        const phi1 = Math.acos(Math.min(0.99, mediaFP));
-        const phi2 = Math.acos(targetFP);
-
-        const kvarProcesso =
-          mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
-
-        const kvarTrafo = calcularReativoTransformadores(
-          transformadores,
-          mediaPotenciaAtiva
+      const faturasProcessadas = faturas.map((f) => {
+        const consumoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
+        const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
+        const fp = calcularFP(consumoTotal, reativoTotal);
+        const custoReativo = calcularCustoReativo(
+          f.reativo_ponta_kvarh,
+          f.reativo_fora_ponta_kvarh,
         );
+        const potenciaMedia = calcularPotenciaAtivaMedia(consumoTotal);
 
-        let kvarTotalCalculado = kvarProcesso + kvarTrafo;
+        return {
+          ...f,
+          fp,
+          custoReativo,
+          consumoTotal,
+          reativoTotal,
+          potenciaMedia,
+        };
+      });
 
-        totalKvar = Math.ceil(kvarTotalCalculado / 5) * 5;
+      const totalFaturas = faturasProcessadas.length;
 
-        // ⚠️ só força mínimo se realmente fizer sentido econômico
-        if (totalKvar < 30 && mediaCustoReativo > 100) {
-          totalKvar = 30;
-        }
+      const mediaPotenciaAtiva =
+        faturasProcessadas.reduce((acc, f) => acc + f.potenciaMedia, 0) /
+        totalFaturas;
 
-        // montagem de estágios
-        let restante = totalKvar;
+      const mediaFP =
+        faturasProcessadas.reduce((acc, f) => acc + f.fp, 0) / totalFaturas;
 
-        const sizes = [60, 30, 20, 15, 10, 5];
+      const mediaConsumo =
+        faturasProcessadas.reduce((acc, f) => acc + f.consumoTotal, 0) /
+        totalFaturas;
 
-        for (const size of sizes) {
-          while (restante >= size) {
-            stages.push(size);
-            restante -= size;
-          }
-        }
+      const mediaCustoReativo =
+        faturasProcessadas.reduce((acc, f) => acc + f.custoReativo, 0) /
+        totalFaturas;
 
-        stages.sort((a, b) => a - b);
+      const piorMes = [...faturasProcessadas].sort((a, b) => a.fp - b.fp)[0];
 
-        recomendacaoEstagios = `Banco de ${totalKvar} kVAr (${stages.join(
-          " + "
-        )})`;
-
-        economiaMensal = mediaCustoReativo * 0.95;
-        investimentoEstimado = totalKvar * 89.9 + 2500;
-
-        paybackMeses =
-          economiaMensal > 0
-            ? Math.ceil(investimentoEstimado / economiaMensal)
-            : 0;
-      } else {
-        totalKvar = 0;
-        stages = [];
-        recomendacaoEstagios = "Sistema já eficiente";
+      // 🔥 BLOQUEIO INTELIGENTE
+      let bloqueioPorQualidade = false;
+      if (mediaFP > 0.98 && mediaCustoReativo < 100) {
+        bloqueioPorQualidade = true;
       }
-    }
 
-    // =========================
-    // GRUPO B (BAIXA TENSÃO)
-    // =========================
-    else {
-      precisaCapacitor = mediaFP < 0.92;
+      let precisaCapacitor = false;
+      let motivo = "";
+      let totalKvar = 0;
+      let stages: number[] = [];
+      let economiaMensal = 0;
+      let investimentoEstimado = 0;
+      let paybackMeses = 0;
+      let recomendacaoEstagios = "";
 
-      if (precisaCapacitor) {
-        const phi1 = Math.acos(Math.min(0.99, mediaFP));
-        const phi2 = Math.acos(targetFP);
+      // =========================
+      // GRUPO A (ALTA TENSÃO)
+      // =========================
+      if (grupoTarifario === "A") {
+        // BLOQUEIO INTELIGENTE
+        const bloqueioPorQualidade = mediaFP > 0.98 && mediaCustoReativo < 100;
 
-        const kvarProcesso =
-          mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
+        // GRUPO A: só recomenda se realmente há custo relevante
+        precisaCapacitor = mediaCustoReativo > 50 && !bloqueioPorQualidade;
 
-        totalKvar = Math.ceil(kvarProcesso / 5) * 5;
+        motivo = bloqueioPorQualidade
+          ? `Sistema já eficiente (FP ${(mediaFP * 100).toFixed(1)}% e baixo custo reativo)`
+          : `Grupo A (Alta Tensão) - Reativo faturado. Custo médio: R$ ${mediaCustoReativo.toFixed(2)}`;
 
-        let restante = totalKvar;
-        const sizes = [30, 20, 15, 10, 5];
+        if (precisaCapacitor) {
+          const phi1 = Math.acos(Math.min(0.99, mediaFP));
+          const phi2 = Math.acos(targetFP);
 
-        for (const size of sizes) {
-          while (restante >= size) {
-            stages.push(size);
-            restante -= size;
+          const kvarProcesso =
+            mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
+
+          const kvarTrafo = calcularReativoTransformadores(
+            transformadores,
+            mediaPotenciaAtiva,
+          );
+
+          // 🔴 AQUI O SEGREDO:
+          // só considera trafo se for relevante
+          const kvarTrafoAjustado = kvarTrafo > 5 ? kvarTrafo : 0;
+
+          totalKvar = Math.ceil((kvarProcesso + kvarTrafoAjustado) / 5) * 5;
+
+          // evita superdimensionamento
+          if (totalKvar < 30 && mediaCustoReativo < 200) {
+            totalKvar = 0;
+            precisaCapacitor = false;
+            recomendacaoEstagios =
+              "Sistema já equilibrado. Banco não necessário.";
+          } else {
+            totalKvar = Math.max(totalKvar, 30);
           }
+
+          let restante = totalKvar;
+
+          const qtdTrafo225 = transformadores
+            .filter((t) => t.potencia_kva === 225)
+            .reduce((acc, t) => acc + t.quantidade, 0);
+
+          for (let i = 0; i < qtdTrafo225 && restante >= 60; i++) {
+            stages.push(60);
+            restante -= 60;
+          }
+
+          if (restante >= 30) {
+            stages.push(30);
+            restante -= 30;
+          }
+
+          const sizes = [20, 15, 10, 5];
+          for (const size of sizes) {
+            while (restante >= size) {
+              stages.push(size);
+              restante -= size;
+            }
+          }
+
+          stages.sort((a, b) => a - b);
+
+          recomendacaoEstagios = `Banco de ${totalKvar} kVAr com ${stages.length} estágios`;
+
+          economiaMensal = mediaCustoReativo * 0.95;
+          investimentoEstimado = totalKvar * 89.9 + 2500;
+
+          paybackMeses =
+            economiaMensal > 0
+              ? Math.ceil(investimentoEstimado / economiaMensal)
+              : 0;
+        } else {
+          recomendacaoEstagios =
+            "✅ Sistema eficiente. Não há necessidade de banco de capacitores.";
         }
-
-        stages.sort((a, b) => a - b);
-
-        recomendacaoEstagios = `Banco automático: ${stages.join(" + ")} kVAr`;
-
-        economiaMensal = mediaCustoReativo * 0.9;
-        investimentoEstimado = totalKvar * 80 + 2000;
-
-        paybackMeses =
-          economiaMensal > 0
-            ? Math.ceil(investimentoEstimado / economiaMensal)
-            : 0;
-      } else {
-        recomendacaoEstagios = "FP dentro do permitido";
       }
+
+      // =========================
+      // GRUPO B (BAIXA TENSÃO)
+      // =========================
+      else {
+        precisaCapacitor = mediaFP < 0.92;
+
+        if (precisaCapacitor) {
+          const phi1 = Math.acos(Math.min(0.99, mediaFP));
+          const phi2 = Math.acos(targetFP);
+
+          const kvarProcesso =
+            mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
+
+          totalKvar = Math.ceil(kvarProcesso / 5) * 5;
+
+          let restante = totalKvar;
+          const sizes = [30, 20, 15, 10, 5];
+
+          for (const size of sizes) {
+            while (restante >= size) {
+              stages.push(size);
+              restante -= size;
+            }
+          }
+
+          stages.sort((a, b) => a - b);
+
+          recomendacaoEstagios = `Banco automático: ${stages.join(" + ")} kVAr`;
+
+          economiaMensal = mediaCustoReativo * 0.9;
+          investimentoEstimado = totalKvar * 80 + 2000;
+
+          paybackMeses =
+            economiaMensal > 0
+              ? Math.ceil(investimentoEstimado / economiaMensal)
+              : 0;
+        } else {
+          recomendacaoEstagios = "FP dentro do permitido";
+        }
+      }
+
+      setResult({
+        totalKvar,
+        stages,
+        economiaMensal,
+        investimentoEstimado,
+        paybackMeses,
+        fpAtual: mediaFP * 100,
+        fpProjetado: precisaCapacitor ? targetFP * 100 : mediaFP * 100,
+        multaAtual: mediaCustoReativo,
+        consumoTotalMedio: mediaConsumo,
+        potenciaAtivaMediaKw: mediaPotenciaAtiva,
+        piorMes,
+        recomendacaoEstagios,
+        quantidadeFaturas: totalFaturas,
+        precisaCapacitor,
+        grupoTarifario,
+        motivoRecomendacao: motivo,
+        custoReativoMensal: mediaCustoReativo,
+      });
+
+      Swal.fire("OK", "Cálculo concluído", "success");
+    } catch (error) {
+      Swal.fire("Erro", "Falha no cálculo", "error");
+    } finally {
+      setCalculando(false);
     }
-
-    setResult({
-      totalKvar,
-      stages,
-      economiaMensal,
-      investimentoEstimado,
-      paybackMeses,
-      fpAtual: mediaFP * 100,
-      fpProjetado: precisaCapacitor ? targetFP * 100 : mediaFP * 100,
-      multaAtual: mediaCustoReativo,
-      consumoTotalMedio: mediaConsumo,
-      potenciaAtivaMediaKw: mediaPotenciaAtiva,
-      piorMes,
-      recomendacaoEstagios,
-      quantidadeFaturas: totalFaturas,
-      precisaCapacitor,
-      grupoTarifario,
-      motivoRecomendacao: motivo,
-      custoReativoMensal: mediaCustoReativo,
-    });
-
-    Swal.fire("OK", "Cálculo concluído", "success");
-  } catch (error) {
-    Swal.fire("Erro", "Falha no cálculo", "error");
-  } finally {
-    setCalculando(false);
-  }
-};
+  };
 
   const exportMemorial = async () => {
     if (!reportRef.current) return;
