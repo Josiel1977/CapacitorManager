@@ -64,6 +64,19 @@ interface DimensionamentoStats {
   potenciaInstalada: number;
 }
 
+interface PeriodoAnalise {
+  nome: string;
+  inicio: number;
+  fim: number;
+  cor: string;
+  totalRegistros: number;
+  registrosCriticos: number;
+  percentualCritico: number;
+  fpMedio: number;
+  kvarMedio: number;
+  nivelCriticidade: string;
+}
+
 // ============================================================================
 // FUNÇÕES UTILITÁRIAS
 // ============================================================================
@@ -195,6 +208,62 @@ const analisarHorariosCriticos = (data: MassMemoryData[]): { hora: string; media
   return resultados;
 };
 
+/**
+ * Analisa períodos do dia com pior fator de potência
+ */
+const analisarPeriodosCriticos = (data: MassMemoryData[], targetFP: number): PeriodoAnalise[] => {
+  const periodos = [
+    { nome: 'Madrugada (00:00 - 06:00)', inicio: 0, fim: 6, cor: 'bg-slate-100' },
+    { nome: 'Início da Manhã (06:00 - 09:00)', inicio: 6, fim: 9, cor: 'bg-blue-50' },
+    { nome: 'Meio da Manhã (09:00 - 12:00)', inicio: 9, fim: 12, cor: 'bg-red-50' },
+    { nome: 'Início da Tarde (12:00 - 15:00)', inicio: 12, fim: 15, cor: 'bg-orange-50' },
+    { nome: 'Final da Tarde (15:00 - 18:00)', inicio: 15, fim: 18, cor: 'bg-amber-50' },
+    { nome: 'Noite (18:00 - 22:00)', inicio: 18, fim: 22, cor: 'bg-purple-50' },
+    { nome: 'Final da Noite (22:00 - 00:00)', inicio: 22, fim: 24, cor: 'bg-slate-100' }
+  ];
+
+  return periodos.map(periodo => {
+    const registrosPeriodo = data.filter(reg => {
+      const hora = parseInt(reg.hora.split(':')[0]);
+      return hora >= periodo.inicio && hora < periodo.fim;
+    });
+
+    if (registrosPeriodo.length === 0) {
+      return {
+        ...periodo,
+        totalRegistros: 0,
+        registrosCriticos: 0,
+        percentualCritico: 0,
+        fpMedio: 0,
+        kvarMedio: 0,
+        nivelCriticidade: 'NORMAL'
+      };
+    }
+
+    const registrosCriticos = registrosPeriodo.filter(reg => 
+      reg.fp < targetFP && reg.tipoReativo === 'indutivo'
+    );
+
+    const fpMedio = registrosPeriodo.reduce((acc, reg) => acc + reg.fp, 0) / registrosPeriodo.length;
+    const kvarMedio = registrosPeriodo.reduce((acc, reg) => acc + Math.abs(reg.kvar), 0) / registrosPeriodo.length;
+    const percentualCritico = (registrosCriticos.length / registrosPeriodo.length) * 100;
+    
+    let nivelCriticidade = 'NORMAL';
+    if (percentualCritico > 50) nivelCriticidade = 'CRÍTICO';
+    else if (percentualCritico > 25) nivelCriticidade = 'ATENÇÃO';
+
+    return {
+      ...periodo,
+      totalRegistros: registrosPeriodo.length,
+      registrosCriticos: registrosCriticos.length,
+      percentualCritico,
+      fpMedio,
+      kvarMedio,
+      nivelCriticidade
+    };
+  }).sort((a, b) => b.percentualCritico - a.percentualCritico);
+};
+
 const analisarDimensionamento = (
   data: MassMemoryData[],
   targetFP: number,
@@ -305,9 +374,8 @@ export default function AnaliseFaturaPage() {
   const [samplingInterval, setSamplingInterval] = useState(15);
   const [fileName, setFileName] = useState<string>('');
   const [showHorariosCriticos, setShowHorariosCriticos] = useState(false);
-  const [recalcKey, setRecalcKey] = useState(0); // Força recálculo
+  const [recalcKey, setRecalcKey] = useState(0);
 
-  // Função para forçar recálculo
   const handleRecalcular = () => {
     setRecalcKey(prev => prev + 1);
     Swal.fire({
@@ -542,6 +610,11 @@ export default function AnaliseFaturaPage() {
     return analisarHorariosCriticos(data);
   }, [data]);
 
+  const periodosAnalise = useMemo(() => {
+    if (data.length === 0) return [];
+    return analisarPeriodosCriticos(data, targetFP);
+  }, [data, targetFP]);
+
   const stats: AnalysisStats | null = useMemo(() => {
     if (data.length === 0) return null;
 
@@ -581,7 +654,7 @@ export default function AnaliseFaturaPage() {
   const dimensionamento: DimensionamentoStats | null = useMemo(() => {
     if (data.length === 0) return null;
     return analisarDimensionamento(data, targetFP, potenciaInstalada);
-  }, [data, targetFP, potenciaInstalada, recalcKey]); // recalcKey força recálculo
+  }, [data, targetFP, potenciaInstalada, recalcKey]);
 
   const chartData = useMemo(() => {
     if (data.length === 0) return [];
@@ -597,6 +670,8 @@ export default function AnaliseFaturaPage() {
       };
     });
   }, [data]);
+
+  const piorPeriodo = periodosAnalise.length > 0 ? periodosAnalise[0] : null;
 
   return (
     <div className="max-w-7xl mx-auto space-y-8 pb-12">
@@ -688,7 +763,7 @@ export default function AnaliseFaturaPage() {
       ) : (
         <div id="report-content" className="space-y-8">
           
-          {/* HORÁRIOS CRÍTICOS */}
+          {/* HORÁRIOS CRÍTICOS DETALHADOS */}
           {horariosCriticos.length > 0 && (
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
@@ -746,6 +821,121 @@ export default function AnaliseFaturaPage() {
                   O reativo indutivo é gerado por equipamentos como motores, ar condicionado, transformadores e reatores magnéticos.
                 </p>
               </div>
+            </motion.div>
+          )}
+
+          {/* ANÁLISE POR PERÍODO DO DIA - NOVO COMPONENTE */}
+          {periodosAnalise.length > 0 && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-3xl border border-blue-200"
+            >
+              <h3 className="text-2xl font-bold text-primary mb-6 flex items-center gap-2">
+                <Clock size={24} />
+                Análise por Período do Dia
+              </h3>
+              
+              <p className="text-slate-600 mb-6 text-sm">
+                📊 Identificação dos períodos mais críticos para instalação de banco de capacitores
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {periodosAnalise.map((periodo, idx) => (
+                  <div 
+                    key={idx} 
+                    className={cn(
+                      "rounded-xl p-4 border-2 transition-all",
+                      periodo.nivelCriticidade === 'CRÍTICO' ? "border-red-400 bg-red-50" :
+                      periodo.nivelCriticidade === 'ATENÇÃO' ? "border-amber-400 bg-amber-50" :
+                      "border-green-400 bg-green-50"
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-bold text-slate-700">{periodo.nome}</span>
+                      <span className={cn(
+                        "text-xs font-bold px-2 py-1 rounded-full",
+                        periodo.nivelCriticidade === 'CRÍTICO' ? "bg-red-500 text-white" :
+                        periodo.nivelCriticidade === 'ATENÇÃO' ? "bg-amber-500 text-white" :
+                        "bg-green-500 text-white"
+                      )}>
+                        {periodo.nivelCriticidade}
+                      </span>
+                    </div>
+                    
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">FP Médio:</span>
+                        <span className={cn(
+                          "font-bold",
+                          periodo.fpMedio < targetFP ? "text-red-600" : "text-green-600"
+                        )}>
+                          {(periodo.fpMedio * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                      
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">kVAr Médio:</span>
+                        <span className="font-bold text-primary">{periodo.kvarMedio.toFixed(1)} kVAr</span>
+                      </div>
+                      
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Registros Críticos:</span>
+                        <span className="font-bold text-red-600">
+                          {periodo.registrosCriticos} / {periodo.totalRegistros}
+                        </span>
+                      </div>
+                      
+                      <div className="w-full bg-slate-200 rounded-full h-2 mt-2">
+                        <div 
+                          className={cn(
+                            "h-2 rounded-full",
+                            periodo.nivelCriticidade === 'CRÍTICO' ? "bg-red-500" :
+                            periodo.nivelCriticidade === 'ATENÇÃO' ? "bg-amber-500" :
+                            "bg-green-500"
+                          )}
+                          style={{ width: `${periodo.percentualCritico}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-slate-400 text-center">
+                        {periodo.percentualCritico.toFixed(1)}% do período em FP baixo
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Resumo da recomendação baseada no pior período */}
+              {piorPeriodo && (
+                <div className="mt-6 p-4 bg-white rounded-xl border border-blue-200">
+                  <h4 className="font-bold text-primary mb-2 flex items-center gap-2">
+                    <Zap size={18} className="text-secondary" />
+                    Recomendação de Instalação
+                  </h4>
+                  {piorPeriodo.nivelCriticidade === 'CRÍTICO' && (
+                    <p className="text-sm text-slate-700">
+                      ⚠️ O período mais crítico é <strong>{piorPeriodo.nome}</strong> com 
+                      <strong className="text-red-600"> {piorPeriodo.percentualCritico.toFixed(1)}%</strong> do tempo com FP abaixo de {targetFP}.
+                      <br />
+                      💡 Recomenda-se instalar banco de capacitores <strong>automático</strong> com atuação prioritária neste período.
+                    </p>
+                  )}
+                  {piorPeriodo.nivelCriticidade === 'ATENÇÃO' && (
+                    <p className="text-sm text-slate-700">
+                      ⚠️ O período que requer atenção é <strong>{piorPeriodo.nome}</strong> com 
+                      <strong className="text-amber-600"> {piorPeriodo.percentualCritico.toFixed(1)}%</strong> do tempo com FP abaixo de {targetFP}.
+                      <br />
+                      💡 Considere instalar banco de capacitores ou ajustar a carga neste período.
+                    </p>
+                  )}
+                  {piorPeriodo.nivelCriticidade === 'NORMAL' && (
+                    <p className="text-sm text-slate-700">
+                      ✅ Todos os períodos estão dentro da conformidade. 
+                      Não há necessidade urgente de instalação de banco de capacitores.
+                    </p>
+                  )}
+                </div>
+              )}
             </motion.div>
           )}
 
