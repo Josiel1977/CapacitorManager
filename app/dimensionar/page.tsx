@@ -111,6 +111,7 @@ export default function DimensionarPage() {
     setSalvando(true);
     try {
       if (editandoFatura !== null) {
+<<<<<<< HEAD
         const { error } = await supabase
           .from('faturas')
           .update(currentFatura)
@@ -121,6 +122,11 @@ export default function DimensionarPage() {
         const { error } = await supabase.from('faturas').insert([currentFatura]);
         if (error) throw error;
         Swal.fire('Sucesso', 'Fatura adicionada!', 'success');
+=======
+        await supabase.from('faturas').update(currentFatura).eq('id', faturas[editandoFatura].id);
+      } else {
+        await supabase.from('faturas').insert([currentFatura]);
+>>>>>>> f22137155c5a1eb9b13b8dc1370a62f4c38d73cc
       }
       await carregarDados();
       setShowFaturaModal(false);
@@ -149,6 +155,7 @@ export default function DimensionarPage() {
   };
 
   const removerFatura = async (index: number) => {
+<<<<<<< HEAD
     const result = await Swal.fire({
       title: 'Remover fatura?',
       text: 'Esta ação não pode ser desfeita.',
@@ -157,6 +164,9 @@ export default function DimensionarPage() {
       confirmButtonColor: '#e74c3c',
       confirmButtonText: 'Remover'
     });
+=======
+    const result = await Swal.fire({ title: 'Remover fatura?', text: 'Esta ação não pode ser desfeita.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#e74c3c', confirmButtonText: 'Remover' });
+>>>>>>> f22137155c5a1eb9b13b8dc1370a62f4c38d73cc
     if (result.isConfirmed) {
       const fatura = faturas[index];
       if (fatura.id) {
@@ -229,6 +239,7 @@ export default function DimensionarPage() {
       setResult({
         totalKvar, stages, economiaMensal, investimentoEstimado, paybackMeses,
         fpAtual: mediaFP * 100, fpProjetado: targetFP * 100, multaAtual,
+<<<<<<< HEAD
         consumoTotalMedio: mediaConsumo, demandaMedia: 0, piorMes, distribuicaoPorTrafo: []
       });
       
@@ -246,6 +257,12 @@ export default function DimensionarPage() {
         icon: 'success',
         confirmButtonColor: '#0a2b3c'
       });
+=======
+        consumoTotalMedio: mediaConsumo, demandaMedia: mediaDemanda, piorMes, distribuicaoPorTrafo: []
+      });
+      
+      Swal.fire({ title: '✅ Dimensionamento Concluído!', html: `<div class="text-left"><p>📊 Análise de ${faturas.length} faturas</p><p>Piores ${pioresFaturas.length} meses considerados</p><p>FP médio: ${(mediaFP * 100).toFixed(1)}%</p><hr><p>🎯 Banco: ${totalKvar} kVAr</p><p>💰 Economia: R$ ${economiaMensal.toFixed(2)}/mês</p><p>⏱️ Payback: ${paybackMeses} meses</p></div>`, icon: 'success', confirmButtonColor: '#0a2b3c' });
+>>>>>>> f22137155c5a1eb9b13b8dc1370a62f4c38d73cc
     } catch (error) {
       console.error(error);
       Swal.fire('Erro', 'Erro ao calcular dimensionamento', 'error');
@@ -281,7 +298,7 @@ export default function DimensionarPage() {
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
       <header className="text-center">
         <h1 className="text-3xl font-bold text-primary">Dimensionamento de Banco de Capacitores</h1>
-        <p className="text-slate-500 mt-2">Análise de múltiplas faturas + configuração de transformadores</p>
+        <p className="text-slate-500 mt-2">Análise de múltiplas faturas + transformadores</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -303,11 +320,9 @@ export default function DimensionarPage() {
                   {transformadores.length > 1 && <button onClick={() => removerTransformador(idx)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>}
                 </div>
               ))}
-              <button onClick={adicionarTransformador} className="w-full py-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-bold hover:border-secondary hover:text-secondary transition-all flex items-center justify-center gap-2"><Plus size={14} /> Adicionar Transformador</button>
+              <button onClick={adicionarTransformador} className="w-full py-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-bold hover:border-secondary hover:text-secondary transition-all flex items-center justify-center gap-2"><Plus size={14} /> Adicionar</button>
             </div>
-            <div className="mt-4 p-3 bg-primary/5 rounded-xl">
-              <div className="flex justify-between text-sm"><span>Potência Total Instalada:</span><span className="font-bold text-primary">{potenciaTotalTransformadores} kVA</span></div>
-            </div>
+            <div className="mt-4 p-3 bg-primary/5 rounded-xl"><div className="flex justify-between text-sm"><span>Potência Total:</span><span className="font-bold text-primary">{potenciaTotalTransformadores} kVA</span></div></div>
           </div>
 
           {/* Faturas */}
@@ -316,8 +331,8 @@ export default function DimensionarPage() {
               <h2 className="text-lg font-bold text-primary flex items-center gap-2"><History size={20} className="text-secondary" /> Faturas ({faturas.length})</h2>
               <button onClick={() => { setCurrentFatura({}); setEditandoFatura(null); setShowFaturaModal(true); }} className="text-xs bg-primary text-white px-3 py-1 rounded-lg hover:bg-primary/90"><Plus size={12} /> Adicionar</button>
             </div>
-            
             <div className="max-h-80 overflow-y-auto space-y-2">
+<<<<<<< HEAD
               {faturas.length === 0 ? (
                 <div className="text-center py-8 text-slate-400">
                   <p>Nenhuma fatura cadastrada</p>
@@ -344,6 +359,14 @@ export default function DimensionarPage() {
                   </div>
                 ))
               )}
+=======
+              {faturas.length === 0 ? <div className="text-center py-8 text-slate-400">Nenhuma fatura cadastrada</div> : faturas.map((fat, idx) => (
+                <div key={idx} className="p-3 bg-slate-50 rounded-lg">
+                  <div className="flex justify-between items-center"><span className="font-bold text-primary">{fat.mes_referencia}</span><div className="flex gap-1"><button onClick={() => { setCurrentFatura(fat); setEditandoFatura(idx); setShowFaturaModal(true); }} className="text-blue-500 hover:text-blue-700"><Edit3 size={14} /></button><button onClick={() => removerFatura(idx)} className="text-red-500 hover:text-red-700"><Trash2 size={14} /></button></div></div>
+                  <div className="grid grid-cols-2 gap-1 text-xs mt-2"><div>Consumo: {(fat.consumo_ponta_kwh + fat.consumo_fora_ponta_kwh).toLocaleString()} kWh</div><div>Demanda: {fat.demanda_kw} kW</div><div>Reativo: {(fat.reativo_ponta_kvarh + fat.reativo_fora_ponta_kvarh).toLocaleString()} kVArh</div><div>Total: R$ {fat.total_pagar.toLocaleString()}</div></div>
+                </div>
+              ))}
+>>>>>>> f22137155c5a1eb9b13b8dc1370a62f4c38d73cc
             </div>
           </div>
 
@@ -356,9 +379,8 @@ export default function DimensionarPage() {
               <option value={0.98}>0.98 (excelente)</option>
             </select>
             <button onClick={calcularDimensionamento} disabled={calculando || faturas.length === 0} className="w-full bg-primary text-white py-3 rounded-xl font-bold hover:bg-primary/90 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
-              {calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />} Calcular Dimensionamento
+              {calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />} Calcular
             </button>
-            {faturas.length === 0 && <p className="text-xs text-amber-600 mt-2 text-center">⚠️ Cadastre pelo menos uma fatura</p>}
           </div>
         </div>
 
@@ -366,33 +388,14 @@ export default function DimensionarPage() {
           {result ? (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
               <div ref={reportRef} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100">
-                <div className="bg-slate-900 p-6 text-white text-center">
-                  <Zap size={32} className="mx-auto text-secondary mb-2" />
-                  <h2 className="text-2xl font-black">CapacitorManager</h2>
-                  <p className="text-slate-400 text-sm">Memorial de Dimensionamento</p>
-                </div>
+                <div className="bg-slate-900 p-6 text-white text-center"><Zap size={32} className="mx-auto text-secondary mb-2" /><h2 className="text-2xl font-black">CapacitorManager</h2><p className="text-slate-400 text-sm">Memorial de Dimensionamento</p></div>
                 <div className="p-6 space-y-6">
-                  <div className="text-center">
-                    <p className="text-sm text-slate-500">Potência Total Recomendada</p>
-                    <p className="text-4xl font-bold text-primary">{result.totalKvar} <span className="text-lg">kVAr</span></p>
-                    <p className="text-xs text-slate-400 mt-1">Distribuição: {result.stages.length} estágios</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-emerald-50 rounded-xl p-3 text-center"><TrendingUp size={20} className="mx-auto text-emerald-600 mb-1" /><p className="text-xs">FP Médio (piores meses)</p><p className="text-xl font-bold text-emerald-700">{result.fpAtual.toFixed(1)}%</p></div>
-                    <div className="bg-primary/10 rounded-xl p-3 text-center"><CheckCircle2 size={20} className="mx-auto text-primary mb-1" /><p className="text-xs">FP Projetado</p><p className="text-xl font-bold text-primary">{result.fpProjetado.toFixed(0)}%</p></div>
-                  </div>
-                  {result.piorMes && (
-                    <div className="bg-amber-50 rounded-xl p-3">
-                      <p className="text-xs font-bold text-amber-700 mb-1">⚠️ Pior Mês Analisado</p>
-                      <p className="text-sm">{result.piorMes.mes_referencia} - FP: {(result.piorMes.fp! * 100).toFixed(1)}%</p>
-                    </div>
-                  )}
-                  <div><h3 className="font-bold text-primary mb-2">📦 Distribuição dos Estágios</h3><div className="flex flex-wrap gap-2">{result.stages.map((s, i) => (<div key={i} className="bg-slate-100 rounded-lg px-3 py-2"><span className="font-bold text-primary">{s} kVAr</span></div>))}</div></div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-red-50 rounded-xl p-4 text-center"><DollarSign size={20} className="mx-auto text-red-600 mb-1" /><p className="text-xs">Multa Média Mensal</p><p className="text-xl font-bold text-red-600">R$ {result.multaAtual.toFixed(2)}</p></div>
-                    <div className="bg-green-50 rounded-xl p-4 text-center"><DollarSign size={20} className="mx-auto text-green-600 mb-1" /><p className="text-xs">Economia Mensal</p><p className="text-xl font-bold text-green-700">R$ {result.economiaMensal.toFixed(2)}</p></div>
-                  </div>
-                  <div className="bg-blue-50 rounded-xl p-4 text-center"><p className="text-sm text-slate-500">⏱️ Payback Estimado</p><p className="text-2xl font-bold text-primary">{result.paybackMeses} meses</p><p className="text-xs text-slate-400">(~{(result.paybackMeses / 12).toFixed(1)} anos)</p></div>
+                  <div className="text-center"><p className="text-sm text-slate-500">Potência Total Recomendada</p><p className="text-4xl font-bold text-primary">{result.totalKvar} <span className="text-lg">kVAr</span></p><p className="text-xs text-slate-400 mt-1">{result.stages.length} estágios</p></div>
+                  <div className="grid grid-cols-2 gap-4"><div className="bg-emerald-50 rounded-xl p-3 text-center"><TrendingUp size={20} className="mx-auto text-emerald-600 mb-1" /><p className="text-xs">FP Médio</p><p className="text-xl font-bold text-emerald-700">{result.fpAtual.toFixed(1)}%</p></div><div className="bg-primary/10 rounded-xl p-3 text-center"><CheckCircle2 size={20} className="mx-auto text-primary mb-1" /><p className="text-xs">FP Projetado</p><p className="text-xl font-bold text-primary">{result.fpProjetado.toFixed(0)}%</p></div></div>
+                  {result.piorMes && <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs font-bold text-amber-700 mb-1">⚠️ Pior Mês</p><p className="text-sm">{result.piorMes.mes_referencia} - FP: {(result.piorMes.fp! * 100).toFixed(1)}%</p></div>}
+                  <div><h3 className="font-bold text-primary mb-2">📦 Estágios</h3><div className="flex flex-wrap gap-2">{result.stages.map((s, i) => (<div key={i} className="bg-slate-100 rounded-lg px-3 py-2"><span className="font-bold text-primary">{s} kVAr</span></div>))}</div></div>
+                  <div className="grid grid-cols-2 gap-4"><div className="bg-red-50 rounded-xl p-4 text-center"><DollarSign size={20} className="mx-auto text-red-600 mb-1" /><p className="text-xs">Multa Mensal</p><p className="text-xl font-bold text-red-600">R$ {result.multaAtual.toFixed(2)}</p></div><div className="bg-green-50 rounded-xl p-4 text-center"><DollarSign size={20} className="mx-auto text-green-600 mb-1" /><p className="text-xs">Economia</p><p className="text-xl font-bold text-green-700">R$ {result.economiaMensal.toFixed(2)}</p></div></div>
+                  <div className="bg-blue-50 rounded-xl p-4 text-center"><p className="text-sm text-slate-500">⏱️ Payback</p><p className="text-2xl font-bold text-primary">{result.paybackMeses} meses</p><p className="text-xs text-slate-400">(~{(result.paybackMeses / 12).toFixed(1)} anos)</p></div>
                 </div>
               </div>
               <div className="flex gap-4"><button onClick={exportMemorial} className="flex-1 bg-white border border-slate-200 text-slate-700 py-3 rounded-xl font-medium hover:bg-slate-50 flex items-center justify-center gap-2"><Printer size={18} /> Exportar PDF</button></div>
@@ -401,13 +404,13 @@ export default function DimensionarPage() {
             <div className="h-full min-h-[500px] flex flex-col items-center justify-center text-center p-12 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
               <Calculator size={64} className="text-slate-300 mb-4" />
               <h3 className="text-xl font-bold text-slate-500">Aguardando Dados</h3>
-              <p className="text-sm text-slate-400 mt-2">Configure os transformadores, cadastre as faturas e clique em "Calcular Dimensionamento"</p>
+              <p className="text-sm text-slate-400 mt-2">Configure os transformadores, cadastre as faturas e clique em "Calcular"</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Modal para adicionar/editar fatura */}
+      {/* Modal Fatura */}
       <AnimatePresence>
         {showFaturaModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
@@ -417,6 +420,7 @@ export default function DimensionarPage() {
                 <button onClick={() => setShowFaturaModal(false)} className="p-1 hover:bg-slate-100 rounded-full"><X size={20} /></button>
               </div>
               <div className="space-y-3">
+<<<<<<< HEAD
                 <div>
                   <label className="text-sm font-medium">Mês/Ano <span className="text-red-500">*</span></label>
                   <input type="text" placeholder="Ex: 04/2025" value={currentFatura.mes_referencia || ''} onChange={(e) => setCurrentFatura({...currentFatura, mes_referencia: e.target.value})} className="w-full rounded-lg border p-2" />
@@ -455,6 +459,12 @@ export default function DimensionarPage() {
                     <p className="text-[10px] text-slate-400">Energia Reativa Excedente fora ponta</p>
                   </div>
                 </div>
+=======
+                <div><label className="text-sm font-medium">Mês/Ano</label><input type="text" placeholder="Ex: 07/2025" value={currentFatura.mes_referencia || ''} onChange={(e) => setCurrentFatura({...currentFatura, mes_referencia: e.target.value})} className="w-full rounded-lg border p-2" /></div>
+                <div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Consumo Ponta (kWh)</label><input type="number" value={currentFatura.consumo_ponta_kwh || ''} onChange={(e) => setCurrentFatura({...currentFatura, consumo_ponta_kwh: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" /></div><div><label className="text-xs">Consumo Fora Ponta (kWh)</label><input type="number" value={currentFatura.consumo_fora_ponta_kwh || ''} onChange={(e) => setCurrentFatura({...currentFatura, consumo_fora_ponta_kwh: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" /></div></div>
+                <div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Demanda (kW)</label><input type="number" value={currentFatura.demanda_kw || ''} onChange={(e) => setCurrentFatura({...currentFatura, demanda_kw: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" /></div><div><label className="text-xs">Total (R$)</label><input type="number" step="0.01" value={currentFatura.total_pagar || ''} onChange={(e) => setCurrentFatura({...currentFatura, total_pagar: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" /></div></div>
+                <div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Reativo Ponta (kVArh)</label><input type="number" value={currentFatura.reativo_ponta_kvarh || ''} onChange={(e) => setCurrentFatura({...currentFatura, reativo_ponta_kvarh: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" /></div><div><label className="text-xs">Reativo Fora Ponta (kVArh)</label><input type="number" value={currentFatura.reativo_fora_ponta_kvarh || ''} onChange={(e) => setCurrentFatura({...currentFatura, reativo_fora_ponta_kvarh: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" /></div></div>
+>>>>>>> f22137155c5a1eb9b13b8dc1370a62f4c38d73cc
               </div>
               <div className="flex gap-3 mt-6">
                 <button onClick={() => carregarFaturaExemplo()} className="flex-1 py-2 border rounded-lg text-primary border-primary/30 hover:bg-primary/5">Carregar Exemplo</button>
