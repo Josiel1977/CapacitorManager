@@ -25,11 +25,13 @@ interface Fatura {
   mes_referencia: string;
   consumo_ponta_kwh: number;
   consumo_fora_ponta_kwh: number;
-  demanda_kw: number;
+  demanda_ponta_kw: number;
+  demanda_fora_ponta_kw: number;
   reativo_ponta_kvarh: number;
   reativo_fora_ponta_kvarh: number;
   total_pagar: number;
   fp?: number;
+  multa_reativa?: number;
 }
 
 interface ResultadoDimensionamento {
@@ -42,15 +44,22 @@ interface ResultadoDimensionamento {
   fpProjetado: number;
   multaAtual: number;
   consumoTotalMedio: number;
+  potenciaAtivaMediaKw: number;
   piorMes: Fatura | null;
+  recomendacaoEstagios: string;
+  quantidadeFaturas: number;
 }
+
+const TARIFA_REATIVO = 0.34469;
 
 export default function DimensionarPage() {
   const reportRef = useRef<HTMLDivElement>(null);
   
   const [transformadores, setTransformadores] = useState<Transformador[]>([
-    { id: '1', potencia_kva: 225, quantidade: 7, tensao_v: 380, horas_trabalho: 220 }
+    { id: '1', potencia_kva: 225, quantidade: 7, tensao_v: 220, horas_trabalho: 220 },
+    { id: '2', potencia_kva: 75, quantidade: 1, tensao_v: 220, horas_trabalho: 220 }
   ]);
+  
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [targetFP, setTargetFP] = useState<number>(0.92);
   const [result, setResult] = useState<ResultadoDimensionamento | null>(null);
@@ -74,12 +83,30 @@ export default function DimensionarPage() {
       const savedFaturas = localStorage.getItem('dimensionar_faturas');
       if (savedFaturas) {
         setFaturas(JSON.parse(savedFaturas));
+      } else {
+        carregarFaturaExemploReal();
       }
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
     } finally {
       setCarregando(false);
     }
+  };
+
+  const carregarFaturaExemploReal = () => {
+    const faturaExemplo: Fatura = {
+      id: 'exemplo1',
+      mes_referencia: '04/2026',
+      consumo_ponta_kwh: 10095,
+      consumo_fora_ponta_kwh: 76282,
+      demanda_ponta_kw: 500,
+      demanda_fora_ponta_kw: 447,
+      reativo_ponta_kvarh: 775,
+      reativo_fora_ponta_kvarh: 4087,
+      total_pagar: 91796.94
+    };
+    setFaturas([faturaExemplo]);
+    localStorage.setItem('dimensionar_faturas', JSON.stringify([faturaExemplo]));
   };
 
   const salvarTransformadores = () => {
@@ -108,7 +135,8 @@ export default function DimensionarPage() {
       mes_referencia: currentFatura.mes_referencia,
       consumo_ponta_kwh: currentFatura.consumo_ponta_kwh || 0,
       consumo_fora_ponta_kwh: currentFatura.consumo_fora_ponta_kwh || 0,
-      demanda_kw: currentFatura.demanda_kw || 0,
+      demanda_ponta_kw: currentFatura.demanda_ponta_kw || 0,
+      demanda_fora_ponta_kw: currentFatura.demanda_fora_ponta_kw || 0,
       reativo_ponta_kvarh: currentFatura.reativo_ponta_kvarh || 0,
       reativo_fora_ponta_kvarh: currentFatura.reativo_fora_ponta_kvarh || 0,
       total_pagar: currentFatura.total_pagar || 0
@@ -120,6 +148,10 @@ export default function DimensionarPage() {
     } else {
       novasFaturas = [novaFatura, ...novasFaturas];
     }
+    
+    // Ordenar por data (mais recente primeiro)
+    novasFaturas.sort((a, b) => b.mes_referencia.localeCompare(a.mes_referencia));
+    
     setFaturas(novasFaturas);
     localStorage.setItem('dimensionar_faturas', JSON.stringify(novasFaturas));
     setShowFaturaModal(false);
@@ -137,13 +169,14 @@ export default function DimensionarPage() {
 
   const carregarFaturaExemplo = () => {
     setCurrentFatura({
-      mes_referencia: '04/2025',
-      consumo_ponta_kwh: 8132,
-      consumo_fora_ponta_kwh: 59050,
-      demanda_kw: 430,
-      reativo_ponta_kvarh: 824,
-      reativo_fora_ponta_kvarh: 4511,
-      total_pagar: 55744.11
+      mes_referencia: '04/2026',
+      consumo_ponta_kwh: 10095,
+      consumo_fora_ponta_kwh: 76282,
+      demanda_ponta_kw: 500,
+      demanda_fora_ponta_kw: 447,
+      reativo_ponta_kvarh: 775,
+      reativo_fora_ponta_kvarh: 4087,
+      total_pagar: 91796.94
     });
   };
 
@@ -171,7 +204,7 @@ export default function DimensionarPage() {
       id: newId,
       potencia_kva: 100, 
       quantidade: 1, 
-      tensao_v: 380, 
+      tensao_v: 220, 
       horas_trabalho: 220 
     }]);
   };
@@ -190,67 +223,158 @@ export default function DimensionarPage() {
 
   const potenciaTotalTransformadores = transformadores.reduce((acc, t) => acc + (t.potencia_kva * t.quantidade), 0);
 
+  const calcularFP = (consumoAtivoTotal: number, reativoTotal: number): number => {
+    if (consumoAtivoTotal === 0) return 0.8;
+    const potenciaAparente = Math.sqrt(Math.pow(consumoAtivoTotal, 2) + Math.pow(reativoTotal, 2));
+    return consumoAtivoTotal / potenciaAparente;
+  };
+
+  const calcularMultaReativa = (reativoPonta: number, reativoForaPonta: number): number => {
+    return (reativoPonta + reativoForaPonta) * TARIFA_REATIVO;
+  };
+
+  const calcularPotenciaAtivaMedia = (consumoTotal: number, horasMes: number = 220): number => {
+    return consumoTotal / horasMes;
+  };
+
   const calcularDimensionamento = () => {
-    if (faturas.length === 0) {
-      Swal.fire('Atenção', 'Cadastre pelo menos uma fatura para análise', 'warning');
+    // VALIDAÇÃO: mínimo 3 faturas
+    if (faturas.length < 3) {
+      Swal.fire({
+        title: '⚠️ Faturas Insuficientes',
+        html: `<div class="text-left">
+          <p>O dimensionamento profissional requer <strong>no mínimo 3 faturas</strong> para análise estatística.</p>
+          <p class="mt-2">Atualmente: <strong>${faturas.length} fatura(s)</strong></p>
+          <p class="mt-2 text-sm text-slate-500">Recomendado: 6 a 12 faturas dos últimos 12 meses.</p>
+        </div>`,
+        icon: 'warning',
+        confirmButtonColor: '#0a2b3c'
+      });
       return;
     }
+    
+    // VALIDAÇÃO: máximo 12 faturas
+    if (faturas.length > 12) {
+      Swal.fire({
+        title: '⚠️ Muitas Faturas',
+        html: `<div class="text-left">
+          <p>Para dimensionamento, utilize no <strong>máximo 12 faturas</strong> (últimos 12 meses).</p>
+          <p class="mt-2">Atualmente: <strong>${faturas.length} faturas</strong></p>
+          <p class="mt-2 text-sm text-slate-500">Faturas mais antigas podem distorcer a análise do perfil atual.</p>
+        </div>`,
+        icon: 'warning',
+        confirmButtonColor: '#0a2b3c'
+      });
+      return;
+    }
+    
     setCalculando(true);
+    
     try {
-      const faturasComFP = faturas.map(f => {
+      const faturasProcessadas = faturas.map(f => {
         const consumoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
         const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
-        const fp = consumoTotal > 0 ? consumoTotal / Math.sqrt(Math.pow(consumoTotal, 2) + Math.pow(reativoTotal, 2)) : 0.8;
-        const potenciaMedia = consumoTotal / 220;
-        return { ...f, fp, potenciaMedia, consumoTotal, reativoTotal };
+        const fp = calcularFP(consumoTotal, reativoTotal);
+        const multa = calcularMultaReativa(f.reativo_ponta_kvarh, f.reativo_fora_ponta_kvarh);
+        const potenciaMedia = calcularPotenciaAtivaMedia(consumoTotal);
+        
+        return { ...f, fp, multa, consumoTotal, reativoTotal, potenciaMedia };
       });
       
-      const pioresFaturas = [...faturasComFP].sort((a, b) => a.fp - b.fp).slice(0, Math.min(3, faturasComFP.length));
-      const mediaPotencia = pioresFaturas.reduce((acc, f) => acc + f.potenciaMedia, 0) / pioresFaturas.length;
-      const mediaFP = pioresFaturas.reduce((acc, f) => acc + f.fp, 0) / pioresFaturas.length;
-      const mediaConsumo = pioresFaturas.reduce((acc, f) => acc + f.consumoTotal, 0) / pioresFaturas.length;
-      const piorMes = pioresFaturas[0] || null;
+      const totalFaturas = faturasProcessadas.length;
       
-      const phi1 = Math.acos(mediaFP);
+      const somaPotenciaAtiva = faturasProcessadas.reduce((acc, f) => acc + f.potenciaMedia, 0);
+      const somaFP = faturasProcessadas.reduce((acc, f) => acc + f.fp, 0);
+      const somaConsumo = faturasProcessadas.reduce((acc, f) => acc + f.consumoTotal, 0);
+      const somaMulta = faturasProcessadas.reduce((acc, f) => acc + f.multa, 0);
+      
+      const mediaPotenciaAtiva = somaPotenciaAtiva / totalFaturas;
+      const mediaFP = somaFP / totalFaturas;
+      const mediaConsumo = somaConsumo / totalFaturas;
+      const mediaMulta = somaMulta / totalFaturas;
+      
+      const piorMes = [...faturasProcessadas].sort((a, b) => a.fp - b.fp)[0];
+      
+      const phi1 = Math.acos(Math.min(0.99, mediaFP));
       const phi2 = Math.acos(targetFP);
-      const kvarProcesso = mediaPotencia * (Math.tan(phi1) - Math.tan(phi2));
-      const kvarTrafo = potenciaTotalTransformadores * 0.025;
-      let totalKvar = Math.ceil((kvarProcesso + kvarTrafo) / 5) * 5;
       
-      const stages = [];
+      const kvarProcesso = mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
+      const kvarTrafo = potenciaTotalTransformadores * 0.025;
+      
+      let totalKvar = Math.ceil((kvarProcesso + kvarTrafo) / 5) * 5;
+      totalKvar = Math.max(totalKvar, 30);
+      
+      const stages: number[] = [];
       let restante = totalKvar;
-      const qtdTrafo225 = transformadores.filter(t => t.potencia_kva === 225).reduce((acc, t) => acc + t.quantidade, 0);
-      for (let i = 0; i < qtdTrafo225 && restante >= 60; i++) { stages.push(60); restante -= 60; }
-      if (restante >= 30) { stages.push(30); restante -= 30; }
+      
+      const qtdTrafo225 = transformadores
+        .filter(t => t.potencia_kva === 225)
+        .reduce((acc, t) => acc + t.quantidade, 0);
+      
+      for (let i = 0; i < qtdTrafo225 && restante >= 60; i++) {
+        stages.push(60);
+        restante -= 60;
+      }
+      
+      if (restante >= 30) {
+        stages.push(30);
+        restante -= 30;
+      }
+      
       const sizes = [20, 15, 10, 5];
-      for (const size of sizes) { while (restante >= size) { stages.push(size); restante -= size; } }
+      for (const size of sizes) {
+        while (restante >= size) {
+          stages.push(size);
+          restante -= size;
+        }
+      }
+      
       stages.sort((a, b) => a - b);
       
-      const multaAtual = pioresFaturas.reduce((acc, f) => acc + (f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh) * 0.382537, 0) / pioresFaturas.length;
-      const economiaMensal = multaAtual * 0.95;
-      const investimentoEstimado = totalKvar * 89.90 + 2000;
+      let recomendacaoEstagios = '';
+      if (qtdTrafo225 === 7) {
+        recomendacaoEstagios = `Recomendado: 1 banco central de ${totalKvar} kVAr ou ${stages.length} estágios (${stages.filter(s => s === 60).length}x60kVAr + ${stages.filter(s => s === 30).length}x30kVAr + complementos)`;
+      } else {
+        recomendacaoEstagios = `Banco automático com ${stages.length} estágios: ${stages.join(' + ')} kVAr`;
+      }
+      
+      const economiaMensal = mediaMulta * 0.95;
+      const investimentoEstimado = totalKvar * 89.90 + 2500;
       const paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoEstimado / economiaMensal) : 0;
       
       setResult({
-        totalKvar, stages, economiaMensal, investimentoEstimado, paybackMeses,
-        fpAtual: mediaFP * 100, fpProjetado: targetFP * 100, multaAtual,
-        consumoTotalMedio: mediaConsumo, piorMes
+        totalKvar,
+        stages,
+        economiaMensal,
+        investimentoEstimado,
+        paybackMeses,
+        fpAtual: mediaFP * 100,
+        fpProjetado: targetFP * 100,
+        multaAtual: mediaMulta,
+        consumoTotalMedio: mediaConsumo,
+        potenciaAtivaMediaKw: mediaPotenciaAtiva,
+        piorMes,
+        recomendacaoEstagios,
+        quantidadeFaturas: totalFaturas
       });
       
       Swal.fire({
         title: '✅ Dimensionamento Concluído!',
         html: `<div class="text-left">
-          <p><strong>📊 Análise de ${faturas.length} faturas</strong></p>
-          <p>Piores ${pioresFaturas.length} meses considerados</p>
-          <p>FP médio dos piores meses: ${(mediaFP * 100).toFixed(1)}%</p>
+          <p><strong>📊 Análise de ${totalFaturas} faturas</strong> (mín:3 | máx:12)</p>
+          <p>📅 Período: ${faturasProcessadas[totalFaturas-1]?.mes_referencia} a ${faturasProcessadas[0]?.mes_referencia}</p>
+          <p>⚡ FP médio geral: ${(mediaFP * 100).toFixed(1)}%</p>
+          <p>⚠️ Pior mês: ${piorMes?.mes_referencia} (${(piorMes?.fp! * 100).toFixed(1)}%)</p>
           <hr class="my-3">
           <p><strong>🎯 Banco de capacitores: ${totalKvar} kVAr</strong></p>
+          <p><strong>📦 Estágios: ${stages.length}</strong></p>
           <p><strong>💰 Economia mensal: R$ ${economiaMensal.toFixed(2)}</strong></p>
-          <p><strong>⏱️ Payback: ${paybackMeses} meses</strong></p>
+          <p><strong>⏱️ Payback: ${paybackMeses} meses (${(paybackMeses/12).toFixed(1)} anos)</strong></p>
         </div>`,
         icon: 'success',
         confirmButtonColor: '#0a2b3c'
       });
+      
     } catch (error) {
       console.error(error);
       Swal.fire('Erro', 'Erro ao calcular dimensionamento', 'error');
@@ -271,7 +395,7 @@ export default function DimensionarPage() {
       await new Promise((resolve) => { img.onload = resolve; });
       const pdfHeight = (img.height * pdfWidth) / img.width;
       pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Dimensionamento_${new Date().toISOString().slice(0,10)}.pdf`);
+      pdf.save(`Dimensionamento_CapacitorManager_${new Date().toISOString().slice(0,10)}.pdf`);
       Swal.close();
       Swal.fire('PDF gerado!', 'Memorial exportado com sucesso.', 'success');
     } catch (error) {
@@ -286,7 +410,8 @@ export default function DimensionarPage() {
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
       <header className="text-center">
         <h1 className="text-3xl font-bold text-primary">Dimensionamento de Banco de Capacitores</h1>
-        <p className="text-slate-500 mt-2">Análise de múltiplas faturas + transformadores</p>
+        <p className="text-slate-500 mt-2">Análise baseada em faturas da RORAIMA ENERGIA</p>
+        <p className="text-xs text-slate-400 mt-1">Infraestrutura: 7x225kVA + 1x75kVA | 220V</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -301,17 +426,57 @@ export default function DimensionarPage() {
               {transformadores.map((trafo, idx) => (
                 <div key={trafo.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
                   <div className="flex-1 flex gap-2">
-                    <div className="flex-1"><label className="text-[8px] font-black text-slate-400 uppercase">Potência (kVA)</label><input type="number" value={trafo.potencia_kva} onChange={(e) => atualizarTransformador(idx, 'potencia_kva', parseFloat(e.target.value) || 0)} className="w-full rounded-lg border border-slate-200 p-2 text-sm" /></div>
-                    <div className="w-20"><label className="text-[8px] font-black text-slate-400 uppercase">Quantidade</label><input type="number" value={trafo.quantidade} onChange={(e) => atualizarTransformador(idx, 'quantidade', parseInt(e.target.value) || 0)} className="w-full rounded-lg border border-slate-200 p-2 text-sm" /></div>
-                    <div className="w-24"><label className="text-[8px] font-black text-slate-400 uppercase">Tensão (V)</label><input type="number" value={trafo.tensao_v} onChange={(e) => atualizarTransformador(idx, 'tensao_v', parseFloat(e.target.value) || 380)} className="w-full rounded-lg border border-slate-200 p-2 text-sm" /></div>
+                    <div className="flex-1">
+                      <label className="text-[8px] font-black text-slate-400 uppercase">Potência (kVA)</label>
+                      <input 
+                        type="number" 
+                        value={trafo.potencia_kva} 
+                        onChange={(e) => atualizarTransformador(idx, 'potencia_kva', parseFloat(e.target.value) || 0)} 
+                        className="w-full rounded-lg border border-slate-200 p-2 text-sm" 
+                      />
+                    </div>
+                    <div className="w-20">
+                      <label className="text-[8px] font-black text-slate-400 uppercase">Qtd</label>
+                      <input 
+                        type="number" 
+                        value={trafo.quantidade} 
+                        onChange={(e) => atualizarTransformador(idx, 'quantidade', parseInt(e.target.value) || 0)} 
+                        className="w-full rounded-lg border border-slate-200 p-2 text-sm" 
+                      />
+                    </div>
+                    <div className="w-24">
+                      <label className="text-[8px] font-black text-slate-400 uppercase">Tensão (V)</label>
+                      <input 
+                        type="number" 
+                        value={trafo.tensao_v} 
+                        onChange={(e) => atualizarTransformador(idx, 'tensao_v', parseFloat(e.target.value) || 220)} 
+                        className="w-full rounded-lg border border-slate-200 p-2 text-sm" 
+                      />
+                    </div>
                   </div>
-                  {transformadores.length > 1 && <button onClick={() => removerTransformador(idx)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>}
+                  {transformadores.length > 1 && (
+                    <button onClick={() => removerTransformador(idx)} className="text-red-400 hover:text-red-600">
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </div>
               ))}
-              <button onClick={adicionarTransformador} className="w-full py-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-bold hover:border-secondary hover:text-secondary transition-all flex items-center justify-center gap-2"><Plus size={14} /> Adicionar Transformador</button>
+              <button 
+                onClick={adicionarTransformador} 
+                className="w-full py-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-bold hover:border-secondary hover:text-secondary transition-all flex items-center justify-center gap-2"
+              >
+                <Plus size={14} /> Adicionar Transformador
+              </button>
             </div>
             <div className="mt-4 p-3 bg-primary/5 rounded-xl">
-              <div className="flex justify-between text-sm"><span>Potência Total Instalada:</span><span className="font-bold text-primary">{potenciaTotalTransformadores} kVA</span></div>
+              <div className="flex justify-between text-sm">
+                <span>Potência Total Instalada:</span>
+                <span className="font-bold text-primary">{potenciaTotalTransformadores.toLocaleString()} kVA</span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-500 mt-1">
+                <span>Configuração:</span>
+                <span>{transformadores.map(t => `${t.quantidade}x${t.potencia_kva}kVA`).join(' + ')} | {transformadores[0]?.tensao_v}V</span>
+              </div>
             </div>
           </div>
 
@@ -319,51 +484,107 @@ export default function DimensionarPage() {
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-bold text-primary flex items-center gap-2"><History size={20} className="text-secondary" /> Faturas ({faturas.length})</h2>
-              <button onClick={() => { setCurrentFatura({}); setEditandoFatura(null); setShowFaturaModal(true); }} className="text-xs bg-primary text-white px-3 py-1 rounded-lg hover:bg-primary/90"><Plus size={12} /> Adicionar</button>
+              <button 
+                onClick={() => { 
+                  setCurrentFatura({}); 
+                  setEditandoFatura(null); 
+                  setShowFaturaModal(true); 
+                }} 
+                className="text-xs bg-primary text-white px-3 py-1 rounded-lg hover:bg-primary/90"
+              >
+                <Plus size={12} /> Adicionar
+              </button>
             </div>
             
             <div className="max-h-80 overflow-y-auto space-y-2">
               {faturas.length === 0 ? (
                 <div className="text-center py-8 text-slate-400">
                   <p>Nenhuma fatura cadastrada</p>
-                  <button onClick={() => { setCurrentFatura({}); setEditandoFatura(null); setShowFaturaModal(true); }} className="mt-2 text-primary text-sm hover:underline">+ Adicionar primeira fatura</button>
+                  <button 
+                    onClick={() => { 
+                      carregarFaturaExemploReal();
+                      Swal.fire('Exemplo carregado!', 'Fatura de 04/2026 adicionada', 'success');
+                    }} 
+                    className="mt-2 text-primary text-sm hover:underline"
+                  >
+                    Carregar fatura exemplo
+                  </button>
                 </div>
               ) : (
-                faturas.map((fat, idx) => (
-                  <div key={fat.id} className="p-3 bg-slate-50 rounded-lg">
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-primary">{fat.mes_referencia}</span>
-                      <div className="flex gap-1">
-                        <button onClick={() => { setCurrentFatura(fat); setEditandoFatura(idx); setShowFaturaModal(true); }} className="text-blue-500 hover:text-blue-700" title="Editar"><Edit3 size={14} /></button>
-                        <button onClick={() => removerFatura(idx)} className="text-red-500 hover:text-red-700" title="Remover"><Trash2 size={14} /></button>
+                faturas.map((fat, idx) => {
+                  const consumoTotal = fat.consumo_ponta_kwh + fat.consumo_fora_ponta_kwh;
+                  const reativoTotal = fat.reativo_ponta_kvarh + fat.reativo_fora_ponta_kvarh;
+                  const fp = calcularFP(consumoTotal, reativoTotal);
+                  const multa = calcularMultaReativa(fat.reativo_ponta_kvarh, fat.reativo_fora_ponta_kvarh);
+                  
+                  return (
+                    <div key={fat.id} className="p-3 bg-slate-50 rounded-lg">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-primary">{fat.mes_referencia}</span>
+                        <div className="flex gap-1">
+                          <button onClick={() => { setCurrentFatura(fat); setEditandoFatura(idx); setShowFaturaModal(true); }} className="text-blue-500 hover:text-blue-700" title="Editar">
+                            <Edit3 size={14} />
+                          </button>
+                          <button onClick={() => removerFatura(idx)} className="text-red-500 hover:text-red-700" title="Remover">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1 text-xs mt-2">
+                        <div><span className="text-slate-500">Consumo Ponta:</span> {fat.consumo_ponta_kwh.toLocaleString()} kWh</div>
+                        <div><span className="text-slate-500">Consumo F/Ponta:</span> {fat.consumo_fora_ponta_kwh.toLocaleString()} kWh</div>
+                        <div><span className="text-slate-500">Demanda Ponta:</span> {fat.demanda_ponta_kw} kW</div>
+                        <div><span className="text-slate-500">Reativo Ponta:</span> {fat.reativo_ponta_kvarh.toLocaleString()} kVArh</div>
+                        <div><span className="text-slate-500">Reativo F/Ponta:</span> {fat.reativo_fora_ponta_kvarh.toLocaleString()} kVArh</div>
+                        <div><span className="text-slate-500">Total:</span> R$ {fat.total_pagar.toLocaleString()}</div>
+                        <div className="col-span-2 mt-1 pt-1 border-t border-slate-200">
+                          <span className={`text-xs font-bold ${fp >= 0.92 ? 'text-green-600' : 'text-red-600'}`}>
+                            FP: {(fp * 100).toFixed(1)}% | Multa: R$ {multa.toFixed(2)}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-1 text-xs mt-2">
-                      <div><span className="text-slate-500">Consumo Ponta:</span> {fat.consumo_ponta_kwh.toLocaleString()} kWh</div>
-                      <div><span className="text-slate-500">Consumo F/Ponta:</span> {fat.consumo_fora_ponta_kwh.toLocaleString()} kWh</div>
-                      <div><span className="text-slate-500">Demanda:</span> {fat.demanda_kw} kW</div>
-                      <div><span className="text-slate-500">Reativo Ponta:</span> {fat.reativo_ponta_kvarh.toLocaleString()} kVArh</div>
-                      <div><span className="text-slate-500">Reativo F/Ponta:</span> {fat.reativo_fora_ponta_kvarh.toLocaleString()} kVArh</div>
-                      <div><span className="text-slate-500">Total:</span> R$ {fat.total_pagar.toLocaleString()}</div>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
+            {faturas.length > 0 && (
+              <div className="mt-3 text-xs text-center text-slate-400">
+                {faturas.length < 3 && <p className="text-amber-600">⚠️ Mínimo: 3 faturas para dimensionamento</p>}
+                {faturas.length > 12 && <p className="text-amber-600">⚠️ Máximo: 12 faturas (use apenas últimas 12)</p>}
+                {faturas.length >= 3 && faturas.length <= 12 && <p className="text-green-600">✅ {faturas.length} faturas - ok para cálculo</p>}
+              </div>
+            )}
           </div>
 
           {/* Parâmetros */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
             <label className="block text-sm font-medium text-slate-700 mb-2">Fator de Potência Desejado</label>
-            <select value={targetFP} onChange={(e) => setTargetFP(parseFloat(e.target.value))} className="w-full rounded-xl border border-slate-200 p-3 mb-6">
-              <option value={0.92}>0.92 (mínimo regulamentar)</option>
-              <option value={0.95}>0.95 (recomendado)</option>
-              <option value={0.98}>0.98 (excelente)</option>
+            <select 
+              value={targetFP} 
+              onChange={(e) => setTargetFP(parseFloat(e.target.value))} 
+              className="w-full rounded-xl border border-slate-200 p-3 mb-6"
+            >
+              <option value={0.92}>0.92 (mínimo regulamentar - ANEEL)</option>
+              <option value={0.95}>0.95 (recomendado para economia)</option>
+              <option value={0.98}>0.98 (excelente - maior investimento)</option>
             </select>
-            <button onClick={calcularDimensionamento} disabled={calculando || faturas.length === 0} className="w-full bg-primary text-white py-3 rounded-xl font-bold hover:bg-primary/90 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
-              {calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />} Calcular Dimensionamento
+            
+            <button 
+              onClick={calcularDimensionamento} 
+              disabled={calculando || faturas.length < 3 || faturas.length > 12} 
+              className="w-full bg-primary text-white py-3 rounded-xl font-bold hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />} 
+              Calcular Dimensionamento
             </button>
-            {faturas.length === 0 && <p className="text-xs text-amber-600 mt-2 text-center">⚠️ Cadastre pelo menos uma fatura</p>}
+            
+            {faturas.length < 3 && (
+              <p className="text-xs text-amber-600 mt-2 text-center">⚠️ Adicione mais {(3 - faturas.length)} fatura(s) (mínimo 3)</p>
+            )}
+            {faturas.length > 12 && (
+              <p className="text-xs text-amber-600 mt-2 text-center">⚠️ Remova {faturas.length - 12} fatura(s) (máximo 12)</p>
+            )}
           </div>
         </div>
 
@@ -375,95 +596,240 @@ export default function DimensionarPage() {
                   <Zap size={32} className="mx-auto text-secondary mb-2" />
                   <h2 className="text-2xl font-black">CapacitorManager</h2>
                   <p className="text-slate-400 text-sm">Memorial de Dimensionamento</p>
+                  <p className="text-slate-500 text-xs mt-1">Gerado em {new Date().toLocaleDateString('pt-BR')}</p>
                 </div>
+                
                 <div className="p-6 space-y-6">
-                  <div className="text-center">
+                  <div className="text-center border-b pb-4">
                     <p className="text-sm text-slate-500">Potência Total Recomendada</p>
-                    <p className="text-4xl font-bold text-primary">{result.totalKvar} <span className="text-lg">kVAr</span></p>
-                    <p className="text-xs text-slate-400 mt-1">Distribuição: {result.stages.length} estágios</p>
+                    <p className="text-5xl font-bold text-primary">{result.totalKvar} <span className="text-lg">kVAr</span></p>
+                    <p className="text-xs text-slate-400 mt-1">Base: {result.quantidadeFaturas} faturas analisadas</p>
                   </div>
+                  
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-emerald-50 rounded-xl p-3 text-center"><TrendingUp size={20} className="mx-auto text-emerald-600 mb-1" /><p className="text-xs">FP Médio (piores meses)</p><p className="text-xl font-bold text-emerald-700">{result.fpAtual.toFixed(1)}%</p></div>
-                    <div className="bg-primary/10 rounded-xl p-3 text-center"><CheckCircle2 size={20} className="mx-auto text-primary mb-1" /><p className="text-xs">FP Projetado</p><p className="text-xl font-bold text-primary">{result.fpProjetado.toFixed(0)}%</p></div>
+                    <div className="bg-red-50 rounded-xl p-3 text-center">
+                      <TrendingUp size={20} className="mx-auto text-red-600 mb-1" />
+                      <p className="text-xs text-slate-500">FP Médio (geral)</p>
+                      <p className="text-2xl font-bold text-red-600">{result.fpAtual.toFixed(1)}%</p>
+                    </div>
+                    <div className="bg-emerald-50 rounded-xl p-3 text-center">
+                      <CheckCircle2 size={20} className="mx-auto text-emerald-600 mb-1" />
+                      <p className="text-xs text-slate-500">FP Projetado</p>
+                      <p className="text-2xl font-bold text-emerald-600">{result.fpProjetado.toFixed(0)}%</p>
+                    </div>
                   </div>
+                  
                   {result.piorMes && (
                     <div className="bg-amber-50 rounded-xl p-3">
-                      <p className="text-xs font-bold text-amber-700 mb-1">⚠️ Pior Mês Analisado</p>
-                      <p className="text-sm">{result.piorMes.mes_referencia} - FP: {(result.piorMes.fp! * 100).toFixed(1)}%</p>
+                      <p className="text-xs font-bold text-amber-700 mb-1 flex items-center gap-1">
+                        <AlertTriangle size={12} /> Pior Mês do Período (apenas informativo)
+                      </p>
+                      <p className="text-sm font-medium">{result.piorMes.mes_referencia}</p>
+                      <p className="text-xs text-amber-600">
+                        FP: {(result.piorMes.fp! * 100).toFixed(1)}% | 
+                        Multa: R$ {(result.piorMes.multa_reativa || calcularMultaReativa(result.piorMes.reativo_ponta_kvarh, result.piorMes.reativo_fora_ponta_kvarh)).toFixed(2)}
+                      </p>
                     </div>
                   )}
-                  <div><h3 className="font-bold text-primary mb-2">📦 Distribuição dos Estágios</h3><div className="flex flex-wrap gap-2">{result.stages.map((s, i) => (<div key={i} className="bg-slate-100 rounded-lg px-3 py-2"><span className="font-bold text-primary">{s} kVAr</span></div>))}</div></div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-red-50 rounded-xl p-4 text-center"><DollarSign size={20} className="mx-auto text-red-600 mb-1" /><p className="text-xs">Multa Média Mensal</p><p className="text-xl font-bold text-red-600">R$ {result.multaAtual.toFixed(2)}</p></div>
-                    <div className="bg-green-50 rounded-xl p-4 text-center"><DollarSign size={20} className="mx-auto text-green-600 mb-1" /><p className="text-xs">Economia Mensal</p><p className="text-xl font-bold text-green-700">R$ {result.economiaMensal.toFixed(2)}</p></div>
+                  
+                  <div>
+                    <h3 className="font-bold text-primary mb-2 flex items-center gap-1">
+                      <Layers size={16} /> Distribuição dos Estágios
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {result.stages.map((s, i) => (
+                        <div key={i} className="bg-slate-100 rounded-lg px-3 py-2">
+                          <span className="font-bold text-primary">{s} kVAr</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2">{result.recomendacaoEstagios}</p>
                   </div>
-                  <div className="bg-blue-50 rounded-xl p-4 text-center"><p className="text-sm text-slate-500">⏱️ Payback Estimado</p><p className="text-2xl font-bold text-primary">{result.paybackMeses} meses</p><p className="text-xs text-slate-400">(~{(result.paybackMeses / 12).toFixed(1)} anos)</p></div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-red-50 rounded-xl p-4 text-center">
+                      <DollarSign size={20} className="mx-auto text-red-600 mb-1" />
+                      <p className="text-xs text-slate-500">Multa Média Mensal</p>
+                      <p className="text-xl font-bold text-red-600">R$ {result.multaAtual.toFixed(2)}</p>
+                      <p className="text-[10px] text-slate-400">por reativo excedente</p>
+                    </div>
+                    <div className="bg-green-50 rounded-xl p-4 text-center">
+                      <DollarSign size={20} className="mx-auto text-green-600 mb-1" />
+                      <p className="text-xs text-slate-500">Economia Mensal Estimada</p>
+                      <p className="text-xl font-bold text-green-700">R$ {result.economiaMensal.toFixed(2)}</p>
+                      <p className="text-[10px] text-slate-400">após correção do FP</p>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-blue-50 rounded-xl p-4 text-center">
+                    <p className="text-sm text-slate-500">⏱️ Payback Estimado</p>
+                    <p className="text-3xl font-bold text-primary">{result.paybackMeses} meses</p>
+                    <p className="text-xs text-slate-400">(~{(result.paybackMeses / 12).toFixed(1)} anos)</p>
+                    <p className="text-xs text-slate-500 mt-2">
+                      Investimento estimado: R$ {result.investimentoEstimado.toLocaleString()}
+                    </p>
+                  </div>
+                  
+                  <div className="bg-slate-50 rounded-xl p-4 mt-2">
+                    <h4 className="font-bold text-primary text-sm mb-2">📋 Especificações Técnicas</h4>
+                    <div className="text-xs space-y-1 text-slate-600">
+                      <p>• Tensão dos capacitores: 440V / 480V (ligação triângulo)</p>
+                      <p>• Controlador automático de fator de potência</p>
+                      <p>• Reatores de 5% a 7% (se houver harmônicos)</p>
+                      <p>• Banco automático tipo rack ou painel</p>
+                      <p>• Instalação no secundário do transformador ou QGBT</p>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-4"><button onClick={exportMemorial} className="flex-1 bg-white border border-slate-200 text-slate-700 py-3 rounded-xl font-medium hover:bg-slate-50 flex items-center justify-center gap-2"><Printer size={18} /> Exportar PDF</button></div>
+              
+              <div className="flex gap-4">
+                <button 
+                  onClick={exportMemorial} 
+                  className="flex-1 bg-white border border-slate-200 text-slate-700 py-3 rounded-xl font-medium hover:bg-slate-50 flex items-center justify-center gap-2"
+                >
+                  <Printer size={18} /> Exportar PDF
+                </button>
+              </div>
             </motion.div>
           ) : (
             <div className="h-full min-h-[500px] flex flex-col items-center justify-center text-center p-12 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
               <Calculator size={64} className="text-slate-300 mb-4" />
               <h3 className="text-xl font-bold text-slate-500">Aguardando Dados</h3>
-              <p className="text-sm text-slate-400 mt-2">Configure os transformadores, cadastre as faturas e clique em "Calcular Dimensionamento"</p>
+              <p className="text-sm text-slate-400 mt-2 max-w-md">
+                Configure os transformadores, adicione <strong>3 a 12 faturas</strong> e clique em "Calcular Dimensionamento"
+              </p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Modal para adicionar/editar fatura */}
+      {/* Modal */}
       <AnimatePresence>
         {showFaturaModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-white rounded-2xl p-6 max-w-md w-full">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.95, opacity: 0 }} 
+              className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto"
+            >
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-bold text-primary">{editandoFatura !== null ? '✏️ Editar Fatura' : '➕ Nova Fatura'}</h3>
-                <button onClick={() => setShowFaturaModal(false)} className="p-1 hover:bg-slate-100 rounded-full"><X size={20} /></button>
+                <h3 className="text-xl font-bold text-primary">
+                  {editandoFatura !== null ? '✏️ Editar Fatura' : '➕ Nova Fatura'}
+                </h3>
+                <button onClick={() => setShowFaturaModal(false)} className="p-1 hover:bg-slate-100 rounded-full">
+                  <X size={20} />
+                </button>
               </div>
+              
               <div className="space-y-3">
                 <div>
                   <label className="text-sm font-medium">Mês/Ano <span className="text-red-500">*</span></label>
-                  <input type="text" placeholder="Ex: 04/2025" value={currentFatura.mes_referencia || ''} onChange={(e) => setCurrentFatura({...currentFatura, mes_referencia: e.target.value})} className="w-full rounded-lg border p-2" />
+                  <input 
+                    type="text" 
+                    placeholder="Ex: 04/2026" 
+                    value={currentFatura.mes_referencia || ''} 
+                    onChange={(e) => setCurrentFatura({...currentFatura, mes_referencia: e.target.value})} 
+                    className="w-full rounded-lg border p-2" 
+                  />
                 </div>
+                
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs font-medium">Consumo Ponta (kWh)</label>
-                    <input type="number" placeholder="Ex: 8132" value={currentFatura.consumo_ponta_kwh || ''} onChange={(e) => setCurrentFatura({...currentFatura, consumo_ponta_kwh: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" />
-                    <p className="text-[10px] text-slate-400">Consumo no horário de ponta</p>
+                    <input 
+                      type="number" 
+                      placeholder="Ex: 10095" 
+                      value={currentFatura.consumo_ponta_kwh || ''} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, consumo_ponta_kwh: parseFloat(e.target.value) || 0})} 
+                      className="w-full rounded-lg border p-2" 
+                    />
                   </div>
                   <div>
                     <label className="text-xs font-medium">Consumo Fora Ponta (kWh)</label>
-                    <input type="number" placeholder="Ex: 59050" value={currentFatura.consumo_fora_ponta_kwh || ''} onChange={(e) => setCurrentFatura({...currentFatura, consumo_fora_ponta_kwh: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" />
-                    <p className="text-[10px] text-slate-400">Consumo fora horário de ponta</p>
+                    <input 
+                      type="number" 
+                      placeholder="Ex: 76282" 
+                      value={currentFatura.consumo_fora_ponta_kwh || ''} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, consumo_fora_ponta_kwh: parseFloat(e.target.value) || 0})} 
+                      className="w-full rounded-lg border p-2" 
+                    />
                   </div>
                 </div>
+                
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs font-medium">Demanda (kW)</label>
-                    <input type="number" placeholder="Ex: 430" value={currentFatura.demanda_kw || ''} onChange={(e) => setCurrentFatura({...currentFatura, demanda_kw: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" />
+                    <label className="text-xs font-medium">Demanda Ponta (kW)</label>
+                    <input 
+                      type="number" 
+                      placeholder="Ex: 500" 
+                      value={currentFatura.demanda_ponta_kw || ''} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, demanda_ponta_kw: parseFloat(e.target.value) || 0})} 
+                      className="w-full rounded-lg border p-2" 
+                    />
                   </div>
                   <div>
-                    <label className="text-xs font-medium">Total a Pagar (R$)</label>
-                    <input type="number" step="0.01" placeholder="Ex: 55744.11" value={currentFatura.total_pagar || ''} onChange={(e) => setCurrentFatura({...currentFatura, total_pagar: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" />
+                    <label className="text-xs font-medium">Demanda Fora Ponta (kW)</label>
+                    <input 
+                      type="number" 
+                      placeholder="Ex: 447" 
+                      value={currentFatura.demanda_fora_ponta_kw || ''} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, demanda_fora_ponta_kw: parseFloat(e.target.value) || 0})} 
+                      className="w-full rounded-lg border p-2" 
+                    />
                   </div>
                 </div>
+                
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs font-medium">Energia Reativa Ponta (kVArh)</label>
-                    <input type="number" placeholder="Ex: 824" value={currentFatura.reativo_ponta_kvarh || ''} onChange={(e) => setCurrentFatura({...currentFatura, reativo_ponta_kvarh: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" />
-                    <p className="text-[10px] text-slate-400">Energia Reativa Excedente na ponta</p>
+                    <label className="text-xs font-medium">Reativo Ponta (kVArh)</label>
+                    <input 
+                      type="number" 
+                      placeholder="Ex: 775" 
+                      value={currentFatura.reativo_ponta_kvarh || ''} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, reativo_ponta_kvarh: parseFloat(e.target.value) || 0})} 
+                      className="w-full rounded-lg border p-2" 
+                    />
                   </div>
                   <div>
-                    <label className="text-xs font-medium">Energia Reativa Fora Ponta (kVArh)</label>
-                    <input type="number" placeholder="Ex: 4511" value={currentFatura.reativo_fora_ponta_kvarh || ''} onChange={(e) => setCurrentFatura({...currentFatura, reativo_fora_ponta_kvarh: parseFloat(e.target.value) || 0})} className="w-full rounded-lg border p-2" />
-                    <p className="text-[10px] text-slate-400">Energia Reativa Excedente fora ponta</p>
+                    <label className="text-xs font-medium">Reativo Fora Ponta (kVArh)</label>
+                    <input 
+                      type="number" 
+                      placeholder="Ex: 4087" 
+                      value={currentFatura.reativo_fora_ponta_kvarh || ''} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, reativo_fora_ponta_kvarh: parseFloat(e.target.value) || 0})} 
+                      className="w-full rounded-lg border p-2" 
+                    />
                   </div>
+                </div>
+                
+                <div>
+                  <label className="text-xs font-medium">Total a Pagar (R$)</label>
+                  <input 
+                    type="number" 
+                    step="0.01" 
+                    placeholder="Ex: 91796.94" 
+                    value={currentFatura.total_pagar || ''} 
+                    onChange={(e) => setCurrentFatura({...currentFatura, total_pagar: parseFloat(e.target.value) || 0})} 
+                    className="w-full rounded-lg border p-2" 
+                  />
                 </div>
               </div>
+              
               <div className="flex gap-3 mt-6">
-                <button onClick={() => carregarFaturaExemplo()} className="flex-1 py-2 border rounded-lg text-primary border-primary/30 hover:bg-primary/5">Carregar Exemplo</button>
-                <button onClick={salvarFatura} className="flex-1 py-2 bg-primary text-white rounded-lg hover:bg-primary/90">Salvar</button>
+                <button 
+                  onClick={carregarFaturaExemplo} 
+                  className="flex-1 py-2 border rounded-lg text-primary border-primary/30 hover:bg-primary/5 text-sm"
+                >
+                  Carregar Exemplo
+                </button>
+                <button 
+                  onClick={salvarFatura} 
+                  className="flex-1 py-2 bg-primary text-white rounded-lg hover:bg-primary/90"
+                >
+                  Salvar
+                </button>
               </div>
             </motion.div>
           </div>
