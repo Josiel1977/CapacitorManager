@@ -34,6 +34,7 @@ interface Fatura {
   reativo_ponta_kvarh: number;
   reativo_fora_ponta_kvarh: number;
   total_pagar: number;
+  fp?: number;
 }
 
 interface ResultadoDimensionamento {
@@ -205,9 +206,9 @@ export default function DimensionarPage() {
   };
 
   const atualizarTransformador = (index: number, field: keyof Transformador, value: number) => {
-   const novos = [...transformadores];
-   novos[index] = { ...novos[index], [field]: value };
-   setTransformadores(novos);
+    const novos = [...transformadores];
+    novos[index] = { ...novos[index], [field]: value };
+    setTransformadores(novos);
   };
 
   const potenciaTotalTransformadores = transformadores.reduce((acc, t) => acc + (t.potencia_kva * t.quantidade), 0);
@@ -238,7 +239,7 @@ export default function DimensionarPage() {
       const mediaFP = pioresFaturas.reduce((acc, f) => acc + f.fp, 0) / pioresFaturas.length;
       const mediaConsumo = pioresFaturas.reduce((acc, f) => acc + f.consumoTotal, 0) / pioresFaturas.length;
       const mediaDemanda = pioresFaturas.reduce((acc, f) => acc + f.demanda_kw, 0) / pioresFaturas.length;
-      const piorMes = pioresFaturas[0];
+      const piorMes = pioresFaturas[0] || null;
       
       // Cálculo do capacitor necessário
       const phi1 = Math.acos(mediaFP);
@@ -271,13 +272,7 @@ export default function DimensionarPage() {
       }
       stages.sort((a, b) => a - b);
       
-      // Distribuição por transformador
-      const distribuicaoPorTrafo = transformadores.map((t, idx) => ({
-        trafoId: idx,
-        kvar: Math.round((totalKvar * (t.potencia_kva * t.quantidade) / potenciaTotalTransformadores) / 5) * 5
-      }));
-      
-      // Multa atual
+      // Multa atual (R$ 0,382537 por kVArh excedente)
       const multaAtual = pioresFaturas.reduce((acc, f) => acc + (f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh) * 0.382537, 0) / pioresFaturas.length;
       const economiaMensal = multaAtual * 0.95;
       const investimentoEstimado = totalKvar * 89.90 + 2000;
@@ -295,7 +290,7 @@ export default function DimensionarPage() {
         consumoTotalMedio: mediaConsumo,
         demandaMedia: mediaDemanda,
         piorMes,
-        distribuicaoPorTrafo
+        distribuicaoPorTrafo: []
       });
       
       Swal.fire({
@@ -459,7 +454,7 @@ export default function DimensionarPage() {
                   {result.piorMes && (
                     <div className="bg-amber-50 rounded-xl p-3">
                       <p className="text-xs font-bold text-amber-700 mb-1">⚠️ Pior Mês Analisado</p>
-                      <p className="text-sm">{result.piorMes.mes_referencia} - FP: {(result.piorMes.fp * 100).toFixed(1)}%</p>
+                      <p className="text-sm">{result.piorMes.mes_referencia} - FP: {(result.piorMes.fp! * 100).toFixed(1)}%</p>
                     </div>
                   )}
                   <div><h3 className="font-bold text-primary mb-2">📦 Distribuição dos Estágios</h3><div className="flex flex-wrap gap-2">{result.stages.map((s, i) => (<div key={i} className="bg-slate-100 rounded-lg px-3 py-2"><span className="font-bold text-primary">{s} kVAr</span></div>))}</div></div>
