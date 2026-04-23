@@ -49,6 +49,9 @@ interface ResultadoDimensionamento {
   recomendacaoEstagios: string;
   quantidadeFaturas: number;
   precisaCapacitor: boolean;
+  grupoTarifario: 'A' | 'B';
+  motivoRecomendacao: string;
+  custoReativoMensal: number;
 }
 
 const TARIFA_REATIVO = 0.34469;
@@ -112,12 +115,10 @@ export default function DimensionarPage() {
     localStorage.setItem('dimensionar_faturas', JSON.stringify([faturaExemplo]));
   };
 
-  // Função para validar se os valores da fatura são coerentes
   const validarFatura = (fatura: Partial<Fatura>): { valida: boolean; mensagem: string } => {
     const consumoTotal = (fatura.consumo_ponta_kwh || 0) + (fatura.consumo_fora_ponta_kwh || 0);
     const reativoTotal = (fatura.reativo_ponta_kvarh || 0) + (fatura.reativo_fora_ponta_kvarh || 0);
     
-    // Verifica se os valores estão zerados
     if (consumoTotal === 0 && reativoTotal === 0) {
       return {
         valida: false,
@@ -125,7 +126,6 @@ export default function DimensionarPage() {
       };
     }
     
-    // VERIFICAÇÃO CRÍTICA: Se o reativo for maior que o consumo, provavelmente está trocado
     if (reativoTotal > consumoTotal && consumoTotal > 0) {
       const percentual = (reativoTotal / consumoTotal) * 100;
       if (percentual > 200) {
@@ -136,10 +136,8 @@ export default function DimensionarPage() {
       }
     }
     
-    // Calcula o FP para validação
     const fp = calcularFP(consumoTotal, reativoTotal);
     
-    // Se o FP for menor que 0,5 (50%), algo está muito errado
     if (fp < 0.5 && consumoTotal > 0 && reativoTotal > 0) {
       return {
         valida: false,
@@ -171,7 +169,6 @@ export default function DimensionarPage() {
       return;
     }
     
-    // Valida os dados antes de salvar
     const validacao = validarFatura(currentFatura);
     if (!validacao.valida) {
       Swal.fire({
@@ -203,7 +200,6 @@ export default function DimensionarPage() {
       novasFaturas = [novaFatura, ...novasFaturas];
     }
     
-    // Ordenar por data (mais recente primeiro)
     novasFaturas.sort((a, b) => b.mes_referencia.localeCompare(a.mes_referencia));
     
     setFaturas(novasFaturas);
@@ -285,8 +281,7 @@ export default function DimensionarPage() {
     return consumoAtivoTotal / potenciaAparente;
   };
 
-  const calcularMultaReativa = (reativoPonta: number, reativoForaPonta: number): number => {
-    // Só calcula multa se o FP for menor que 0.92
+  const calcularCustoReativo = (reativoPonta: number, reativoForaPonta: number): number => {
     return (reativoPonta + reativoForaPonta) * TARIFA_REATIVO;
   };
 
@@ -295,219 +290,221 @@ export default function DimensionarPage() {
   };
 
   const calcularDimensionamento = () => {
-  if (faturas.length < 3) {
-    Swal.fire({
-      title: '⚠️ Faturas Insuficientes',
-      html: `<div class="text-left">
-        <p>O dimensionamento profissional requer <strong>no mínimo 3 faturas</strong> para análise estatística.</p>
-        <p class="mt-2">Atualmente: <strong>${faturas.length} fatura(s)</strong></p>
-      </div>`,
-      icon: 'warning',
-      confirmButtonColor: '#0a2b3c'
-    });
-    return;
-  }
-  
-  if (faturas.length > 12) {
-    Swal.fire({
-      title: '⚠️ Muitas Faturas',
-      html: `<div class="text-left">
-        <p>Para dimensionamento, utilize no <strong>máximo 12 faturas</strong> (últimos 12 meses).</p>
-        <p class="mt-2">Atualmente: <strong>${faturas.length} faturas</strong></p>
-      </div>`,
-      icon: 'warning',
-      confirmButtonColor: '#0a2b3c'
-    });
-    return;
-  }
-  
-  setCalculando(true);
-  
-  try {
-    // IDENTIFICAR GRUPO TARIFÁRIO
-    const potenciaTotal = potenciaTotalTransformadores;
-    const grupoTarifario = potenciaTotal >= 75 ? 'A' : 'B';
-    
-    const faturasProcessadas = faturas.map(f => {
-      const consumoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
-      const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
-      const fp = calcularFP(consumoTotal, reativoTotal);
-      
-      // NOVO: Cálculo do custo de reativo (sempre cobrado no Grupo A)
-      const custoReativo = (f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh) * TARIFA_REATIVO;
-      
-      const potenciaMedia = calcularPotenciaAtivaMedia(consumoTotal);
-      
-      return { ...f, fp, custoReativo, consumoTotal, reativoTotal, potenciaMedia };
-    });
-    
-    const totalFaturas = faturasProcessadas.length;
-    
-    const somaPotenciaAtiva = faturasProcessadas.reduce((acc, f) => acc + f.potenciaMedia, 0);
-    const somaFP = faturasProcessadas.reduce((acc, f) => acc + f.fp, 0);
-    const somaConsumo = faturasProcessadas.reduce((acc, f) => acc + f.consumoTotal, 0);
-    const somaCustoReativo = faturasProcessadas.reduce((acc, f) => acc + f.custoReativo, 0);
-    
-    const mediaPotenciaAtiva = somaPotenciaAtiva / totalFaturas;
-    const mediaFP = somaFP / totalFaturas;
-    const mediaConsumo = somaConsumo / totalFaturas;
-    const mediaCustoReativo = somaCustoReativo / totalFaturas;
-    
-    const piorMes = [...faturasProcessadas].sort((a, b) => a.fp - b.fp)[0];
-    
-    // LÓGICA CORRIGIDA baseada no Grupo Tarifário
-    let precisaCapacitor = false;
-    let motivo = '';
-    let totalKvar = 0;
-    let stages: number[] = [];
-    let economiaMensal = 0;
-    let investimentoEstimado = 0;
-    let paybackMeses = 0;
-    let recomendacaoEstagios = '';
-    
-    if (grupoTarifario === 'A') {
-      // GRUPO A: SEMPRE precisa de capacitor se paga reativo
-      precisaCapacitor = mediaCustoReativo > 50; // Se paga mais de R$50 de reativo
-      motivo = 'Grupo A (Alta Tensão) - Todo reativo excedente é faturado.';
-      
-      if (precisaCapacitor) {
-        // Cálculo do kVAr baseado na potência ativa
-        const phi1 = Math.acos(Math.min(0.99, mediaFP));
-        const phi2 = Math.acos(targetFP);
-        
-        const kvarProcesso = mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
-        const kvarTrafo = potenciaTotalTransformadores * 0.025;
-        
-        totalKvar = Math.ceil((kvarProcesso + kvarTrafo) / 5) * 5;
-        totalKvar = Math.max(totalKvar, 30);
-        
-        // Distribuição dos estágios
-        let restante = totalKvar;
-        
-        const qtdTrafo225 = transformadores
-          .filter(t => t.potencia_kva === 225)
-          .reduce((acc, t) => acc + t.quantidade, 0);
-        
-        for (let i = 0; i < qtdTrafo225 && restante >= 60; i++) {
-          stages.push(60);
-          restante -= 60;
-        }
-        
-        if (restante >= 30) {
-          stages.push(30);
-          restante -= 30;
-        }
-        
-        const sizes = [20, 15, 10, 5];
-        for (const size of sizes) {
-          while (restante >= size) {
-            stages.push(size);
-            restante -= size;
-          }
-        }
-        
-        stages.sort((a, b) => a - b);
-        
-        recomendacaoEstagios = `Recomendado: 1 banco central de ${totalKvar} kVAr ou ${stages.length} estágios (${stages.filter(s => s === 60).length}x60kVAr + complementos)`;
-        
-        economiaMensal = mediaCustoReativo * 0.95;
-        investimentoEstimado = totalKvar * 89.90 + 2500;
-        paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoEstimado / economiaMensal) : 0;
-      }
-    } else {
-      // GRUPO B: só precisa se FP < 92%
-      precisaCapacitor = mediaFP < 0.92;
-      motivo = precisaCapacitor 
-        ? `FP abaixo do regulamentar (${(mediaFP * 100).toFixed(1)}% < 92%)`
-        : 'FP dentro do regulamentar';
-      
-      if (precisaCapacitor) {
-        const phi1 = Math.acos(Math.min(0.99, mediaFP));
-        const phi2 = Math.acos(targetFP);
-        
-        const kvarProcesso = mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
-        const kvarTrafo = potenciaTotalTransformadores * 0.025;
-        
-        totalKvar = Math.ceil((kvarProcesso + kvarTrafo) / 5) * 5;
-        totalKvar = Math.max(totalKvar, 30);
-        
-        let restante = totalKvar;
-        const sizes = [30, 20, 15, 10, 5];
-        for (const size of sizes) {
-          while (restante >= size) {
-            stages.push(size);
-            restante -= size;
-          }
-        }
-        stages.sort((a, b) => a - b);
-        
-        recomendacaoEstagios = `Banco automático com ${stages.length} estágios: ${stages.join(' + ')} kVAr`;
-        economiaMensal = mediaCustoReativo * 0.95;
-        investimentoEstimado = totalKvar * 89.90 + 2000;
-        paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoEstimado / economiaMensal) : 0;
-      }
+    if (faturas.length < 3) {
+      Swal.fire({
+        title: '⚠️ Faturas Insuficientes',
+        html: `<div class="text-left">
+          <p>O dimensionamento profissional requer <strong>no mínimo 3 faturas</strong> para análise estatística.</p>
+          <p class="mt-2">Atualmente: <strong>${faturas.length} fatura(s)</strong></p>
+          <p class="mt-2 text-sm text-slate-500">Recomendado: 6 a 12 faturas dos últimos 12 meses.</p>
+        </div>`,
+        icon: 'warning',
+        confirmButtonColor: '#0a2b3c'
+      });
+      return;
     }
     
-    setResult({
-      totalKvar,
-      stages,
-      economiaMensal,
-      investimentoEstimado,
-      paybackMeses,
-      fpAtual: mediaFP * 100,
-      fpProjetado: targetFP * 100,
-      multaAtual: mediaCustoReativo,
-      consumoTotalMedio: mediaConsumo,
-      potenciaAtivaMediaKw: mediaPotenciaAtiva,
-      piorMes,
-      recomendacaoEstagios,
-      quantidadeFaturas: totalFaturas,
-      precisaCapacitor,
-      grupoTarifario,
-      motivoRecomendacao: motivo
-    });
-    
-    // Mensagem adaptada ao grupo tarifário
-    let mensagem = '';
-    if (precisaCapacitor) {
-      mensagem = `<div class="text-left">
-        <p><strong>📊 Análise de ${totalFaturas} faturas</strong> (mín:3 | máx:12)</p>
-        <p>🏭 Grupo Tarifário: <strong>${grupoTarifario}</strong> (${grupoTarifario === 'A' ? 'Alta Tensão - reativo é cobrado' : 'Baixa Tensão'})</p>
-        <p>⚡ FP médio geral: ${(mediaFP * 100).toFixed(1)}%</p>
-        <p class="text-red-600">⚠️ Custo mensal com reativo: <strong>R$ ${mediaCustoReativo.toFixed(2)}</strong></p>
-        <hr class="my-3">
-        <p><strong>🎯 Banco de capacitores: ${totalKvar} kVAr</strong></p>
-        <p><strong>📦 Estágios: ${stages.length}</strong></p>
-        <p><strong>💰 Economia mensal: R$ ${economiaMensal.toFixed(2)}</strong></p>
-        <p><strong>⏱️ Payback: ${paybackMeses} meses (${(paybackMeses/12).toFixed(1)} anos)</strong></p>
-        <p class="text-sm text-slate-500 mt-2">💡 Investimento estimado: R$ ${investimentoEstimado.toLocaleString()}</p>
-      </div>`;
-    } else {
-      mensagem = `<div class="text-left">
-        <p><strong>📊 Análise de ${totalFaturas} faturas</strong></p>
-        <p>🏭 Grupo Tarifário: <strong>${grupoTarifario}</strong></p>
-        <p>⚡ FP médio geral: ${(mediaFP * 100).toFixed(1)}%</p>
-        <p class="text-green-600">✅ ${motivo}</p>
-        <p>💰 Custo mensal com reativo: R$ ${mediaCustoReativo.toFixed(2)}</p>
-        <hr class="my-3">
-        <p><strong>✅ Não há necessidade de investimento no momento</strong></p>
-      </div>`;
+    if (faturas.length > 12) {
+      Swal.fire({
+        title: '⚠️ Muitas Faturas',
+        html: `<div class="text-left">
+          <p>Para dimensionamento, utilize no <strong>máximo 12 faturas</strong> (últimos 12 meses).</p>
+          <p class="mt-2">Atualmente: <strong>${faturas.length} faturas</strong></p>
+          <p class="mt-2 text-sm text-slate-500">Faturas mais antigas podem distorcer a análise do perfil atual.</p>
+        </div>`,
+        icon: 'warning',
+        confirmButtonColor: '#0a2b3c'
+      });
+      return;
     }
     
-    Swal.fire({
-      title: precisaCapacitor ? '✅ Dimensionamento Concluído!' : '✅ Análise Concluída!',
-      html: mensagem,
-      icon: precisaCapacitor ? 'success' : 'info',
-      confirmButtonColor: '#0a2b3c'
-    });
+    setCalculando(true);
     
-  } catch (error) {
-    console.error(error);
-    Swal.fire('Erro', 'Erro ao calcular dimensionamento', 'error');
-  } finally {
-    setCalculando(false);
-  }
-};
+    try {
+      // IDENTIFICAR GRUPO TARIFÁRIO
+      const potenciaTotal = potenciaTotalTransformadores;
+      const grupoTarifario: 'A' | 'B' = potenciaTotal >= 75 ? 'A' : 'B';
+      
+      const faturasProcessadas = faturas.map(f => {
+        const consumoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
+        const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
+        const fp = calcularFP(consumoTotal, reativoTotal);
+        const custoReativo = calcularCustoReativo(f.reativo_ponta_kvarh, f.reativo_fora_ponta_kvarh);
+        const potenciaMedia = calcularPotenciaAtivaMedia(consumoTotal);
+        
+        return { ...f, fp, custoReativo, consumoTotal, reativoTotal, potenciaMedia };
+      });
+      
+      const totalFaturas = faturasProcessadas.length;
+      
+      const somaPotenciaAtiva = faturasProcessadas.reduce((acc, f) => acc + f.potenciaMedia, 0);
+      const somaFP = faturasProcessadas.reduce((acc, f) => acc + f.fp, 0);
+      const somaConsumo = faturasProcessadas.reduce((acc, f) => acc + f.consumoTotal, 0);
+      const somaCustoReativo = faturasProcessadas.reduce((acc, f) => acc + f.custoReativo, 0);
+      
+      const mediaPotenciaAtiva = somaPotenciaAtiva / totalFaturas;
+      const mediaFP = somaFP / totalFaturas;
+      const mediaConsumo = somaConsumo / totalFaturas;
+      const mediaCustoReativo = somaCustoReativo / totalFaturas;
+      
+      const piorMes = [...faturasProcessadas].sort((a, b) => a.fp - b.fp)[0];
+      
+      // LÓGICA BASEADA NO GRUPO TARIFÁRIO
+      let precisaCapacitor = false;
+      let motivo = '';
+      let totalKvar = 0;
+      let stages: number[] = [];
+      let economiaMensal = 0;
+      let investimentoEstimado = 0;
+      let paybackMeses = 0;
+      let recomendacaoEstagios = '';
+      
+      if (grupoTarifario === 'A') {
+        // GRUPO A: SEMPRE precisa de capacitor se paga reativo
+        precisaCapacitor = mediaCustoReativo > 50;
+        motivo = `Grupo A (Alta Tensão) - Todo reativo excedente é faturado. Custo médio mensal: R$ ${mediaCustoReativo.toFixed(2)}`;
+        
+        if (precisaCapacitor) {
+          const phi1 = Math.acos(Math.min(0.99, mediaFP));
+          const phi2 = Math.acos(targetFP);
+          
+          const kvarProcesso = mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
+          const kvarTrafo = potenciaTotalTransformadores * 0.025;
+          
+          totalKvar = Math.ceil((kvarProcesso + kvarTrafo) / 5) * 5;
+          totalKvar = Math.max(totalKvar, 30);
+          
+          let restante = totalKvar;
+          
+          const qtdTrafo225 = transformadores
+            .filter(t => t.potencia_kva === 225)
+            .reduce((acc, t) => acc + t.quantidade, 0);
+          
+          for (let i = 0; i < qtdTrafo225 && restante >= 60; i++) {
+            stages.push(60);
+            restante -= 60;
+          }
+          
+          if (restante >= 30) {
+            stages.push(30);
+            restante -= 30;
+          }
+          
+          const sizes = [20, 15, 10, 5];
+          for (const size of sizes) {
+            while (restante >= size) {
+              stages.push(size);
+              restante -= size;
+            }
+          }
+          
+          stages.sort((a, b) => a - b);
+          
+          recomendacaoEstagios = `Recomendado: 1 banco central de ${totalKvar} kVAr ou ${stages.length} estágios (${stages.filter(s => s === 60).length}x60kVAr + complementos)`;
+          
+          economiaMensal = mediaCustoReativo * 0.95;
+          investimentoEstimado = totalKvar * 89.90 + 2500;
+          paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoEstimado / economiaMensal) : 0;
+        } else {
+          recomendacaoEstagios = `✅ Seu custo com reativo é baixo (R$ ${mediaCustoReativo.toFixed(2)}/mês). Não há necessidade de investimento no momento.`;
+        }
+      } else {
+        // GRUPO B: só precisa se FP < 92%
+        precisaCapacitor = mediaFP < 0.92;
+        motivo = precisaCapacitor 
+          ? `FP abaixo do regulamentar (${(mediaFP * 100).toFixed(1)}% < 92%)`
+          : 'FP dentro do regulamentar';
+        
+        if (precisaCapacitor) {
+          const phi1 = Math.acos(Math.min(0.99, mediaFP));
+          const phi2 = Math.acos(targetFP);
+          
+          const kvarProcesso = mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
+          const kvarTrafo = potenciaTotalTransformadores * 0.025;
+          
+          totalKvar = Math.ceil((kvarProcesso + kvarTrafo) / 5) * 5;
+          totalKvar = Math.max(totalKvar, 30);
+          
+          let restante = totalKvar;
+          const sizes = [30, 20, 15, 10, 5];
+          for (const size of sizes) {
+            while (restante >= size) {
+              stages.push(size);
+              restante -= size;
+            }
+          }
+          stages.sort((a, b) => a - b);
+          
+          recomendacaoEstagios = `Banco automático com ${stages.length} estágios: ${stages.join(' + ')} kVAr`;
+          economiaMensal = mediaCustoReativo * 0.95;
+          investimentoEstimado = totalKvar * 89.90 + 2000;
+          paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoEstimado / economiaMensal) : 0;
+        } else {
+          recomendacaoEstagios = '✅ Seu fator de potência já está dentro do regulamentar (FP ≥ 92%). Não há necessidade de investimento em banco de capacitores no momento.';
+        }
+      }
+      
+      setResult({
+        totalKvar,
+        stages,
+        economiaMensal,
+        investimentoEstimado,
+        paybackMeses,
+        fpAtual: mediaFP * 100,
+        fpProjetado: precisaCapacitor ? targetFP * 100 : mediaFP * 100,
+        multaAtual: mediaCustoReativo,
+        consumoTotalMedio: mediaConsumo,
+        potenciaAtivaMediaKw: mediaPotenciaAtiva,
+        piorMes,
+        recomendacaoEstagios,
+        quantidadeFaturas: totalFaturas,
+        precisaCapacitor,
+        grupoTarifario,
+        motivoRecomendacao: motivo,
+        custoReativoMensal: mediaCustoReativo
+      });
+      
+      let mensagem = '';
+      if (precisaCapacitor) {
+        mensagem = `<div class="text-left">
+          <p><strong>📊 Análise de ${totalFaturas} faturas</strong> (mín:3 | máx:12)</p>
+          <p>🏭 Grupo Tarifário: <strong>${grupoTarifario}</strong> (${grupoTarifario === 'A' ? 'Alta Tensão - reativo é cobrado' : 'Baixa Tensão'})</p>
+          <p>⚡ FP médio geral: ${(mediaFP * 100).toFixed(1)}%</p>
+          <p class="text-red-600">⚠️ Custo mensal com reativo: <strong>R$ ${mediaCustoReativo.toFixed(2)}</strong></p>
+          <hr class="my-3">
+          <p><strong>🎯 Banco de capacitores: ${totalKvar} kVAr</strong></p>
+          <p><strong>📦 Estágios: ${stages.length}</strong></p>
+          <p><strong>💰 Economia mensal: R$ ${economiaMensal.toFixed(2)}</strong></p>
+          <p><strong>⏱️ Payback: ${paybackMeses} meses (${(paybackMeses/12).toFixed(1)} anos)</strong></p>
+          <p class="text-sm text-slate-500 mt-2">💡 Investimento estimado: R$ ${investimentoEstimado.toLocaleString()}</p>
+        </div>`;
+      } else {
+        mensagem = `<div class="text-left">
+          <p><strong>📊 Análise de ${totalFaturas} faturas</strong></p>
+          <p>🏭 Grupo Tarifário: <strong>${grupoTarifario}</strong></p>
+          <p>⚡ FP médio geral: ${(mediaFP * 100).toFixed(1)}%</p>
+          <p>💰 Custo médio mensal com reativo: R$ ${mediaCustoReativo.toFixed(2)}</p>
+          <p class="text-green-600">✅ ${motivo}</p>
+          <hr class="my-3">
+          <p><strong>✅ Não há necessidade de investimento no momento</strong></p>
+        </div>`;
+      }
+      
+      Swal.fire({
+        title: precisaCapacitor ? '✅ Dimensionamento Concluído!' : '✅ Análise Concluída!',
+        html: mensagem,
+        icon: precisaCapacitor ? 'success' : 'info',
+        confirmButtonColor: '#0a2b3c'
+      });
+      
+    } catch (error) {
+      console.error(error);
+      Swal.fire('Erro', 'Erro ao calcular dimensionamento', 'error');
+    } finally {
+      setCalculando(false);
+    }
+  };
+
   const exportMemorial = async () => {
     if (!reportRef.current) return;
     try {
@@ -640,7 +637,7 @@ export default function DimensionarPage() {
                   const consumoTotal = fat.consumo_ponta_kwh + fat.consumo_fora_ponta_kwh;
                   const reativoTotal = fat.reativo_ponta_kvarh + fat.reativo_fora_ponta_kvarh;
                   const fp = calcularFP(consumoTotal, reativoTotal);
-                  const multa = calcularMultaReativa(fat.reativo_ponta_kvarh, fat.reativo_fora_ponta_kvarh);
+                  const custoReativo = calcularCustoReativo(fat.reativo_ponta_kvarh, fat.reativo_fora_ponta_kvarh);
                   const isInvertido = reativoTotal > consumoTotal && consumoTotal > 0;
                   
                   return (
@@ -667,7 +664,7 @@ export default function DimensionarPage() {
                           <span className={`text-xs font-bold ${fp >= 0.92 ? 'text-green-600' : fp > 0.5 ? 'text-amber-600' : 'text-red-600'} flex items-center justify-between`}>
                             <span>FP: {(fp * 100).toFixed(1)}%</span>
                             {isInvertido && <span className="flex items-center gap-1 text-red-500"><AlertCircle size={12} /> Dados invertidos?</span>}
-                            {fp < 0.92 && fp > 0.5 && <span>Multa: R$ {multa.toFixed(2)}</span>}
+                            {custoReativo > 50 && <span>Custo Reativo: R$ {custoReativo.toFixed(2)}</span>}
                           </span>
                         </div>
                       </div>
@@ -733,7 +730,11 @@ export default function DimensionarPage() {
                       <div className="text-center border-b pb-4">
                         <p className="text-sm text-slate-500">Potência Total Recomendada</p>
                         <p className="text-5xl font-bold text-primary">{result.totalKvar} <span className="text-lg">kVAr</span></p>
-                        <p className="text-xs text-slate-400 mt-1">Base: {result.quantidadeFaturas} faturas analisadas</p>
+                        <p className="text-xs text-slate-400 mt-1">Grupo {result.grupoTarifario} - {result.quantidadeFaturas} faturas analisadas</p>
+                      </div>
+                      
+                      <div className="bg-blue-50 rounded-xl p-3 mb-4">
+                        <p className="text-xs font-bold text-blue-700">📌 {result.motivoRecomendacao}</p>
                       </div>
                       
                       <div className="grid grid-cols-2 gap-4">
@@ -757,7 +758,7 @@ export default function DimensionarPage() {
                           <p className="text-sm font-medium">{result.piorMes.mes_referencia}</p>
                           <p className="text-xs text-amber-600">
                             FP: {(result.piorMes.fp! * 100).toFixed(1)}% | 
-                            Multa: R$ {(result.piorMes.multa_reativa || calcularMultaReativa(result.piorMes.reativo_ponta_kvarh, result.piorMes.reativo_fora_ponta_kvarh)).toFixed(2)}
+                            Custo Reativo: R$ {calcularCustoReativo(result.piorMes.reativo_ponta_kvarh, result.piorMes.reativo_fora_ponta_kvarh).toFixed(2)}
                           </p>
                         </div>
                       )}
@@ -779,15 +780,15 @@ export default function DimensionarPage() {
                       <div className="grid grid-cols-2 gap-4">
                         <div className="bg-red-50 rounded-xl p-4 text-center">
                           <DollarSign size={20} className="mx-auto text-red-600 mb-1" />
-                          <p className="text-xs text-slate-500">Multa Média Mensal</p>
+                          <p className="text-xs text-slate-500">Custo Mensal com Reativo</p>
                           <p className="text-xl font-bold text-red-600">R$ {result.multaAtual.toFixed(2)}</p>
-                          <p className="text-[10px] text-slate-400">por reativo excedente</p>
+                          <p className="text-[10px] text-slate-400">valor faturado</p>
                         </div>
                         <div className="bg-green-50 rounded-xl p-4 text-center">
                           <DollarSign size={20} className="mx-auto text-green-600 mb-1" />
                           <p className="text-xs text-slate-500">Economia Mensal Estimada</p>
                           <p className="text-xl font-bold text-green-700">R$ {result.economiaMensal.toFixed(2)}</p>
-                          <p className="text-[10px] text-slate-400">após correção do FP</p>
+                          <p className="text-[10px] text-slate-400">após instalação</p>
                         </div>
                       </div>
                       
@@ -806,8 +807,12 @@ export default function DimensionarPage() {
                         <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-3">
                           <CheckCircle2 size={32} className="text-green-600" />
                         </div>
-                        <p className="text-xl font-bold text-green-600">Fator de Potência Regularizado</p>
-                        <p className="text-sm text-slate-500 mt-1">Sua instalação já atende aos requisitos da ANEEL</p>
+                        <p className="text-xl font-bold text-green-600">Instalação Regularizada</p>
+                        <p className="text-sm text-slate-500 mt-1">Grupo {result.grupoTarifario} - {result.quantidadeFaturas} faturas analisadas</p>
+                      </div>
+                      
+                      <div className="bg-blue-50 rounded-xl p-3 mb-4">
+                        <p className="text-xs font-bold text-blue-700">📌 {result.motivoRecomendacao}</p>
                       </div>
                       
                       <div className="grid grid-cols-2 gap-4">
@@ -817,15 +822,14 @@ export default function DimensionarPage() {
                           <p className="text-2xl font-bold text-emerald-600">{result.fpAtual.toFixed(1)}%</p>
                         </div>
                         <div className="bg-emerald-50 rounded-xl p-3 text-center">
-                          <CheckCircle2 size={20} className="mx-auto text-emerald-600 mb-1" />
-                          <p className="text-xs text-slate-500">Situação</p>
-                          <p className="text-md font-bold text-emerald-600">Dentro do regulamentar</p>
+                          <DollarSign size={20} className="mx-auto text-emerald-600 mb-1" />
+                          <p className="text-xs text-slate-500">Custo Reativo Médio</p>
+                          <p className="text-xl font-bold text-emerald-600">R$ {result.custoReativoMensal.toFixed(2)}</p>
                         </div>
                       </div>
                       
                       <div className="bg-green-50 rounded-xl p-4 text-center">
-                        <p className="text-sm text-slate-600">✅ Você não precisa instalar banco de capacitores no momento</p>
-                        <p className="text-xs text-slate-500 mt-2">Continue monitorando suas faturas para manter o FP acima de 92%</p>
+                        <p className="text-sm text-slate-600">✅ {result.recomendacaoEstagios}</p>
                       </div>
                     </>
                   )}
