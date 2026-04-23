@@ -10,16 +10,70 @@ import { cn } from '@/lib/utils';
 import jsPDF from 'jspdf';
 import { toPng } from 'html-to-image';
 
-// Funções de cálculo
+// ============================================================================
+// FUNÇÕES DE CÁLCULO CORRIGIDAS
+// ============================================================================
+
+/**
+ * Calcula a corrente teórica do capacitor
+ * @param potenciaKvar - Potência do capacitor em kVAr
+ * @param tensaoNominal - Tensão nominal do capacitor (V)
+ * @returns Corrente teórica em Amperes
+ */
 function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
     if (!tensaoNominal || tensaoNominal === 0) return 0;
     return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
 }
 
-function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
+/**
+ * Calcula a capacitância teórica com base na ligação
+ * @param capacitanciaNominalFase - Capacitância nominal por fase em µF
+ * @param ligacao - Tipo de ligação: 'delta' ou 'estrela'
+ * @returns Capacitância teórica total em µF
+ * 
+ * Regras:
+ * - Ligação Triângulo (Δ): C_total = C_fase × 1,5 (3 capacitores em Δ)
+ * - Ligação Estrela (Y): C_total = C_fase × 0,5 (3 capacitores em Y)
+ */
+function calcularCapacitanciaTeorica(
+  capacitanciaNominalFase: number, 
+  ligacao: 'delta' | 'estrela' = 'delta'
+): number {
+  if (!capacitanciaNominalFase || capacitanciaNominalFase === 0) return 0;
+  
+  if (ligacao === 'delta') {
+    // Ligação Triângulo (Δ): C_total = C_fase × 1,5
     return capacitanciaNominalFase * 1.5;
+  } else {
+    // Ligação Estrela (Y): C_total = C_fase × 0,5
+    return capacitanciaNominalFase * 0.5;
+  }
 }
 
+/**
+ * Obtém o rótulo da ligação para exibição
+ */
+function getLigacaoLabel(ligacao: string): string {
+  if (ligacao === 'delta') return 'Δ (Triângulo)';
+  if (ligacao === 'estrela') return 'Y (Estrela)';
+  return '-';
+}
+
+/**
+ * Calcula o desvio percentual entre valor medido e teórico
+ */
+function calcularDesvio(valorMedido: number, valorTeorico: number): number {
+  if (!valorTeorico || valorTeorico === 0) return 0;
+  return ((valorMedido - valorTeorico) / valorTeorico) * 100;
+}
+
+/**
+ * Determina o status de validação baseado no desvio
+ * Regras:
+ * - Aprovado: desvio entre -5% e +10%
+ * - Atenção: desvio entre -10% e -5% OU entre +10% e +15%
+ * - Reprovado: desvio < -10% OU > +15%
+ */
 function getStatusValidacao(desvio: number): string {
     if (desvio >= -5 && desvio <= 10) return 'aprovado';
     if (desvio >= -10 && desvio < -5) return 'atencao';
@@ -27,6 +81,9 @@ function getStatusValidacao(desvio: number): string {
     return 'reprovado';
 }
 
+/**
+ * Componente de badge de status
+ */
 function StatusBadge({ status }: { status: string }) {
   const configs: any = {
     aprovado: { icon: CheckCircle2, color: 'bg-green-50 text-green-700', label: '✅ Aprovado' },
@@ -44,6 +101,10 @@ function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
+
+// ============================================================================
+// COMPONENTE PRINCIPAL COM SUSPENSE
+// ============================================================================
 
 // Componente que usa useSearchParams
 function MedicoesContent() {
@@ -82,6 +143,10 @@ function MedicoesContent() {
         .single();
 
       if (capData) {
+        // Garantir que a ligação tenha um valor padrão
+        if (!capData.ligacao) {
+          capData.ligacao = 'delta'; // Padrão para compatibilidade
+        }
         setCapacitor(capData);
       }
 
@@ -92,29 +157,36 @@ function MedicoesContent() {
         .eq('capacitor_id', capacitorId)
         .order('created_at', { ascending: false });
 
-      // Recalcular desvios
+      // Recalcular desvios com base nos dados atuais
       const processedMedicoes = (medData || []).map(med => {
         let desvio = med.desvio_percentual;
         let status = med.status_validacao;
         let teoricoLabel = '---';
+        let teoricoValue = 0;
         
         if (capData) {
           const tensaoNominal = capData.tensao_nominal_v;
+          const ligacao = capData.ligacao || 'delta';
           
           if (med.tipo_teste === 'corrente' && med.corrente_medida_a) {
+            // CORRENTE: usa tensão NOMINAL do capacitor (correto!)
             const correnteTeorica = calcularCorrenteTeorica(capData.potencia_kvar, tensaoNominal);
-            teoricoLabel = `${correnteTeorica.toFixed(2)} A @ ${tensaoNominal}V`;
+            teoricoValue = correnteTeorica;
+            teoricoLabel = `${correnteTeorica.toFixed(2)} A @ ${tensaoNominal}V (nominal)`;
             
             if (correnteTeorica > 0) {
-              desvio = ((med.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
+              desvio = calcularDesvio(med.corrente_medida_a, correnteTeorica);
               status = getStatusValidacao(desvio);
             }
-          } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf) {
-            const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(capData.capacitancia_nominal_uf);
-            teoricoLabel = `${capacitanciaTeorica.toFixed(2)} µF (Δ) @ ${tensaoNominal}V`;
+          } 
+          else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf) {
+            // CAPACITÂNCIA: considera a ligação (Δ ou Y)
+            const capacitanciaTeorica = calcularCapacitanciaTeorica(capData.capacitancia_nominal_uf, ligacao);
+            teoricoValue = capacitanciaTeorica;
+            teoricoLabel = `${capacitanciaTeorica.toFixed(2)} µF (${getLigacaoLabel(ligacao)}) @ ${tensaoNominal}V`;
             
             if (capacitanciaTeorica > 0) {
-              desvio = ((med.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
+              desvio = calcularDesvio(med.capacitancia_medida_uf, capacitanciaTeorica);
               status = getStatusValidacao(desvio);
             }
           }
@@ -124,7 +196,8 @@ function MedicoesContent() {
           ...med,
           desvio_percentual: desvio,
           status_validacao: status,
-          teoricoLabel
+          teoricoLabel,
+          teoricoValue
         };
       });
 
@@ -145,16 +218,22 @@ function MedicoesContent() {
         let status = med.status_validacao;
         
         if (capacitor) {
+          const tensaoNominal = capacitor.tensao_nominal_v;
+          const ligacao = capacitor.ligacao || 'delta';
+          
           if (med.tipo_teste === 'corrente' && med.corrente_medida_a) {
-            const correnteTeorica = calcularCorrenteTeorica(capacitor.potencia_kvar, capacitor.tensao_nominal_v);
+            // CORRENTE: usa tensão NOMINAL do capacitor
+            const correnteTeorica = calcularCorrenteTeorica(capacitor.potencia_kvar, tensaoNominal);
             if (correnteTeorica > 0) {
-              desvio = ((med.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
+              desvio = calcularDesvio(med.corrente_medida_a, correnteTeorica);
               status = getStatusValidacao(desvio);
             }
-          } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf) {
-            const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(capacitor.capacitancia_nominal_uf);
+          } 
+          else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf) {
+            // CAPACITÂNCIA: considera a ligação
+            const capacitanciaTeorica = calcularCapacitanciaTeorica(capacitor.capacitancia_nominal_uf, ligacao);
             if (capacitanciaTeorica > 0) {
-              desvio = ((med.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
+              desvio = calcularDesvio(med.capacitancia_medida_uf, capacitanciaTeorica);
               status = getStatusValidacao(desvio);
             }
           }
@@ -231,22 +310,29 @@ function MedicoesContent() {
     );
   }
 
+  // Estatísticas para o relatório
+  const aprovados = medicoes.filter(m => m.status_validacao === 'aprovado').length;
+  const atencao = medicoes.filter(m => m.status_validacao === 'atencao').length;
+  const reprovados = medicoes.filter(m => m.status_validacao === 'reprovado').length;
+
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
-      <div className="flex items-center gap-4">
-        <button
-          onClick={() => router.back()}
-          className="flex items-center gap-2 text-primary hover:underline"
-        >
-          <ArrowLeft size={20} />
-          Voltar
-        </button>
-        <div className="flex-1">
-          <h1 className="text-3xl font-bold text-primary">Histórico de Medições</h1>
-          <p className="text-slate-500">
-            Capacitor: {capacitor.codigo_identificacao} - {capacitor.bancos_capacitores?.nome_banco}
-          </p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => router.back()}
+            className="flex items-center gap-2 text-primary hover:underline"
+          >
+            <ArrowLeft size={20} />
+            Voltar
+          </button>
+          <div>
+            <h1 className="text-3xl font-bold text-primary">Histórico de Medições</h1>
+            <p className="text-slate-500">
+              Capacitor: {capacitor.codigo_identificacao} - {capacitor.bancos_capacitores?.nome_banco}
+            </p>
+          </div>
         </div>
         <div className="flex gap-2">
           <button
@@ -271,7 +357,7 @@ function MedicoesContent() {
 
       {/* Informações do Capacitor */}
       <div className="bg-gradient-to-r from-primary/10 to-secondary/10 rounded-2xl p-6 border border-primary/20">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div className="text-center">
             <p className="text-xs text-slate-500">Potência</p>
             <p className="text-xl font-bold text-primary">{capacitor.potencia_kvar} kVAr</p>
@@ -281,34 +367,65 @@ function MedicoesContent() {
             <p className="text-xl font-bold text-primary">{capacitor.tensao_nominal_v} V</p>
           </div>
           <div className="text-center">
-            <p className="text-xs text-slate-500">Capacitância</p>
-            <p className="text-xl font-bold text-primary">{capacitor.capacitancia_nominal_uf || '-'} µF</p>
+            <p className="text-xs text-slate-500">Ligação</p>
+            <p className="text-xl font-bold text-primary">{getLigacaoLabel(capacitor.ligacao || 'delta')}</p>
           </div>
           <div className="text-center">
-            <p className="text-xs text-slate-500">Total de Medições</p>
+            <p className="text-xs text-slate-500">Capacitância</p>
+            <p className="text-xl font-bold text-primary">{capacitor.capacitancia_nominal_uf || '-'} µF/fase</p>
+          </div>
+          <div className="text-center">
+            <p className="text-xs text-slate-500">Total Medições</p>
             <p className="text-xl font-bold text-primary">{medicoes.length}</p>
           </div>
         </div>
       </div>
 
       {/* Container para PDF */}
-      <div ref={reportRef} className="bg-white p-8 rounded-2xl shadow-sm">
+      <div ref={reportRef} className="bg-white rounded-2xl shadow-sm overflow-hidden">
         {/* Cabeçalho do PDF */}
-        <div className="text-center mb-8 pb-4 border-b">
+        <div className="text-center p-8 pb-4 border-b">
           <h2 className="text-2xl font-bold text-primary">Relatório de Medições</h2>
           <p className="text-slate-500">Capacitor: {capacitor.codigo_identificacao}</p>
           <p className="text-slate-500">Banco: {capacitor.bancos_capacitores?.nome_banco}</p>
           <p className="text-slate-500">Cliente: {capacitor.bancos_capacitores?.clientes?.nome}</p>
-          <p className="text-xs text-slate-400 mt-2">Gerado em: {new Date().toLocaleDateString('pt-BR')}</p>
+          <p className="text-xs text-slate-400 mt-2">Gerado em: {new Date().toLocaleDateString('pt-BR')} às {new Date().toLocaleTimeString('pt-BR')}</p>
         </div>
+
+        {/* Resumo de Status */}
+        {medicoes.length > 0 && (
+          <div className="grid grid-cols-3 gap-4 p-6 bg-slate-50 border-b">
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-2">
+                <CheckCircle2 size={20} className="text-green-600" />
+                <span className="text-sm font-medium text-slate-600">Aprovados</span>
+              </div>
+              <p className="text-2xl font-bold text-green-600">{aprovados}</p>
+            </div>
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-2">
+                <AlertTriangle size={20} className="text-amber-600" />
+                <span className="text-sm font-medium text-slate-600">Atenção</span>
+              </div>
+              <p className="text-2xl font-bold text-amber-600">{atencao}</p>
+            </div>
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-2">
+                <XCircle size={20} className="text-red-600" />
+                <span className="text-sm font-medium text-slate-600">Reprovados</span>
+              </div>
+              <p className="text-2xl font-bold text-red-600">{reprovados}</p>
+            </div>
+          </div>
+        )}
 
         {/* Tabela de Medições */}
         {medicoes.length > 0 ? (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto p-6">
             <table className="w-full text-left">
-              <thead className="bg-slate-50 text-sm font-medium text-slate-500">
+              <thead className="bg-slate-50 text-sm font-medium text-slate-500 rounded-lg">
                 <tr>
-                  <th className="px-4 py-3">Data</th>
+                  <th className="px-4 py-3">Data/Hora</th>
                   <th className="px-4 py-3">Tipo</th>
                   <th className="px-4 py-3">Valor Teórico</th>
                   <th className="px-4 py-3">Valor Medido</th>
@@ -318,12 +435,22 @@ function MedicoesContent() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {medicoes.map((med) => (
-                  <tr key={med.id} className="text-sm hover:bg-slate-50">
+                  <tr key={med.id} className="text-sm hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 text-slate-600">
-                      {new Date(med.created_at).toLocaleDateString('pt-BR')}
+                      {new Date(med.created_at).toLocaleDateString('pt-BR')}<br />
+                      <span className="text-xs text-slate-400">
+                        {new Date(med.created_at).toLocaleTimeString('pt-BR')}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 capitalize">
-                      {med.tipo_teste === 'corrente' ? 'Corrente' : 'Capacitância'}
+                    <td className="px-4 py-3">
+                      <span className={cn(
+                        "px-2 py-1 rounded-md text-xs font-bold",
+                        med.tipo_teste === 'corrente' 
+                          ? "bg-blue-50 text-blue-700" 
+                          : "bg-purple-50 text-purple-700"
+                      )}>
+                        {med.tipo_teste === 'corrente' ? '🔌 Corrente' : '⚡ Capacitância'}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs">
                       {med.teoricoLabel}
@@ -336,7 +463,8 @@ function MedicoesContent() {
                     <td className="px-4 py-3">
                       <span className={cn(
                         "font-bold",
-                        med.desvio_percentual > 0 ? "text-red-500" : "text-green-500"
+                        med.desvio_percentual > 5 ? "text-red-500" : 
+                        med.desvio_percentual < -5 ? "text-red-500" : "text-green-600"
                       )}>
                         {med.desvio_percentual > 0 ? '+' : ''}{med.desvio_percentual?.toFixed(2)}%
                       </span>
@@ -348,6 +476,18 @@ function MedicoesContent() {
                 ))}
               </tbody>
             </table>
+            
+            {/* Legenda */}
+            <div className="mt-6 pt-4 border-t border-slate-100 text-xs text-slate-400">
+              <p className="font-bold mb-2">📌 Legenda de Validação:</p>
+              <ul className="space-y-1 list-disc list-inside">
+                <li><strong className="text-green-600">Aprovado:</strong> Desvio entre -5% e +10%</li>
+                <li><strong className="text-amber-600">Atenção:</strong> Desvio entre -10% e -5% OU entre +10% e +15%</li>
+                <li><strong className="text-red-600">Reprovado:</strong> Desvio abaixo de -10% ou acima de +15%</li>
+                <li><strong className="text-blue-600">Corrente:</strong> Calculada com tensão NOMINAL do capacitor (não a tensão medida)</li>
+                <li><strong className="text-purple-600">Capacitância:</strong> Calculada considerando a ligação {getLigacaoLabel(capacitor.ligacao || 'delta')}</li>
+              </ul>
+            </div>
           </div>
         ) : (
           <div className="text-center py-12 text-slate-400">
@@ -378,4 +518,3 @@ export default function MedicoesPage() {
     </Suspense>
   );
 }
-
