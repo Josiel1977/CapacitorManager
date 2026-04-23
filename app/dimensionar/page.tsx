@@ -205,9 +205,9 @@ export default function DimensionarPage() {
   };
 
   const atualizarTransformador = (index: number, field: keyof Transformador, value: number) => {
-    const novos = [...transformadores];
-    novos[index][field] = value;
-    setTransformadores(novos);
+   const novos = [...transformadores];
+   novos[index] = { ...novos[index], [field]: value };
+   setTransformadores(novos);
   };
 
   const potenciaTotalTransformadores = transformadores.reduce((acc, t) => acc + (t.potencia_kva * t.quantidade), 0);
