@@ -5,7 +5,7 @@ import {
   Calculator, Zap, TrendingUp, DollarSign, CheckCircle2, 
   FileText, Loader2, AlertTriangle, Package, History,
   Download, Printer, Activity, Layers, Plus, Trash2,
-  Save, Edit3, X
+  Save, Edit3, X, AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Swal from 'sweetalert2';
@@ -48,6 +48,7 @@ interface ResultadoDimensionamento {
   piorMes: Fatura | null;
   recomendacaoEstagios: string;
   quantidadeFaturas: number;
+  precisaCapacitor: boolean;
 }
 
 const TARIFA_REATIVO = 0.34469;
@@ -68,6 +69,7 @@ export default function DimensionarPage() {
   const [currentFatura, setCurrentFatura] = useState<Partial<Fatura>>({});
   const [editandoFatura, setEditandoFatura] = useState<number | null>(null);
   const [carregando, setCarregando] = useState(true);
+  const [erroValidacao, setErroValidacao] = useState<string | null>(null);
 
   useEffect(() => {
     carregarDados();
@@ -82,7 +84,8 @@ export default function DimensionarPage() {
       
       const savedFaturas = localStorage.getItem('dimensionar_faturas');
       if (savedFaturas) {
-        setFaturas(JSON.parse(savedFaturas));
+        const faturasCarregadas = JSON.parse(savedFaturas);
+        setFaturas(faturasCarregadas);
       } else {
         carregarFaturaExemploReal();
       }
@@ -96,17 +99,55 @@ export default function DimensionarPage() {
   const carregarFaturaExemploReal = () => {
     const faturaExemplo: Fatura = {
       id: 'exemplo1',
-      mes_referencia: '04/2026',
-      consumo_ponta_kwh: 10095,
-      consumo_fora_ponta_kwh: 76282,
-      demanda_ponta_kw: 500,
+      mes_referencia: '05/2025',
+      consumo_ponta_kwh: 8132,
+      consumo_fora_ponta_kwh: 59050,
+      demanda_ponta_kw: 430,
       demanda_fora_ponta_kw: 447,
-      reativo_ponta_kvarh: 775,
-      reativo_fora_ponta_kvarh: 4087,
-      total_pagar: 91796.94
+      reativo_ponta_kvarh: 824,
+      reativo_fora_ponta_kvarh: 4511,
+      total_pagar: 55970.04
     };
     setFaturas([faturaExemplo]);
     localStorage.setItem('dimensionar_faturas', JSON.stringify([faturaExemplo]));
+  };
+
+  // Função para validar se os valores da fatura são coerentes
+  const validarFatura = (fatura: Partial<Fatura>): { valida: boolean; mensagem: string } => {
+    const consumoTotal = (fatura.consumo_ponta_kwh || 0) + (fatura.consumo_fora_ponta_kwh || 0);
+    const reativoTotal = (fatura.reativo_ponta_kvarh || 0) + (fatura.reativo_fora_ponta_kvarh || 0);
+    
+    // Verifica se os valores estão zerados
+    if (consumoTotal === 0 && reativoTotal === 0) {
+      return {
+        valida: false,
+        mensagem: '⚠️ Ambos os valores de consumo e reativo estão zerados. Preencha pelo menos um campo.'
+      };
+    }
+    
+    // VERIFICAÇÃO CRÍTICA: Se o reativo for maior que o consumo, provavelmente está trocado
+    if (reativoTotal > consumoTotal && consumoTotal > 0) {
+      const percentual = (reativoTotal / consumoTotal) * 100;
+      if (percentual > 200) {
+        return {
+          valida: false,
+          mensagem: `⚠️ ATENÇÃO: A Energia Reativa (${reativoTotal.toLocaleString()} kVArh) é ${percentual.toFixed(0)}% maior que o Consumo Ativo (${consumoTotal.toLocaleString()} kWh).\n\nIsso geralmente indica que os valores de CONSUMO e REATIVO foram TROCADOS.\n\n✓ Consumo (kWh): valores altos (ex: 8.000 a 80.000)\n✓ Reativo (kVArh): valores baixos (ex: 500 a 5.000)\n\nPor favor, verifique e corrija os dados.`
+        };
+      }
+    }
+    
+    // Calcula o FP para validação
+    const fp = calcularFP(consumoTotal, reativoTotal);
+    
+    // Se o FP for menor que 0,5 (50%), algo está muito errado
+    if (fp < 0.5 && consumoTotal > 0 && reativoTotal > 0) {
+      return {
+        valida: false,
+        mensagem: `⚠️ ATENÇÃO: O Fator de Potência calculado é ${(fp * 100).toFixed(1)}%, o que é tecnicamente inválido para uma instalação real.\n\n✓ O FP normal fica entre 80% e 99%\n✓ Valores baixos geralmente indicam dados trocados\n✓ Verifique se você inverteu Consumo (kWh) com Reativo (kVArh)`
+      };
+    }
+    
+    return { valida: true, mensagem: '' };
   };
 
   const salvarTransformadores = () => {
@@ -127,6 +168,19 @@ export default function DimensionarPage() {
   const salvarFatura = () => {
     if (!currentFatura.mes_referencia) {
       Swal.fire('Atenção', 'Informe o mês de referência', 'warning');
+      return;
+    }
+    
+    // Valida os dados antes de salvar
+    const validacao = validarFatura(currentFatura);
+    if (!validacao.valida) {
+      Swal.fire({
+        title: 'Dados inconsistentes',
+        html: `<div class="text-left whitespace-pre-line">${validacao.mensagem}</div>`,
+        icon: 'warning',
+        confirmButtonColor: '#e74c3c',
+        confirmButtonText: 'Entendi, vou corrigir'
+      });
       return;
     }
     
@@ -157,6 +211,7 @@ export default function DimensionarPage() {
     setShowFaturaModal(false);
     setCurrentFatura({});
     setEditandoFatura(null);
+    setErroValidacao(null);
     
     Swal.fire({
       title: '✅ Sucesso!',
@@ -169,15 +224,16 @@ export default function DimensionarPage() {
 
   const carregarFaturaExemplo = () => {
     setCurrentFatura({
-      mes_referencia: '04/2026',
-      consumo_ponta_kwh: 10095,
-      consumo_fora_ponta_kwh: 76282,
-      demanda_ponta_kw: 500,
+      mes_referencia: '05/2025',
+      consumo_ponta_kwh: 8132,
+      consumo_fora_ponta_kwh: 59050,
+      demanda_ponta_kw: 430,
       demanda_fora_ponta_kw: 447,
-      reativo_ponta_kvarh: 775,
-      reativo_fora_ponta_kvarh: 4087,
-      total_pagar: 91796.94
+      reativo_ponta_kvarh: 824,
+      reativo_fora_ponta_kvarh: 4511,
+      total_pagar: 55970.04
     });
+    setErroValidacao(null);
   };
 
   const removerFatura = (index: number) => {
@@ -230,6 +286,7 @@ export default function DimensionarPage() {
   };
 
   const calcularMultaReativa = (reativoPonta: number, reativoForaPonta: number): number => {
+    // Só calcula multa se o FP for menor que 0.92
     return (reativoPonta + reativoForaPonta) * TARIFA_REATIVO;
   };
 
@@ -238,7 +295,6 @@ export default function DimensionarPage() {
   };
 
   const calcularDimensionamento = () => {
-    // VALIDAÇÃO: mínimo 3 faturas
     if (faturas.length < 3) {
       Swal.fire({
         title: '⚠️ Faturas Insuficientes',
@@ -253,7 +309,6 @@ export default function DimensionarPage() {
       return;
     }
     
-    // VALIDAÇÃO: máximo 12 faturas
     if (faturas.length > 12) {
       Swal.fire({
         title: '⚠️ Muitas Faturas',
@@ -295,52 +350,70 @@ export default function DimensionarPage() {
       
       const piorMes = [...faturasProcessadas].sort((a, b) => a.fp - b.fp)[0];
       
-      const phi1 = Math.acos(Math.min(0.99, mediaFP));
-      const phi2 = Math.acos(targetFP);
+      // SÓ CALCULA SE O FP ESTIVER ABAIXO DE 0.92
+      const precisaCapacitor = mediaFP < 0.92;
       
-      const kvarProcesso = mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
-      const kvarTrafo = potenciaTotalTransformadores * 0.025;
-      
-      let totalKvar = Math.ceil((kvarProcesso + kvarTrafo) / 5) * 5;
-      totalKvar = Math.max(totalKvar, 30);
-      
-      const stages: number[] = [];
-      let restante = totalKvar;
-      
-      const qtdTrafo225 = transformadores
-        .filter(t => t.potencia_kva === 225)
-        .reduce((acc, t) => acc + t.quantidade, 0);
-      
-      for (let i = 0; i < qtdTrafo225 && restante >= 60; i++) {
-        stages.push(60);
-        restante -= 60;
-      }
-      
-      if (restante >= 30) {
-        stages.push(30);
-        restante -= 30;
-      }
-      
-      const sizes = [20, 15, 10, 5];
-      for (const size of sizes) {
-        while (restante >= size) {
-          stages.push(size);
-          restante -= size;
-        }
-      }
-      
-      stages.sort((a, b) => a - b);
-      
+      let totalKvar = 0;
+      let stages: number[] = [];
+      let economiaMensal = 0;
+      let investimentoEstimado = 0;
+      let paybackMeses = 0;
       let recomendacaoEstagios = '';
-      if (qtdTrafo225 === 7) {
-        recomendacaoEstagios = `Recomendado: 1 banco central de ${totalKvar} kVAr ou ${stages.length} estágios (${stages.filter(s => s === 60).length}x60kVAr + ${stages.filter(s => s === 30).length}x30kVAr + complementos)`;
-      } else {
-        recomendacaoEstagios = `Banco automático com ${stages.length} estágios: ${stages.join(' + ')} kVAr`;
-      }
       
-      const economiaMensal = mediaMulta * 0.95;
-      const investimentoEstimado = totalKvar * 89.90 + 2500;
-      const paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoEstimado / economiaMensal) : 0;
+      if (precisaCapacitor) {
+        const phi1 = Math.acos(Math.min(0.99, mediaFP));
+        const phi2 = Math.acos(targetFP);
+        
+        const kvarProcesso = mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
+        const kvarTrafo = potenciaTotalTransformadores * 0.025;
+        
+        totalKvar = Math.ceil((kvarProcesso + kvarTrafo) / 5) * 5;
+        totalKvar = Math.max(totalKvar, 30);
+        
+        // Distribuição dos estágios
+        let restante = totalKvar;
+        
+        const qtdTrafo225 = transformadores
+          .filter(t => t.potencia_kva === 225)
+          .reduce((acc, t) => acc + t.quantidade, 0);
+        
+        for (let i = 0; i < qtdTrafo225 && restante >= 60; i++) {
+          stages.push(60);
+          restante -= 60;
+        }
+        
+        if (restante >= 30) {
+          stages.push(30);
+          restante -= 30;
+        }
+        
+        const sizes = [20, 15, 10, 5];
+        for (const size of sizes) {
+          while (restante >= size) {
+            stages.push(size);
+            restante -= size;
+          }
+        }
+        
+        stages.sort((a, b) => a - b);
+        
+        if (qtdTrafo225 === 7) {
+          recomendacaoEstagios = `Recomendado: 1 banco central de ${totalKvar} kVAr ou ${stages.length} estágios (${stages.filter(s => s === 60).length}x60kVAr + ${stages.filter(s => s === 30).length}x30kVAr + complementos)`;
+        } else {
+          recomendacaoEstagios = `Banco automático com ${stages.length} estágios: ${stages.join(' + ')} kVAr`;
+        }
+        
+        economiaMensal = mediaMulta * 0.95;
+        investimentoEstimado = totalKvar * 89.90 + 2500;
+        paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoEstimado / economiaMensal) : 0;
+      } else {
+        // FP já está bom - não precisa de capacitor
+        stages = [];
+        recomendacaoEstagios = '✅ Seu fator de potência já está dentro do regulamentar (FP ≥ 92%). Não há necessidade de investimento em banco de capacitores no momento.';
+        economiaMensal = 0;
+        investimentoEstimado = 0;
+        paybackMeses = 0;
+      }
       
       setResult({
         totalKvar,
@@ -349,29 +422,46 @@ export default function DimensionarPage() {
         investimentoEstimado,
         paybackMeses,
         fpAtual: mediaFP * 100,
-        fpProjetado: targetFP * 100,
+        fpProjetado: precisaCapacitor ? targetFP * 100 : mediaFP * 100,
         multaAtual: mediaMulta,
         consumoTotalMedio: mediaConsumo,
         potenciaAtivaMediaKw: mediaPotenciaAtiva,
         piorMes,
         recomendacaoEstagios,
-        quantidadeFaturas: totalFaturas
+        quantidadeFaturas: totalFaturas,
+        precisaCapacitor
       });
       
-      Swal.fire({
-        title: '✅ Dimensionamento Concluído!',
-        html: `<div class="text-left">
+      let mensagem = '';
+      if (precisaCapacitor) {
+        mensagem = `<div class="text-left">
           <p><strong>📊 Análise de ${totalFaturas} faturas</strong> (mín:3 | máx:12)</p>
           <p>📅 Período: ${faturasProcessadas[totalFaturas-1]?.mes_referencia} a ${faturasProcessadas[0]?.mes_referencia}</p>
           <p>⚡ FP médio geral: ${(mediaFP * 100).toFixed(1)}%</p>
-          <p>⚠️ Pior mês: ${piorMes?.mes_referencia} (${(piorMes?.fp! * 100).toFixed(1)}%)</p>
+          <p class="text-red-600">⚠️ FP abaixo de 92% - Multa por reativo excedente detectada</p>
           <hr class="my-3">
           <p><strong>🎯 Banco de capacitores: ${totalKvar} kVAr</strong></p>
           <p><strong>📦 Estágios: ${stages.length}</strong></p>
           <p><strong>💰 Economia mensal: R$ ${economiaMensal.toFixed(2)}</strong></p>
           <p><strong>⏱️ Payback: ${paybackMeses} meses (${(paybackMeses/12).toFixed(1)} anos)</strong></p>
-        </div>`,
-        icon: 'success',
+        </div>`;
+      } else {
+        mensagem = `<div class="text-left">
+          <p><strong>📊 Análise de ${totalFaturas} faturas</strong> (mín:3 | máx:12)</p>
+          <p>📅 Período: ${faturasProcessadas[totalFaturas-1]?.mes_referencia} a ${faturasProcessadas[0]?.mes_referencia}</p>
+          <p>⚡ FP médio geral: ${(mediaFP * 100).toFixed(1)}%</p>
+          <p class="text-green-600">✅ FP dentro do regulamentar (≥ 92%)</p>
+          <hr class="my-3">
+          <p><strong>✅ Você não precisa instalar banco de capacitores!</strong></p>
+          <p class="text-sm mt-2">Sua instalação já atende aos requisitos da ANEEL.</p>
+          <p class="text-sm">Economia potencial: R$ 0,00 (não há multa a eliminar)</p>
+        </div>`;
+      }
+      
+      Swal.fire({
+        title: precisaCapacitor ? '✅ Dimensionamento Concluído!' : '✅ Análise Concluída!',
+        html: mensagem,
+        icon: precisaCapacitor ? 'success' : 'info',
         confirmButtonColor: '#0a2b3c'
       });
       
@@ -503,7 +593,7 @@ export default function DimensionarPage() {
                   <button 
                     onClick={() => { 
                       carregarFaturaExemploReal();
-                      Swal.fire('Exemplo carregado!', 'Fatura de 04/2026 adicionada', 'success');
+                      Swal.fire('Exemplo carregado!', 'Fatura de 05/2025 adicionada', 'success');
                     }} 
                     className="mt-2 text-primary text-sm hover:underline"
                   >
@@ -516,9 +606,10 @@ export default function DimensionarPage() {
                   const reativoTotal = fat.reativo_ponta_kvarh + fat.reativo_fora_ponta_kvarh;
                   const fp = calcularFP(consumoTotal, reativoTotal);
                   const multa = calcularMultaReativa(fat.reativo_ponta_kvarh, fat.reativo_fora_ponta_kvarh);
+                  const isInvertido = reativoTotal > consumoTotal && consumoTotal > 0;
                   
                   return (
-                    <div key={fat.id} className="p-3 bg-slate-50 rounded-lg">
+                    <div key={fat.id} className={`p-3 rounded-lg ${isInvertido ? 'bg-red-50 border border-red-200' : 'bg-slate-50'}`}>
                       <div className="flex justify-between items-center">
                         <span className="font-bold text-primary">{fat.mes_referencia}</span>
                         <div className="flex gap-1">
@@ -538,8 +629,10 @@ export default function DimensionarPage() {
                         <div><span className="text-slate-500">Reativo F/Ponta:</span> {fat.reativo_fora_ponta_kvarh.toLocaleString()} kVArh</div>
                         <div><span className="text-slate-500">Total:</span> R$ {fat.total_pagar.toLocaleString()}</div>
                         <div className="col-span-2 mt-1 pt-1 border-t border-slate-200">
-                          <span className={`text-xs font-bold ${fp >= 0.92 ? 'text-green-600' : 'text-red-600'}`}>
-                            FP: {(fp * 100).toFixed(1)}% | Multa: R$ {multa.toFixed(2)}
+                          <span className={`text-xs font-bold ${fp >= 0.92 ? 'text-green-600' : fp > 0.5 ? 'text-amber-600' : 'text-red-600'} flex items-center justify-between`}>
+                            <span>FP: {(fp * 100).toFixed(1)}%</span>
+                            {isInvertido && <span className="flex items-center gap-1 text-red-500"><AlertCircle size={12} /> Dados invertidos?</span>}
+                            {fp < 0.92 && fp > 0.5 && <span>Multa: R$ {multa.toFixed(2)}</span>}
                           </span>
                         </div>
                       </div>
@@ -600,75 +693,107 @@ export default function DimensionarPage() {
                 </div>
                 
                 <div className="p-6 space-y-6">
-                  <div className="text-center border-b pb-4">
-                    <p className="text-sm text-slate-500">Potência Total Recomendada</p>
-                    <p className="text-5xl font-bold text-primary">{result.totalKvar} <span className="text-lg">kVAr</span></p>
-                    <p className="text-xs text-slate-400 mt-1">Base: {result.quantidadeFaturas} faturas analisadas</p>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-red-50 rounded-xl p-3 text-center">
-                      <TrendingUp size={20} className="mx-auto text-red-600 mb-1" />
-                      <p className="text-xs text-slate-500">FP Médio (geral)</p>
-                      <p className="text-2xl font-bold text-red-600">{result.fpAtual.toFixed(1)}%</p>
-                    </div>
-                    <div className="bg-emerald-50 rounded-xl p-3 text-center">
-                      <CheckCircle2 size={20} className="mx-auto text-emerald-600 mb-1" />
-                      <p className="text-xs text-slate-500">FP Projetado</p>
-                      <p className="text-2xl font-bold text-emerald-600">{result.fpProjetado.toFixed(0)}%</p>
-                    </div>
-                  </div>
-                  
-                  {result.piorMes && (
-                    <div className="bg-amber-50 rounded-xl p-3">
-                      <p className="text-xs font-bold text-amber-700 mb-1 flex items-center gap-1">
-                        <AlertTriangle size={12} /> Pior Mês do Período (apenas informativo)
-                      </p>
-                      <p className="text-sm font-medium">{result.piorMes.mes_referencia}</p>
-                      <p className="text-xs text-amber-600">
-                        FP: {(result.piorMes.fp! * 100).toFixed(1)}% | 
-                        Multa: R$ {(result.piorMes.multa_reativa || calcularMultaReativa(result.piorMes.reativo_ponta_kvarh, result.piorMes.reativo_fora_ponta_kvarh)).toFixed(2)}
-                      </p>
-                    </div>
-                  )}
-                  
-                  <div>
-                    <h3 className="font-bold text-primary mb-2 flex items-center gap-1">
-                      <Layers size={16} /> Distribuição dos Estágios
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
-                      {result.stages.map((s, i) => (
-                        <div key={i} className="bg-slate-100 rounded-lg px-3 py-2">
-                          <span className="font-bold text-primary">{s} kVAr</span>
+                  {result.precisaCapacitor ? (
+                    <>
+                      <div className="text-center border-b pb-4">
+                        <p className="text-sm text-slate-500">Potência Total Recomendada</p>
+                        <p className="text-5xl font-bold text-primary">{result.totalKvar} <span className="text-lg">kVAr</span></p>
+                        <p className="text-xs text-slate-400 mt-1">Base: {result.quantidadeFaturas} faturas analisadas</p>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-red-50 rounded-xl p-3 text-center">
+                          <TrendingUp size={20} className="mx-auto text-red-600 mb-1" />
+                          <p className="text-xs text-slate-500">FP Médio (geral)</p>
+                          <p className="text-2xl font-bold text-red-600">{result.fpAtual.toFixed(1)}%</p>
                         </div>
-                      ))}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-2">{result.recomendacaoEstagios}</p>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-red-50 rounded-xl p-4 text-center">
-                      <DollarSign size={20} className="mx-auto text-red-600 mb-1" />
-                      <p className="text-xs text-slate-500">Multa Média Mensal</p>
-                      <p className="text-xl font-bold text-red-600">R$ {result.multaAtual.toFixed(2)}</p>
-                      <p className="text-[10px] text-slate-400">por reativo excedente</p>
-                    </div>
-                    <div className="bg-green-50 rounded-xl p-4 text-center">
-                      <DollarSign size={20} className="mx-auto text-green-600 mb-1" />
-                      <p className="text-xs text-slate-500">Economia Mensal Estimada</p>
-                      <p className="text-xl font-bold text-green-700">R$ {result.economiaMensal.toFixed(2)}</p>
-                      <p className="text-[10px] text-slate-400">após correção do FP</p>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-blue-50 rounded-xl p-4 text-center">
-                    <p className="text-sm text-slate-500">⏱️ Payback Estimado</p>
-                    <p className="text-3xl font-bold text-primary">{result.paybackMeses} meses</p>
-                    <p className="text-xs text-slate-400">(~{(result.paybackMeses / 12).toFixed(1)} anos)</p>
-                    <p className="text-xs text-slate-500 mt-2">
-                      Investimento estimado: R$ {result.investimentoEstimado.toLocaleString()}
-                    </p>
-                  </div>
+                        <div className="bg-emerald-50 rounded-xl p-3 text-center">
+                          <CheckCircle2 size={20} className="mx-auto text-emerald-600 mb-1" />
+                          <p className="text-xs text-slate-500">FP Projetado</p>
+                          <p className="text-2xl font-bold text-emerald-600">{result.fpProjetado.toFixed(0)}%</p>
+                        </div>
+                      </div>
+                      
+                      {result.piorMes && (
+                        <div className="bg-amber-50 rounded-xl p-3">
+                          <p className="text-xs font-bold text-amber-700 mb-1 flex items-center gap-1">
+                            <AlertTriangle size={12} /> Pior Mês do Período (apenas informativo)
+                          </p>
+                          <p className="text-sm font-medium">{result.piorMes.mes_referencia}</p>
+                          <p className="text-xs text-amber-600">
+                            FP: {(result.piorMes.fp! * 100).toFixed(1)}% | 
+                            Multa: R$ {(result.piorMes.multa_reativa || calcularMultaReativa(result.piorMes.reativo_ponta_kvarh, result.piorMes.reativo_fora_ponta_kvarh)).toFixed(2)}
+                          </p>
+                        </div>
+                      )}
+                      
+                      <div>
+                        <h3 className="font-bold text-primary mb-2 flex items-center gap-1">
+                          <Layers size={16} /> Distribuição dos Estágios
+                        </h3>
+                        <div className="flex flex-wrap gap-2">
+                          {result.stages.map((s, i) => (
+                            <div key={i} className="bg-slate-100 rounded-lg px-3 py-2">
+                              <span className="font-bold text-primary">{s} kVAr</span>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">{result.recomendacaoEstagios}</p>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-red-50 rounded-xl p-4 text-center">
+                          <DollarSign size={20} className="mx-auto text-red-600 mb-1" />
+                          <p className="text-xs text-slate-500">Multa Média Mensal</p>
+                          <p className="text-xl font-bold text-red-600">R$ {result.multaAtual.toFixed(2)}</p>
+                          <p className="text-[10px] text-slate-400">por reativo excedente</p>
+                        </div>
+                        <div className="bg-green-50 rounded-xl p-4 text-center">
+                          <DollarSign size={20} className="mx-auto text-green-600 mb-1" />
+                          <p className="text-xs text-slate-500">Economia Mensal Estimada</p>
+                          <p className="text-xl font-bold text-green-700">R$ {result.economiaMensal.toFixed(2)}</p>
+                          <p className="text-[10px] text-slate-400">após correção do FP</p>
+                        </div>
+                      </div>
+                      
+                      <div className="bg-blue-50 rounded-xl p-4 text-center">
+                        <p className="text-sm text-slate-500">⏱️ Payback Estimado</p>
+                        <p className="text-3xl font-bold text-primary">{result.paybackMeses} meses</p>
+                        <p className="text-xs text-slate-400">(~{(result.paybackMeses / 12).toFixed(1)} anos)</p>
+                        <p className="text-xs text-slate-500 mt-2">
+                          Investimento estimado: R$ {result.investimentoEstimado.toLocaleString()}
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-center border-b pb-4">
+                        <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-3">
+                          <CheckCircle2 size={32} className="text-green-600" />
+                        </div>
+                        <p className="text-xl font-bold text-green-600">Fator de Potência Regularizado</p>
+                        <p className="text-sm text-slate-500 mt-1">Sua instalação já atende aos requisitos da ANEEL</p>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-emerald-50 rounded-xl p-3 text-center">
+                          <TrendingUp size={20} className="mx-auto text-emerald-600 mb-1" />
+                          <p className="text-xs text-slate-500">FP Médio Atual</p>
+                          <p className="text-2xl font-bold text-emerald-600">{result.fpAtual.toFixed(1)}%</p>
+                        </div>
+                        <div className="bg-emerald-50 rounded-xl p-3 text-center">
+                          <CheckCircle2 size={20} className="mx-auto text-emerald-600 mb-1" />
+                          <p className="text-xs text-slate-500">Situação</p>
+                          <p className="text-md font-bold text-emerald-600">Dentro do regulamentar</p>
+                        </div>
+                      </div>
+                      
+                      <div className="bg-green-50 rounded-xl p-4 text-center">
+                        <p className="text-sm text-slate-600">✅ Você não precisa instalar banco de capacitores no momento</p>
+                        <p className="text-xs text-slate-500 mt-2">Continue monitorando suas faturas para manter o FP acima de 92%</p>
+                      </div>
+                    </>
+                  )}
                   
                   <div className="bg-slate-50 rounded-xl p-4 mt-2">
                     <h4 className="font-bold text-primary text-sm mb-2">📋 Especificações Técnicas</h4>
@@ -728,11 +853,18 @@ export default function DimensionarPage() {
                   <label className="text-sm font-medium">Mês/Ano <span className="text-red-500">*</span></label>
                   <input 
                     type="text" 
-                    placeholder="Ex: 04/2026" 
+                    placeholder="Ex: 05/2025" 
                     value={currentFatura.mes_referencia || ''} 
                     onChange={(e) => setCurrentFatura({...currentFatura, mes_referencia: e.target.value})} 
                     className="w-full rounded-lg border p-2" 
                   />
+                </div>
+                
+                <div className="bg-blue-50 p-3 rounded-lg text-xs text-blue-800">
+                  <p className="font-bold mb-1">📌 Como preencher corretamente:</p>
+                  <p>• <strong>Consumo (kWh):</strong> valores altos (ex: 8.000 a 80.000)</p>
+                  <p>• <strong>Reativo (kVArh):</strong> valores baixos (ex: 500 a 5.000)</p>
+                  <p>• O Fator de Potência ideal deve ficar entre 80% e 99%</p>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-2">
@@ -740,7 +872,7 @@ export default function DimensionarPage() {
                     <label className="text-xs font-medium">Consumo Ponta (kWh)</label>
                     <input 
                       type="number" 
-                      placeholder="Ex: 10095" 
+                      placeholder="Ex: 8132" 
                       value={currentFatura.consumo_ponta_kwh || ''} 
                       onChange={(e) => setCurrentFatura({...currentFatura, consumo_ponta_kwh: parseFloat(e.target.value) || 0})} 
                       className="w-full rounded-lg border p-2" 
@@ -750,7 +882,7 @@ export default function DimensionarPage() {
                     <label className="text-xs font-medium">Consumo Fora Ponta (kWh)</label>
                     <input 
                       type="number" 
-                      placeholder="Ex: 76282" 
+                      placeholder="Ex: 59050" 
                       value={currentFatura.consumo_fora_ponta_kwh || ''} 
                       onChange={(e) => setCurrentFatura({...currentFatura, consumo_fora_ponta_kwh: parseFloat(e.target.value) || 0})} 
                       className="w-full rounded-lg border p-2" 
@@ -763,7 +895,7 @@ export default function DimensionarPage() {
                     <label className="text-xs font-medium">Demanda Ponta (kW)</label>
                     <input 
                       type="number" 
-                      placeholder="Ex: 500" 
+                      placeholder="Ex: 430" 
                       value={currentFatura.demanda_ponta_kw || ''} 
                       onChange={(e) => setCurrentFatura({...currentFatura, demanda_ponta_kw: parseFloat(e.target.value) || 0})} 
                       className="w-full rounded-lg border p-2" 
@@ -786,7 +918,7 @@ export default function DimensionarPage() {
                     <label className="text-xs font-medium">Reativo Ponta (kVArh)</label>
                     <input 
                       type="number" 
-                      placeholder="Ex: 775" 
+                      placeholder="Ex: 824" 
                       value={currentFatura.reativo_ponta_kvarh || ''} 
                       onChange={(e) => setCurrentFatura({...currentFatura, reativo_ponta_kvarh: parseFloat(e.target.value) || 0})} 
                       className="w-full rounded-lg border p-2" 
@@ -796,7 +928,7 @@ export default function DimensionarPage() {
                     <label className="text-xs font-medium">Reativo Fora Ponta (kVArh)</label>
                     <input 
                       type="number" 
-                      placeholder="Ex: 4087" 
+                      placeholder="Ex: 4511" 
                       value={currentFatura.reativo_fora_ponta_kvarh || ''} 
                       onChange={(e) => setCurrentFatura({...currentFatura, reativo_fora_ponta_kvarh: parseFloat(e.target.value) || 0})} 
                       className="w-full rounded-lg border p-2" 
@@ -809,7 +941,7 @@ export default function DimensionarPage() {
                   <input 
                     type="number" 
                     step="0.01" 
-                    placeholder="Ex: 91796.94" 
+                    placeholder="Ex: 55970.04" 
                     value={currentFatura.total_pagar || ''} 
                     onChange={(e) => setCurrentFatura({...currentFatura, total_pagar: parseFloat(e.target.value) || 0})} 
                     className="w-full rounded-lg border p-2" 
@@ -822,7 +954,7 @@ export default function DimensionarPage() {
                   onClick={carregarFaturaExemplo} 
                   className="flex-1 py-2 border rounded-lg text-primary border-primary/30 hover:bg-primary/5 text-sm"
                 >
-                  Carregar Exemplo
+                  Carregar Exemplo (05/2025)
                 </button>
                 <button 
                   onClick={salvarFatura} 
