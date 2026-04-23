@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { ClipboardCheck, Zap, Save, Calculator, AlertCircle, ArrowLeft } from 'lucide-react';
+import { ClipboardCheck, Zap, Save, Calculator, AlertCircle, ArrowLeft, Info } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { calculateCorrenteTeorica, calculateCapacitanciaTeoricaDelta, getStatusValidacao, cn, parseNumber } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
@@ -100,6 +100,44 @@ export default function RealizarTestePage() {
     }
   }, [selection.banco_id, fetchCapacitores]);
 
+  /**
+   * Calcula a corrente teórica corrigida pela tensão nominal do capacitor
+   * 
+   * Fórmula: I = (kVAr_nominal × 1000 × V_medida) / (√3 × V_nominal²)
+   * 
+   * Explicação:
+   * - Um capacitor de 10 kVAr / 440V quando ligado em 220V fornece apenas 2,5 kVAr
+   * - Potência real = kVAr_nominal × (V_medida² / V_nominal²)
+   * - Corrente teórica = (Potência_real × 1000) / (√3 × V_medida)
+   * - Simplificando: I = (kVAr_nominal × 1000 × V_medida) / (√3 × V_nominal²)
+   */
+  function calcularCorrenteTeoricaCorrigida(
+    potenciaKvarNominal: number,
+    tensaoNominalCapacitor: number,
+    tensaoMedida: number
+  ): number {
+    if (!tensaoNominalCapacitor || tensaoNominalCapacitor === 0) return 0;
+    if (!tensaoMedida || tensaoMedida === 0) return 0;
+    
+    // Calcula a potência real que o capacitor fornece na tensão medida
+    const potenciaReal = potenciaKvarNominal * Math.pow(tensaoMedida / tensaoNominalCapacitor, 2);
+    
+    // Calcula a corrente teórica baseada na potência real
+    return (potenciaReal * 1000) / (Math.sqrt(3) * tensaoMedida);
+  }
+
+  /**
+   * Calcula a potência real que o capacitor está fornecendo
+   */
+  function calcularPotenciaReal(
+    potenciaKvarNominal: number,
+    tensaoNominalCapacitor: number,
+    tensaoMedida: number
+  ): number {
+    if (!tensaoNominalCapacitor || tensaoNominalCapacitor === 0) return 0;
+    return potenciaKvarNominal * Math.pow(tensaoMedida / tensaoNominalCapacitor, 2);
+  }
+
   function handleCalcular() {
     if (!selection.capacitor_id) {
       Swal.fire('Atenção', 'Selecione um capacitor primeiro', 'warning');
@@ -125,8 +163,23 @@ export default function RealizarTestePage() {
         return;
       }
 
-      const correnteTeorica = calculateCorrenteTeorica(cap.potencia_kvar, vMedida);
-      const correnteNominal = calculateCorrenteTeorica(cap.potencia_kvar, cap.tensao_nominal_v);
+      // ✅ CORREÇÃO: Calcula a corrente teórica baseada na tensão nominal do capacitor
+      const correnteTeorica = calcularCorrenteTeoricaCorrigida(
+        cap.potencia_kvar,
+        cap.tensao_nominal_v,
+        vMedida
+      );
+      
+      // Corrente nominal (para referência - seria a corrente se estivesse na tensão nominal)
+      const correnteNominal = (cap.potencia_kvar * 1000) / (Math.sqrt(3) * cap.tensao_nominal_v);
+      
+      // Potência real que o capacitor está fornecendo
+      const potenciaReal = calcularPotenciaReal(
+        cap.potencia_kvar,
+        cap.tensao_nominal_v,
+        vMedida
+      );
+      
       const desvio = ((iMedida - correnteTeorica) / correnteTeorica) * 100;
       const status = getStatusValidacao(desvio, config);
       const desvioExibicao = Math.round(desvio * 100) / 100;
@@ -135,7 +188,9 @@ export default function RealizarTestePage() {
         tipo: 'corrente',
         correnteTeorica,
         correnteNominal,
+        potenciaReal,
         tensaoMedida: vMedida,
+        tensaoNominal: cap.tensao_nominal_v,
         correnteMedida: iMedida,
         desvio: desvioExibicao,
         desvioOriginal: desvio,
@@ -196,6 +251,7 @@ export default function RealizarTestePage() {
         payload.tensao_medida_v = vMedida || null;
         payload.corrente_medida_a = iMedida || null;
         payload.corrente_teorica_a = resultado.correnteTeorica;
+        payload.potencia_real_kvar = resultado.potenciaReal;
       } else {
         payload.capacitancia_medida_uf = cMedida || null;
         payload.capacitancia_teorica_uf = resultado.capacitanciaTeorica;
@@ -244,6 +300,18 @@ export default function RealizarTestePage() {
   }
 
   const capacitorSelecionado = capacitores.find(c => c.id === selection.capacitor_id);
+  
+  // Calcula informações adicionais para exibição
+  const infoAdicional = capacitorSelecionado && selection.tipo_teste === 'corrente' && medicao.tensao_medida_v
+    ? {
+        potenciaReal: calcularPotenciaReal(
+          capacitorSelecionado.potencia_kvar,
+          capacitorSelecionado.tensao_nominal_v,
+          parseNumber(medicao.tensao_medida_v)
+        ),
+        fatorCorrecao: Math.pow(parseNumber(medicao.tensao_medida_v) / capacitorSelecionado.tensao_nominal_v, 2)
+      }
+    : null;
 
   return (
     <div className="mx-auto max-w-4xl space-y-8">
@@ -364,6 +432,11 @@ export default function RealizarTestePage() {
                       value={medicao.tensao_medida_v}
                       onChange={(e) => setMedicao({...medicao, tensao_medida_v: e.target.value})}
                     />
+                    {capacitorSelecionado && medicao.tensao_medida_v && (
+                      <p className="mt-1 text-xs text-blue-600">
+                        💡 Fator de correção: {(Math.pow(parseNumber(medicao.tensao_medida_v) / capacitorSelecionado.tensao_nominal_v, 2) * 100).toFixed(1)}% da potência nominal
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-slate-700">Corrente Medida (A)</label>
@@ -389,7 +462,7 @@ export default function RealizarTestePage() {
                     onChange={(e) => setMedicao({...medicao, capacitancia_medida_uf: e.target.value})}
                   />
                   <p className="mt-1 text-xs text-slate-400">
-                    ⚠️ Para ligação delta, o valor teórico é Cfase × 1.5
+                    ⚠️ Para ligação delta, o valor teórico é Cfase × 1,5
                   </p>
                 </div>
               )}
@@ -451,26 +524,38 @@ export default function RealizarTestePage() {
                     {resultado.tipo === 'corrente' ? (
                       <>
                         <div className="flex justify-between border-t border-slate-200 pt-2">
-                          <span className="text-slate-500">Corrente Nominal ({resultado.capacitor?.tensao_nominal_v}V):</span>
-                          <span className="font-medium text-primary">{resultado.correnteNominal?.toFixed(2)} A</span>
+                          <span className="text-slate-500">Tensão Nominal:</span>
+                          <span className="font-medium text-primary">{resultado.tensaoNominal} V</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-500">Corrente Teórica ({resultado.tensaoMedida}V):</span>
+                          <span className="text-slate-500">Tensão Medida:</span>
+                          <span className="font-medium text-primary">{resultado.tensaoMedida.toFixed(1)} V</span>
+                        </div>
+                        <div className="flex justify-between border-t border-slate-200 pt-2">
+                          <span className="text-slate-500">Potência Real Fornecida:</span>
+                          <span className="font-medium text-primary">{resultado.potenciaReal?.toFixed(2)} kVAr</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Corrente Teórica Esperada:</span>
                           <span className="font-medium text-primary">{resultado.correnteTeorica?.toFixed(2)} A</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-500">Corrente Medida:</span>
                           <span className="font-medium text-primary">{resultado.correnteMedida?.toFixed(2)} A</span>
                         </div>
+                        <div className="flex justify-between text-xs text-slate-400 border-t border-slate-200 pt-2">
+                          <span>Corrente Nominal ({resultado.tensaoNominal}V):</span>
+                          <span>{resultado.correnteNominal?.toFixed(2)} A</span>
+                        </div>
                       </>
                     ) : (
                       <>
                         <div className="flex justify-between border-t border-slate-200 pt-2">
-                          <span className="text-slate-500">Capacitância Nominal (por fase):</span>
-                          <span className="font-medium text-primary">{resultado.capacitanciaNominal?.toFixed(2)} µF</span>
+                          <span className="text-slate-500">Capacitância Nominal:</span>
+                          <span className="font-medium text-primary">{resultado.capacitanciaNominal?.toFixed(2)} µF/fase</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-500">Capacitância Teórica (entre fases):</span>
+                          <span className="text-slate-500">Capacitância Teórica (Δ):</span>
                           <span className="font-medium text-primary">{resultado.capacitanciaTeorica?.toFixed(2)} µF</span>
                         </div>
                         <div className="flex justify-between">
@@ -514,6 +599,14 @@ export default function RealizarTestePage() {
               <div className="flex flex-1 flex-col items-center justify-center text-center text-slate-400">
                 <Calculator size={48} className="mb-4 opacity-20" />
                 <p>Preencha os dados e clique em &quot;Calcular&quot; para ver o resultado.</p>
+                {infoAdicional && infoAdicional.potenciaReal < capacitorSelecionado?.potencia_kvar && (
+                  <div className="mt-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+                    <Info size={14} className="inline mr-1" />
+                    A tensão medida ({medicao.tensao_medida_v}V) é diferente da tensão nominal do capacitor ({capacitorSelecionado?.tensao_nominal_v}V).
+                    <br />
+                    O capacitor fornecerá apenas <strong>{infoAdicional.potenciaReal.toFixed(2)} kVAr</strong> ({((infoAdicional.fatorCorrecao || 0) * 100).toFixed(0)}% da potência nominal).
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -522,4 +615,3 @@ export default function RealizarTestePage() {
     </div>
   );
 }
-
