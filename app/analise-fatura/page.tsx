@@ -1,5 +1,5 @@
 'use client';
-
+import { analisarGrupoTarifario } from '@/lib/energia/analiseTarifaria';
 import React, { useState, useMemo } from 'react';
 import Papa from 'papaparse';
 import jsPDF from 'jspdf';
@@ -7,7 +7,7 @@ import { toPng } from 'html-to-image';
 import { 
   Upload, FileText, AlertTriangle, TrendingUp, TrendingDown, Zap, 
   DollarSign, Info, CheckCircle2, ArrowRight, Download, Activity, 
-  Cpu, ArrowUpRight, FileDown, Settings, Calendar, Clock
+  Cpu, ArrowUpRight, FileDown, Settings, Calendar, Clock, AlertCircle
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { 
@@ -31,6 +31,7 @@ interface MassMemoryData {
   kWh?: number;
   kVArh?: number;
   tipoReativo: 'indutivo' | 'capacitivo' | 'neutro';
+  isHorarioCritico?: boolean;
 }
 
 interface AnalysisStats {
@@ -42,6 +43,7 @@ interface AnalysisStats {
   registrosCriticos: number;
   percentualConformidade: number;
   periodoAnalise: { inicio: string; fim: string };
+  horariosPicoReativo?: { hora: string; mediaKvar: number; ocorrencias: number }[];
 }
 
 interface DimensionamentoStats {
@@ -60,6 +62,7 @@ interface DimensionamentoStats {
   coeficienteVariacao: number;
   orcamentoEstimado: { min: number; max: number };
   alertaTransformador: boolean;
+  potenciaInstalada: number;
 }
 
 // ============================================================================
@@ -76,10 +79,8 @@ const parseBrazilianNumber = (val: any): number => {
   const lastDot = str.lastIndexOf('.');
   
   if (lastComma > lastDot) {
-    // Formato brasileiro: 1.234,56 ou 1234,56
     str = str.replace(/\./g, '').replace(',', '.');
   } else if (lastDot > lastComma) {
-    // Formato americano: 1,234.56 ou 1234.56
     str = str.replace(/,/g, '');
   }
   
@@ -94,7 +95,7 @@ const calcularFP = (kw: number, kvar: number): number => {
 
 const calcularCorrecaoNecessaria = (kw: number, fpAtual: number, fpDesejado: number): number => {
   if (kw <= 0) return 0;
-  const fpCalculo = Math.max(0.01, Math.abs(fpAtual)); // Evita Infinity no tan()
+  const fpCalculo = Math.max(0.01, Math.abs(fpAtual));
   const phiAtual = Math.acos(Math.min(1, fpCalculo));
   const phiDesejado = Math.acos(Math.min(1, Math.max(0, fpDesejado)));
   const kvarNecessario = kw * (Math.tan(phiAtual) - Math.tan(phiDesejado));
@@ -111,8 +112,6 @@ const calcularMultaANEEL = (
     if (reg.fp >= fpMinimo || reg.tipoReativo !== 'indutivo') return total;
     
     let fatorAjuste = 0;
-    // Regra ANEEL: Se a energia ativa for nula (ou muito próxima de zero) e houver reativo, 
-    // o fator (0.92/FP - 1) assume o valor 1.
     if (reg.kw <= 0.01) {
       fatorAjuste = 1;
     } else {
@@ -169,10 +168,39 @@ const estimarOrcamento = (kvar: number, tipo: 'fixo' | 'automatico' | 'hibrido')
   }
 };
 
+// Função para analisar horários críticos (reativo indutivo)
+const analisarHorariosCriticos = (data: MassMemoryData[]): { hora: string; mediaKvar: number; ocorrencias: number }[] => {
+  const horariosMap = new Map<string, { somaKvar: number; count: number }>();
+  
+  data.forEach(registro => {
+    if (registro.tipoReativo === 'indutivo' && registro.kvar > 5) { // Considera apenas reativo significativo > 5 kVAr
+      const horaBase = registro.hora.substring(0, 5); // HH:MM
+      const existing = horariosMap.get(horaBase);
+      if (existing) {
+        existing.somaKvar += registro.kvar;
+        existing.count++;
+      } else {
+        horariosMap.set(horaBase, { somaKvar: registro.kvar, count: 1 });
+      }
+    }
+  });
+  
+  const resultados = Array.from(horariosMap.entries())
+    .map(([hora, { somaKvar, count }]) => ({
+      hora,
+      mediaKvar: somaKvar / count,
+      ocorrencias: count
+    }))
+    .sort((a, b) => b.mediaKvar - a.mediaKvar)
+    .slice(0, 10); // Top 10 horários críticos
+  
+  return resultados;
+};
+
 const analisarDimensionamento = (
   data: MassMemoryData[],
   targetFP: number,
-  transformadorKVA: number
+  potenciaInstalada: number
 ): DimensionamentoStats => {
   const periodosCriticos = data.filter(d => 
     d.fp < targetFP && d.tipoReativo === 'indutivo'
@@ -187,8 +215,7 @@ const analisarDimensionamento = (
     ? kvarCriticos.reduce((a, b) => a + b, 0) / kvarCriticos.length 
     : 0;
   
-  // Usar o percentil 85 para evitar superdimensionamento por picos muito isolados
-  const percentil85KvarCritico = getPercentile(kvarCriticos, 85);
+  const percentil90KvarCritico = getPercentile(kvarCriticos, 90);
   const maxKvarCritico = Math.max(...kvarCriticos, 0);
   
   const variancia = periodosCriticos.length > 0
@@ -215,16 +242,16 @@ const analisarDimensionamento = (
   }
   
   let bancoSugeridoFixo = Math.ceil(mediaKvarCritico / 5) * 5;
-  let bancoSugeridoAutomatico = Math.ceil(percentil85KvarCritico / 5) * 5;
+  let bancoSugeridoAutomatico = Math.ceil(percentil90KvarCritico / 5) * 5;
 
-  // Limite de segurança baseado no transformador (max 40% do trafo)
-  const limiteTrafo = transformadorKVA > 0 ? transformadorKVA * 0.4 : Infinity;
-  const alertaTransformador = bancoSugeridoAutomatico > limiteTrafo;
+  // Limite de segurança baseado na potência instalada (máx 40%)
+  const limiteInstalado = potenciaInstalada > 0 ? potenciaInstalada * 0.4 : Infinity;
+  const alertaTransformador = bancoSugeridoAutomatico > limiteInstalado;
 
   if (alertaTransformador) {
-    bancoSugeridoAutomatico = Math.floor(limiteTrafo / 5) * 5;
+    bancoSugeridoAutomatico = Math.floor(limiteInstalado / 5) * 5;
     bancoSugeridoFixo = Math.min(bancoSugeridoFixo, bancoSugeridoAutomatico);
-    justificativa += ` ATENÇÃO: O dimensionamento original excedia 40% da capacidade do transformador (${transformadorKVA} kVA). O valor foi limitado por segurança.`;
+    justificativa += ` ATENÇÃO: O dimensionamento original excedia 40% da potência instalada (${potenciaInstalada} kVA). O valor foi limitado por segurança.`;
   }
 
   const orcamentoEstimado = estimarOrcamento(
@@ -239,7 +266,7 @@ const analisarDimensionamento = (
     periodosCriticos: periodosCriticos.length,
     percentualCritico: (periodosCriticos.length / data.length) * 100,
     mediaKvarCritico,
-    percentil90KvarCritico: percentil85KvarCritico, // Mantendo o nome da prop para compatibilidade
+    percentil90KvarCritico,
     maxKvarCritico,
     bancoSugeridoFixo,
     bancoSugeridoAutomatico,
@@ -247,7 +274,8 @@ const analisarDimensionamento = (
     justificativa,
     coeficienteVariacao,
     orcamentoEstimado,
-    alertaTransformador
+    alertaTransformador,
+    potenciaInstalada
   };
 };
 
@@ -276,9 +304,10 @@ export default function AnaliseFaturaPage() {
   const [loading, setLoading] = useState(false);
   const [targetFP, setTargetFP] = useState(0.92);
   const [tariff, setTariff] = useState(0.95);
-  const [transformadorKVA, setTransformadorKVA] = useState<number>(500);
+  const [potenciaInstalada, setPotenciaInstalada] = useState<number>(1575); // NOVO: padrão para 7x225kVA
   const [samplingInterval, setSamplingInterval] = useState(15);
   const [fileName, setFileName] = useState<string>('');
+  const [showHorariosCriticos, setShowHorariosCriticos] = useState(false);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -301,7 +330,6 @@ export default function AnaliseFaturaPage() {
       });
       
       if (headerIndex === -1) {
-        // Fallback 1: Procura qualquer linha que pareça um cabeçalho de CSV válido (tem Data e pelo menos 3 colunas)
         headerIndex = lines.findIndex(line => {
           const lower = line.toLowerCase();
           const parts = line.split(/[,;]/);
@@ -310,7 +338,6 @@ export default function AnaliseFaturaPage() {
       }
       
       if (headerIndex === -1) {
-        // Fallback 2: Assume que a primeira linha com ; ou , é o cabeçalho, desde que não seja a linha de metadados
         headerIndex = lines.findIndex(line => 
           (line.includes(';') || line.includes(',')) && 
           !line.toLowerCase().includes('leitora') && 
@@ -369,6 +396,9 @@ export default function AnaliseFaturaPage() {
               }
 
               const timestamp = `${fullDate}T${hora.padStart(5, '0')}`;
+              
+              // Marca horário crítico (reativo indutivo significativo)
+              const isHorarioCritico = tipoReativo === 'indutivo' && kvar > 5 && fp < targetFP;
 
               return {
                 data: fullDate,
@@ -378,7 +408,8 @@ export default function AnaliseFaturaPage() {
                 kvar,
                 fp: Math.round(fp * 100) / 100,
                 kvarNecessario,
-                tipoReativo
+                tipoReativo,
+                isHorarioCritico
               };
             });
 
@@ -471,7 +502,7 @@ export default function AnaliseFaturaPage() {
       'kVAr': d.kvar.toString().replace('.', ','),
       'Tipo Reativo': d.tipoReativo,
       'FP Medido': d.fp.toString().replace('.', ','),
-      'FP Meta': targetFP.toString().replace('.', ','),
+      'Horário Crítico': d.isHorarioCritico ? 'SIM' : 'NÃO',
       'Correcao Necessaria (kVAr)': d.kvarNecessario.toString().replace('.', ',')
     }));
     
@@ -496,6 +527,12 @@ export default function AnaliseFaturaPage() {
     
     Swal.fire('Sucesso', 'CSV exportado com separação correta!', 'success');
   };
+
+  // Análise de horários críticos
+  const horariosCriticos = useMemo(() => {
+    if (data.length === 0) return [];
+    return analisarHorariosCriticos(data);
+  }, [data]);
 
   const stats: AnalysisStats | null = useMemo(() => {
     if (data.length === 0) return null;
@@ -528,14 +565,15 @@ export default function AnaliseFaturaPage() {
       maxKvarNecessario,
       registrosCriticos,
       percentualConformidade,
-      periodoAnalise
+      periodoAnalise,
+      horariosPicoReativo: horariosCriticos
     };
-  }, [data, tariff, targetFP, samplingInterval]);
+  }, [data, tariff, targetFP, samplingInterval, horariosCriticos]);
 
   const dimensionamento: DimensionamentoStats | null = useMemo(() => {
     if (data.length === 0) return null;
-    return analisarDimensionamento(data, targetFP, transformadorKVA);
-  }, [data, targetFP, transformadorKVA]);
+    return analisarDimensionamento(data, targetFP, potenciaInstalada);
+  }, [data, targetFP, potenciaInstalada]);
 
   const chartData = useMemo(() => {
     if (data.length === 0) return [];
@@ -642,6 +680,67 @@ export default function AnaliseFaturaPage() {
       ) : (
         <div id="report-content" className="space-y-8">
           
+          {/* HORÁRIOS CRÍTICOS - NOVO COMPONENTE */}
+          {horariosCriticos.length > 0 && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-gradient-to-br from-red-50 to-orange-50 p-8 rounded-3xl border border-red-200"
+            >
+              <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+                <h3 className="text-2xl font-bold text-red-800 flex items-center gap-2">
+                  <AlertCircle size={24} />
+                  Horários de Baixo Fator de Potência (Reativo Indutivo)
+                </h3>
+                <span className="text-xs bg-red-200 text-red-700 px-3 py-1 rounded-full font-bold">
+                  Multa aplicável pela ANEEL
+                </span>
+              </div>
+              
+              <p className="text-red-700 mb-4 text-sm">
+                ⚠️ Nestes horários o fator de potência ficou abaixo de {targetFP} com consumo de reativo indutivo, gerando multa conforme Resolução ANEEL 414/2010.
+              </p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {horariosCriticos.map((horario, idx) => (
+                  <div key={idx} className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-red-500">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Clock size={16} className="text-red-500" />
+                        <span className="font-mono text-lg font-bold text-red-700">{horario.hora}</span>
+                      </div>
+                      <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
+                        {horario.ocorrencias} ocorrências
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-500">Média de Reativo:</span>
+                        <span className="font-bold text-red-600">{horario.mediaKvar.toFixed(1)} kVAr</span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-1.5">
+                        <div 
+                          className="bg-red-500 h-1.5 rounded-full" 
+                          style={{ width: `${Math.min(100, (horario.mediaKvar / 100) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-2">
+                      💡 Recomendação: Instalar banco de capacitores automático para correção neste período
+                    </p>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="mt-4 p-3 bg-red-100 rounded-lg">
+                <p className="text-xs text-red-700 flex items-center gap-2">
+                  <Info size={14} />
+                  O reativo indutivo é gerado por equipamentos como motores, ar condicionado, transformadores e reatores magnéticos.
+                </p>
+              </div>
+            </motion.div>
+          )}
+
           {/* DASHBOARD DE IMPACTO */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <motion.div 
@@ -702,7 +801,7 @@ export default function AnaliseFaturaPage() {
                 </div>
                 <span className="text-sm font-medium text-slate-500">FP Médio</span>
               </div>
-              <p className="text-3xl font-bold text-slate-900">{stats?.fpMedio.toFixed(2)}</p>
+              <p className="text-3xl font-bold text-slate-900">{stats?.fpMedio.toFixed(3)}</p>
               <div className="flex items-center gap-2 mt-1">
                 <div className="h-1.5 flex-1 bg-slate-100 rounded-full overflow-hidden">
                   <div 
@@ -817,6 +916,12 @@ export default function AnaliseFaturaPage() {
                       <span className="text-slate-500">Percentil 90:</span>
                       <span className="font-semibold">{dimensionamento.percentil90KvarCritico.toFixed(1)} kVAr</span>
                     </div>
+                    {dimensionamento.potenciaInstalada > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-400">Potência Instalada:</span>
+                        <span className="font-medium text-primary">{dimensionamento.potenciaInstalada} kVA</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -998,7 +1103,7 @@ export default function AnaliseFaturaPage() {
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-bold text-primary flex items-center gap-2">
                   <AlertTriangle size={18} className="text-red-500" />
-                  Intervalos Críticos (FP &lt; {targetFP})
+                  Intervalos Críticos (FP &lt; {targetFP} e Reativo Indutivo)
                 </h3>
                 <span className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded font-bold">
                   {stats?.registrosCriticos} ocorrências
@@ -1025,7 +1130,7 @@ export default function AnaliseFaturaPage() {
                         <tr key={idx} className="text-sm hover:bg-slate-50 transition-colors">
                           <td className="py-3 font-medium text-slate-700">{row.data} {row.hora}</td>
                           <td className="py-3 text-slate-600">{row.kw.toFixed(1)}</td>
-                          <td className="py-3 text-slate-600">{row.kvar.toFixed(1)}</td>
+                          <td className="py-3 font-bold text-red-600">{row.kvar.toFixed(1)}</td>
                           <td className="py-3 font-bold text-red-500">{row.fp.toFixed(3)}</td>
                           <td className="py-3 text-slate-600 font-medium">{row.kvarNecessario > 0 ? `+${row.kvarNecessario}` : '-'}</td>
                           <td className="py-3">
@@ -1071,7 +1176,7 @@ export default function AnaliseFaturaPage() {
                         <ArrowRight size={14} className="text-secondary" />
                       </div>
                       <p className="text-sm font-medium">
-                        Banco sugerido: <span className="text-secondary font-bold">{Math.ceil((stats?.maxKvarNecessario ?? 0) / 5) * 5} kVAr</span>
+                        Banco sugerido: <span className="text-secondary font-bold">{dimensionamento?.bancoSugeridoAutomatico || Math.ceil((stats?.maxKvarNecessario ?? 0) / 5) * 5} kVAr</span>
                       </p>
                     </div>
                     <div className="flex items-start gap-3">
@@ -1113,29 +1218,32 @@ export default function AnaliseFaturaPage() {
                 </div>
               </div>
 
+              {/* NOVO: PAINEL DE POTÊNCIA INSTALADA */}
               <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
                 <h4 className="font-bold text-primary mb-4 flex items-center gap-2">
                   <Settings size={16} />
-                  Parâmetros do Sistema
+                  Configuração da Instalação
                 </h4>
                 <div className="space-y-4">
                   <div>
                     <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
-                      Potência do Transformador (kVA)
+                      Potência Instalada Total (kVA)
                     </label>
                     <input 
                       type="number" 
                       step="10" 
                       min="0" 
-                      value={transformadorKVA} 
-                      onChange={(e) => setTransformadorKVA(Math.max(0, parseFloat(e.target.value) || 0))}
+                      value={potenciaInstalada} 
+                      onChange={(e) => setPotenciaInstalada(Math.max(0, parseFloat(e.target.value) || 0))}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/20"
                     />
-                    <p className="text-[10px] text-slate-400 mt-1">Usado para limites de segurança</p>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Exemplo: 7 trafos × 225kVA = 1575 kVA (sua instalação)
+                    </p>
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
-                      Fator de Potência Mínimo (Meta)
+                      Fator de Potência Mínimo (Meta ANEEL)
                     </label>
                     <input 
                       type="number" 
@@ -1146,7 +1254,7 @@ export default function AnaliseFaturaPage() {
                       onChange={(e) => setTargetFP(Math.min(1, Math.max(0.8, parseFloat(e.target.value) || 0.92)))}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/20"
                     />
-                    <p className="text-[10px] text-slate-400 mt-1">Padrão ANEEL: 0.92 indutivo</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Padrão ANEEL: 0.92 (Grupo B) | Grupo A: todo reativo é cobrado</p>
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
@@ -1170,6 +1278,14 @@ export default function AnaliseFaturaPage() {
                         {samplingInterval} minutos
                       </span>
                     </div>
+                    {potenciaInstalada > 0 && (
+                      <div className="flex items-center justify-between text-sm mt-2">
+                        <span className="text-slate-500">Limite seguro (40%):</span>
+                        <span className="font-bold text-primary flex items-center gap-1">
+                          {Math.floor(potenciaInstalada * 0.4)} kVAr
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1202,4 +1318,3 @@ export default function AnaliseFaturaPage() {
     </div>
   );
 }
-
