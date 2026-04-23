@@ -295,72 +295,83 @@ export default function DimensionarPage() {
   };
 
   const calcularDimensionamento = () => {
-    if (faturas.length < 3) {
-      Swal.fire({
-        title: '⚠️ Faturas Insuficientes',
-        html: `<div class="text-left">
-          <p>O dimensionamento profissional requer <strong>no mínimo 3 faturas</strong> para análise estatística.</p>
-          <p class="mt-2">Atualmente: <strong>${faturas.length} fatura(s)</strong></p>
-          <p class="mt-2 text-sm text-slate-500">Recomendado: 6 a 12 faturas dos últimos 12 meses.</p>
-        </div>`,
-        icon: 'warning',
-        confirmButtonColor: '#0a2b3c'
-      });
-      return;
-    }
+  if (faturas.length < 3) {
+    Swal.fire({
+      title: '⚠️ Faturas Insuficientes',
+      html: `<div class="text-left">
+        <p>O dimensionamento profissional requer <strong>no mínimo 3 faturas</strong> para análise estatística.</p>
+        <p class="mt-2">Atualmente: <strong>${faturas.length} fatura(s)</strong></p>
+      </div>`,
+      icon: 'warning',
+      confirmButtonColor: '#0a2b3c'
+    });
+    return;
+  }
+  
+  if (faturas.length > 12) {
+    Swal.fire({
+      title: '⚠️ Muitas Faturas',
+      html: `<div class="text-left">
+        <p>Para dimensionamento, utilize no <strong>máximo 12 faturas</strong> (últimos 12 meses).</p>
+        <p class="mt-2">Atualmente: <strong>${faturas.length} faturas</strong></p>
+      </div>`,
+      icon: 'warning',
+      confirmButtonColor: '#0a2b3c'
+    });
+    return;
+  }
+  
+  setCalculando(true);
+  
+  try {
+    // IDENTIFICAR GRUPO TARIFÁRIO
+    const potenciaTotal = potenciaTotalTransformadores;
+    const grupoTarifario = potenciaTotal >= 75 ? 'A' : 'B';
     
-    if (faturas.length > 12) {
-      Swal.fire({
-        title: '⚠️ Muitas Faturas',
-        html: `<div class="text-left">
-          <p>Para dimensionamento, utilize no <strong>máximo 12 faturas</strong> (últimos 12 meses).</p>
-          <p class="mt-2">Atualmente: <strong>${faturas.length} faturas</strong></p>
-          <p class="mt-2 text-sm text-slate-500">Faturas mais antigas podem distorcer a análise do perfil atual.</p>
-        </div>`,
-        icon: 'warning',
-        confirmButtonColor: '#0a2b3c'
-      });
-      return;
-    }
+    const faturasProcessadas = faturas.map(f => {
+      const consumoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
+      const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
+      const fp = calcularFP(consumoTotal, reativoTotal);
+      
+      // NOVO: Cálculo do custo de reativo (sempre cobrado no Grupo A)
+      const custoReativo = (f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh) * TARIFA_REATIVO;
+      
+      const potenciaMedia = calcularPotenciaAtivaMedia(consumoTotal);
+      
+      return { ...f, fp, custoReativo, consumoTotal, reativoTotal, potenciaMedia };
+    });
     
-    setCalculando(true);
+    const totalFaturas = faturasProcessadas.length;
     
-    try {
-      const faturasProcessadas = faturas.map(f => {
-        const consumoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
-        const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
-        const fp = calcularFP(consumoTotal, reativoTotal);
-        const multa = calcularMultaReativa(f.reativo_ponta_kvarh, f.reativo_fora_ponta_kvarh);
-        const potenciaMedia = calcularPotenciaAtivaMedia(consumoTotal);
-        
-        return { ...f, fp, multa, consumoTotal, reativoTotal, potenciaMedia };
-      });
-      
-      const totalFaturas = faturasProcessadas.length;
-      
-      const somaPotenciaAtiva = faturasProcessadas.reduce((acc, f) => acc + f.potenciaMedia, 0);
-      const somaFP = faturasProcessadas.reduce((acc, f) => acc + f.fp, 0);
-      const somaConsumo = faturasProcessadas.reduce((acc, f) => acc + f.consumoTotal, 0);
-      const somaMulta = faturasProcessadas.reduce((acc, f) => acc + f.multa, 0);
-      
-      const mediaPotenciaAtiva = somaPotenciaAtiva / totalFaturas;
-      const mediaFP = somaFP / totalFaturas;
-      const mediaConsumo = somaConsumo / totalFaturas;
-      const mediaMulta = somaMulta / totalFaturas;
-      
-      const piorMes = [...faturasProcessadas].sort((a, b) => a.fp - b.fp)[0];
-      
-      // SÓ CALCULA SE O FP ESTIVER ABAIXO DE 0.92
-      const precisaCapacitor = mediaFP < 0.92;
-      
-      let totalKvar = 0;
-      let stages: number[] = [];
-      let economiaMensal = 0;
-      let investimentoEstimado = 0;
-      let paybackMeses = 0;
-      let recomendacaoEstagios = '';
+    const somaPotenciaAtiva = faturasProcessadas.reduce((acc, f) => acc + f.potenciaMedia, 0);
+    const somaFP = faturasProcessadas.reduce((acc, f) => acc + f.fp, 0);
+    const somaConsumo = faturasProcessadas.reduce((acc, f) => acc + f.consumoTotal, 0);
+    const somaCustoReativo = faturasProcessadas.reduce((acc, f) => acc + f.custoReativo, 0);
+    
+    const mediaPotenciaAtiva = somaPotenciaAtiva / totalFaturas;
+    const mediaFP = somaFP / totalFaturas;
+    const mediaConsumo = somaConsumo / totalFaturas;
+    const mediaCustoReativo = somaCustoReativo / totalFaturas;
+    
+    const piorMes = [...faturasProcessadas].sort((a, b) => a.fp - b.fp)[0];
+    
+    // LÓGICA CORRIGIDA baseada no Grupo Tarifário
+    let precisaCapacitor = false;
+    let motivo = '';
+    let totalKvar = 0;
+    let stages: number[] = [];
+    let economiaMensal = 0;
+    let investimentoEstimado = 0;
+    let paybackMeses = 0;
+    let recomendacaoEstagios = '';
+    
+    if (grupoTarifario === 'A') {
+      // GRUPO A: SEMPRE precisa de capacitor se paga reativo
+      precisaCapacitor = mediaCustoReativo > 50; // Se paga mais de R$50 de reativo
+      motivo = 'Grupo A (Alta Tensão) - Todo reativo excedente é faturado.';
       
       if (precisaCapacitor) {
+        // Cálculo do kVAr baseado na potência ativa
         const phi1 = Math.acos(Math.min(0.99, mediaFP));
         const phi2 = Math.acos(targetFP);
         
@@ -397,82 +408,106 @@ export default function DimensionarPage() {
         
         stages.sort((a, b) => a - b);
         
-        if (qtdTrafo225 === 7) {
-          recomendacaoEstagios = `Recomendado: 1 banco central de ${totalKvar} kVAr ou ${stages.length} estágios (${stages.filter(s => s === 60).length}x60kVAr + ${stages.filter(s => s === 30).length}x30kVAr + complementos)`;
-        } else {
-          recomendacaoEstagios = `Banco automático com ${stages.length} estágios: ${stages.join(' + ')} kVAr`;
-        }
+        recomendacaoEstagios = `Recomendado: 1 banco central de ${totalKvar} kVAr ou ${stages.length} estágios (${stages.filter(s => s === 60).length}x60kVAr + complementos)`;
         
-        economiaMensal = mediaMulta * 0.95;
+        economiaMensal = mediaCustoReativo * 0.95;
         investimentoEstimado = totalKvar * 89.90 + 2500;
         paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoEstimado / economiaMensal) : 0;
-      } else {
-        // FP já está bom - não precisa de capacitor
-        stages = [];
-        recomendacaoEstagios = '✅ Seu fator de potência já está dentro do regulamentar (FP ≥ 92%). Não há necessidade de investimento em banco de capacitores no momento.';
-        economiaMensal = 0;
-        investimentoEstimado = 0;
-        paybackMeses = 0;
       }
+    } else {
+      // GRUPO B: só precisa se FP < 92%
+      precisaCapacitor = mediaFP < 0.92;
+      motivo = precisaCapacitor 
+        ? `FP abaixo do regulamentar (${(mediaFP * 100).toFixed(1)}% < 92%)`
+        : 'FP dentro do regulamentar';
       
-      setResult({
-        totalKvar,
-        stages,
-        economiaMensal,
-        investimentoEstimado,
-        paybackMeses,
-        fpAtual: mediaFP * 100,
-        fpProjetado: precisaCapacitor ? targetFP * 100 : mediaFP * 100,
-        multaAtual: mediaMulta,
-        consumoTotalMedio: mediaConsumo,
-        potenciaAtivaMediaKw: mediaPotenciaAtiva,
-        piorMes,
-        recomendacaoEstagios,
-        quantidadeFaturas: totalFaturas,
-        precisaCapacitor
-      });
-      
-      let mensagem = '';
       if (precisaCapacitor) {
-        mensagem = `<div class="text-left">
-          <p><strong>📊 Análise de ${totalFaturas} faturas</strong> (mín:3 | máx:12)</p>
-          <p>📅 Período: ${faturasProcessadas[totalFaturas-1]?.mes_referencia} a ${faturasProcessadas[0]?.mes_referencia}</p>
-          <p>⚡ FP médio geral: ${(mediaFP * 100).toFixed(1)}%</p>
-          <p class="text-red-600">⚠️ FP abaixo de 92% - Multa por reativo excedente detectada</p>
-          <hr class="my-3">
-          <p><strong>🎯 Banco de capacitores: ${totalKvar} kVAr</strong></p>
-          <p><strong>📦 Estágios: ${stages.length}</strong></p>
-          <p><strong>💰 Economia mensal: R$ ${economiaMensal.toFixed(2)}</strong></p>
-          <p><strong>⏱️ Payback: ${paybackMeses} meses (${(paybackMeses/12).toFixed(1)} anos)</strong></p>
-        </div>`;
-      } else {
-        mensagem = `<div class="text-left">
-          <p><strong>📊 Análise de ${totalFaturas} faturas</strong> (mín:3 | máx:12)</p>
-          <p>📅 Período: ${faturasProcessadas[totalFaturas-1]?.mes_referencia} a ${faturasProcessadas[0]?.mes_referencia}</p>
-          <p>⚡ FP médio geral: ${(mediaFP * 100).toFixed(1)}%</p>
-          <p class="text-green-600">✅ FP dentro do regulamentar (≥ 92%)</p>
-          <hr class="my-3">
-          <p><strong>✅ Você não precisa instalar banco de capacitores!</strong></p>
-          <p class="text-sm mt-2">Sua instalação já atende aos requisitos da ANEEL.</p>
-          <p class="text-sm">Economia potencial: R$ 0,00 (não há multa a eliminar)</p>
-        </div>`;
+        const phi1 = Math.acos(Math.min(0.99, mediaFP));
+        const phi2 = Math.acos(targetFP);
+        
+        const kvarProcesso = mediaPotenciaAtiva * (Math.tan(phi1) - Math.tan(phi2));
+        const kvarTrafo = potenciaTotalTransformadores * 0.025;
+        
+        totalKvar = Math.ceil((kvarProcesso + kvarTrafo) / 5) * 5;
+        totalKvar = Math.max(totalKvar, 30);
+        
+        let restante = totalKvar;
+        const sizes = [30, 20, 15, 10, 5];
+        for (const size of sizes) {
+          while (restante >= size) {
+            stages.push(size);
+            restante -= size;
+          }
+        }
+        stages.sort((a, b) => a - b);
+        
+        recomendacaoEstagios = `Banco automático com ${stages.length} estágios: ${stages.join(' + ')} kVAr`;
+        economiaMensal = mediaCustoReativo * 0.95;
+        investimentoEstimado = totalKvar * 89.90 + 2000;
+        paybackMeses = economiaMensal > 0 ? Math.ceil(investimentoEstimado / economiaMensal) : 0;
       }
-      
-      Swal.fire({
-        title: precisaCapacitor ? '✅ Dimensionamento Concluído!' : '✅ Análise Concluída!',
-        html: mensagem,
-        icon: precisaCapacitor ? 'success' : 'info',
-        confirmButtonColor: '#0a2b3c'
-      });
-      
-    } catch (error) {
-      console.error(error);
-      Swal.fire('Erro', 'Erro ao calcular dimensionamento', 'error');
-    } finally {
-      setCalculando(false);
     }
-  };
-
+    
+    setResult({
+      totalKvar,
+      stages,
+      economiaMensal,
+      investimentoEstimado,
+      paybackMeses,
+      fpAtual: mediaFP * 100,
+      fpProjetado: targetFP * 100,
+      multaAtual: mediaCustoReativo,
+      consumoTotalMedio: mediaConsumo,
+      potenciaAtivaMediaKw: mediaPotenciaAtiva,
+      piorMes,
+      recomendacaoEstagios,
+      quantidadeFaturas: totalFaturas,
+      precisaCapacitor,
+      grupoTarifario,
+      motivoRecomendacao: motivo
+    });
+    
+    // Mensagem adaptada ao grupo tarifário
+    let mensagem = '';
+    if (precisaCapacitor) {
+      mensagem = `<div class="text-left">
+        <p><strong>📊 Análise de ${totalFaturas} faturas</strong> (mín:3 | máx:12)</p>
+        <p>🏭 Grupo Tarifário: <strong>${grupoTarifario}</strong> (${grupoTarifario === 'A' ? 'Alta Tensão - reativo é cobrado' : 'Baixa Tensão'})</p>
+        <p>⚡ FP médio geral: ${(mediaFP * 100).toFixed(1)}%</p>
+        <p class="text-red-600">⚠️ Custo mensal com reativo: <strong>R$ ${mediaCustoReativo.toFixed(2)}</strong></p>
+        <hr class="my-3">
+        <p><strong>🎯 Banco de capacitores: ${totalKvar} kVAr</strong></p>
+        <p><strong>📦 Estágios: ${stages.length}</strong></p>
+        <p><strong>💰 Economia mensal: R$ ${economiaMensal.toFixed(2)}</strong></p>
+        <p><strong>⏱️ Payback: ${paybackMeses} meses (${(paybackMeses/12).toFixed(1)} anos)</strong></p>
+        <p class="text-sm text-slate-500 mt-2">💡 Investimento estimado: R$ ${investimentoEstimado.toLocaleString()}</p>
+      </div>`;
+    } else {
+      mensagem = `<div class="text-left">
+        <p><strong>📊 Análise de ${totalFaturas} faturas</strong></p>
+        <p>🏭 Grupo Tarifário: <strong>${grupoTarifario}</strong></p>
+        <p>⚡ FP médio geral: ${(mediaFP * 100).toFixed(1)}%</p>
+        <p class="text-green-600">✅ ${motivo}</p>
+        <p>💰 Custo mensal com reativo: R$ ${mediaCustoReativo.toFixed(2)}</p>
+        <hr class="my-3">
+        <p><strong>✅ Não há necessidade de investimento no momento</strong></p>
+      </div>`;
+    }
+    
+    Swal.fire({
+      title: precisaCapacitor ? '✅ Dimensionamento Concluído!' : '✅ Análise Concluída!',
+      html: mensagem,
+      icon: precisaCapacitor ? 'success' : 'info',
+      confirmButtonColor: '#0a2b3c'
+    });
+    
+  } catch (error) {
+    console.error(error);
+    Swal.fire('Erro', 'Erro ao calcular dimensionamento', 'error');
+  } finally {
+    setCalculando(false);
+  }
+};
   const exportMemorial = async () => {
     if (!reportRef.current) return;
     try {
