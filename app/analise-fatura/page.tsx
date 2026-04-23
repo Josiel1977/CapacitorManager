@@ -6,7 +6,7 @@ import { toPng } from 'html-to-image';
 import { 
   Upload, FileText, AlertTriangle, TrendingUp, TrendingDown, Zap, 
   DollarSign, Info, CheckCircle2, ArrowRight, Download, Activity, 
-  Cpu, ArrowUpRight, FileDown, Settings, Calendar, Clock, AlertCircle
+  Cpu, ArrowUpRight, FileDown, Settings, Calendar, Clock, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { 
@@ -167,7 +167,6 @@ const estimarOrcamento = (kvar: number, tipo: 'fixo' | 'automatico' | 'hibrido')
   }
 };
 
-// Função para analisar horários críticos (reativo indutivo)
 const analisarHorariosCriticos = (data: MassMemoryData[]): { hora: string; mediaKvar: number; ocorrencias: number }[] => {
   const horariosMap = new Map<string, { somaKvar: number; count: number }>();
   
@@ -306,6 +305,19 @@ export default function AnaliseFaturaPage() {
   const [samplingInterval, setSamplingInterval] = useState(15);
   const [fileName, setFileName] = useState<string>('');
   const [showHorariosCriticos, setShowHorariosCriticos] = useState(false);
+  const [recalcKey, setRecalcKey] = useState(0); // Força recálculo
+
+  // Função para forçar recálculo
+  const handleRecalcular = () => {
+    setRecalcKey(prev => prev + 1);
+    Swal.fire({
+      title: '✅ Análise Recalculada!',
+      text: `Dimensionamento atualizado com potência instalada de ${potenciaInstalada} kVA`,
+      icon: 'success',
+      timer: 2000,
+      showConfirmButton: false
+    });
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -569,7 +581,7 @@ export default function AnaliseFaturaPage() {
   const dimensionamento: DimensionamentoStats | null = useMemo(() => {
     if (data.length === 0) return null;
     return analisarDimensionamento(data, targetFP, potenciaInstalada);
-  }, [data, targetFP, potenciaInstalada]);
+  }, [data, targetFP, potenciaInstalada, recalcKey]); // recalcKey força recálculo
 
   const chartData = useMemo(() => {
     if (data.length === 0) return [];
@@ -843,10 +855,19 @@ export default function AnaliseFaturaPage() {
               animate={{ opacity: 1, y: 0 }}
               className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-3xl border border-blue-200"
             >
-              <h3 className="text-2xl font-bold text-primary mb-6 flex items-center gap-2">
-                <Cpu size={24} />
-                Análise de Dimensionamento Inteligente
-              </h3>
+              <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+                <h3 className="text-2xl font-bold text-primary flex items-center gap-2">
+                  <Cpu size={24} />
+                  Análise de Dimensionamento Inteligente
+                </h3>
+                <button
+                  onClick={handleRecalcular}
+                  className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition-all text-sm font-bold shadow-md"
+                >
+                  <RefreshCw size={16} />
+                  Recalcular
+                </button>
+              </div>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 <div className="bg-white p-6 rounded-2xl shadow-sm">
@@ -1132,7 +1153,7 @@ export default function AnaliseFaturaPage() {
             </div>
 
             <div className="space-y-6">
-              {/* PAINEL DE POTÊNCIA INSTALADA */}
+              {/* PAINEL DE POTÊNCIA INSTALADA COM BOTÃO RECALCULAR */}
               <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
                 <h4 className="font-bold text-primary mb-4 flex items-center gap-2">
                   <Settings size={16} />
@@ -1140,17 +1161,26 @@ export default function AnaliseFaturaPage() {
                 </h4>
                 <div className="space-y-4">
                   <div>
-                    <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
-                      Potência Instalada Total (kVA)
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-2 block flex items-center justify-between">
+                      <span>Potência Instalada Total (kVA)</span>
+                      <button
+                        onClick={handleRecalcular}
+                        className="flex items-center gap-1 bg-primary text-white px-3 py-1 rounded-lg hover:bg-primary/90 transition-all text-xs"
+                      >
+                        <RefreshCw size={12} />
+                        Recalcular
+                      </button>
                     </label>
-                    <input 
-                      type="number" 
-                      step="10" 
-                      min="0" 
-                      value={potenciaInstalada} 
-                      onChange={(e) => setPotenciaInstalada(Math.max(0, parseFloat(e.target.value) || 0))}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/20"
-                    />
+                    <div className="flex gap-2">
+                      <input 
+                        type="number" 
+                        step="10" 
+                        min="0" 
+                        value={potenciaInstalada} 
+                        onChange={(e) => setPotenciaInstalada(Math.max(0, parseFloat(e.target.value) || 0))}
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/20"
+                      />
+                    </div>
                     <p className="text-[10px] text-slate-400 mt-1">
                       Exemplo: 7 trafos × 225kVA = 1575 kVA
                     </p>
