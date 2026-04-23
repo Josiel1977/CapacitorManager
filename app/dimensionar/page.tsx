@@ -8,13 +8,12 @@ import {
   Save, Edit3, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { cn } from '@/lib/utils';
 import Swal from 'sweetalert2';
 import jsPDF from 'jspdf';
 import { toPng } from 'html-to-image';
 
 interface Transformador {
-  id?: string;
+  id: string;
   potencia_kva: number;
   quantidade: number;
   tensao_v: number;
@@ -22,7 +21,7 @@ interface Transformador {
 }
 
 interface Fatura {
-  id?: string;
+  id: string;
   mes_referencia: string;
   consumo_ponta_kwh: number;
   consumo_fora_ponta_kwh: number;
@@ -50,7 +49,7 @@ export default function DimensionarPage() {
   const reportRef = useRef<HTMLDivElement>(null);
   
   const [transformadores, setTransformadores] = useState<Transformador[]>([
-    { potencia_kva: 225, quantidade: 7, tensao_v: 380, horas_trabalho: 220 }
+    { id: '1', potencia_kva: 225, quantidade: 7, tensao_v: 380, horas_trabalho: 220 }
   ]);
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [targetFP, setTargetFP] = useState<number>(0.92);
@@ -86,7 +85,13 @@ export default function DimensionarPage() {
   const salvarTransformadores = () => {
     try {
       localStorage.setItem('dimensionar_transformadores', JSON.stringify(transformadores));
-      Swal.fire('Sucesso', 'Configuração salva!', 'success');
+      Swal.fire({
+        title: '✅ Sucesso!',
+        text: 'Configuração dos transformadores salva!',
+        icon: 'success',
+        timer: 1500,
+        showConfirmButton: false
+      });
     } catch (error) {
       Swal.fire('Erro', 'Não foi possível salvar', 'error');
     }
@@ -98,18 +103,36 @@ export default function DimensionarPage() {
       return;
     }
     
+    const novaFatura: Fatura = {
+      id: Date.now().toString(),
+      mes_referencia: currentFatura.mes_referencia,
+      consumo_ponta_kwh: currentFatura.consumo_ponta_kwh || 0,
+      consumo_fora_ponta_kwh: currentFatura.consumo_fora_ponta_kwh || 0,
+      demanda_kw: currentFatura.demanda_kw || 0,
+      reativo_ponta_kvarh: currentFatura.reativo_ponta_kvarh || 0,
+      reativo_fora_ponta_kvarh: currentFatura.reativo_fora_ponta_kvarh || 0,
+      total_pagar: currentFatura.total_pagar || 0
+    };
+    
     let novasFaturas = [...faturas];
     if (editandoFatura !== null) {
-      novasFaturas[editandoFatura] = { ...currentFatura, id: Date.now().toString() } as Fatura;
+      novasFaturas[editandoFatura] = novaFatura;
     } else {
-      novasFaturas = [{ ...currentFatura, id: Date.now().toString() } as Fatura, ...novasFaturas];
+      novasFaturas = [novaFatura, ...novasFaturas];
     }
     setFaturas(novasFaturas);
     localStorage.setItem('dimensionar_faturas', JSON.stringify(novasFaturas));
     setShowFaturaModal(false);
     setCurrentFatura({});
     setEditandoFatura(null);
-    Swal.fire('Sucesso', 'Fatura salva!', 'success');
+    
+    Swal.fire({
+      title: '✅ Sucesso!',
+      text: 'Fatura salva com sucesso!',
+      icon: 'success',
+      timer: 1500,
+      showConfirmButton: false
+    });
   };
 
   const carregarFaturaExemplo = () => {
@@ -143,7 +166,14 @@ export default function DimensionarPage() {
   };
 
   const adicionarTransformador = () => {
-    setTransformadores([...transformadores, { potencia_kva: 100, quantidade: 1, tensao_v: 380, horas_trabalho: 220 }]);
+    const newId = (transformadores.length + 1).toString();
+    setTransformadores([...transformadores, { 
+      id: newId,
+      potencia_kva: 100, 
+      quantidade: 1, 
+      tensao_v: 380, 
+      horas_trabalho: 220 
+    }]);
   };
 
   const removerTransformador = (index: number) => {
@@ -269,7 +299,7 @@ export default function DimensionarPage() {
             </div>
             <div className="space-y-3">
               {transformadores.map((trafo, idx) => (
-                <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+                <div key={trafo.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
                   <div className="flex-1 flex gap-2">
                     <div className="flex-1"><label className="text-[8px] font-black text-slate-400 uppercase">Potência (kVA)</label><input type="number" value={trafo.potencia_kva} onChange={(e) => atualizarTransformador(idx, 'potencia_kva', parseFloat(e.target.value) || 0)} className="w-full rounded-lg border border-slate-200 p-2 text-sm" /></div>
                     <div className="w-20"><label className="text-[8px] font-black text-slate-400 uppercase">Quantidade</label><input type="number" value={trafo.quantidade} onChange={(e) => atualizarTransformador(idx, 'quantidade', parseInt(e.target.value) || 0)} className="w-full rounded-lg border border-slate-200 p-2 text-sm" /></div>
@@ -300,7 +330,7 @@ export default function DimensionarPage() {
                 </div>
               ) : (
                 faturas.map((fat, idx) => (
-                  <div key={idx} className="p-3 bg-slate-50 rounded-lg">
+                  <div key={fat.id} className="p-3 bg-slate-50 rounded-lg">
                     <div className="flex justify-between items-center">
                       <span className="font-bold text-primary">{fat.mes_referencia}</span>
                       <div className="flex gap-1">
