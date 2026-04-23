@@ -1,5 +1,4 @@
 'use client';
-import { analisarGrupoTarifario } from '@/lib/energia/analiseTarifaria';
 import React, { useState, useMemo } from 'react';
 import Papa from 'papaparse';
 import jsPDF from 'jspdf';
@@ -173,8 +172,8 @@ const analisarHorariosCriticos = (data: MassMemoryData[]): { hora: string; media
   const horariosMap = new Map<string, { somaKvar: number; count: number }>();
   
   data.forEach(registro => {
-    if (registro.tipoReativo === 'indutivo' && registro.kvar > 5) { // Considera apenas reativo significativo > 5 kVAr
-      const horaBase = registro.hora.substring(0, 5); // HH:MM
+    if (registro.tipoReativo === 'indutivo' && registro.kvar > 5) {
+      const horaBase = registro.hora.substring(0, 5);
       const existing = horariosMap.get(horaBase);
       if (existing) {
         existing.somaKvar += registro.kvar;
@@ -192,7 +191,7 @@ const analisarHorariosCriticos = (data: MassMemoryData[]): { hora: string; media
       ocorrencias: count
     }))
     .sort((a, b) => b.mediaKvar - a.mediaKvar)
-    .slice(0, 10); // Top 10 horários críticos
+    .slice(0, 10);
   
   return resultados;
 };
@@ -244,7 +243,6 @@ const analisarDimensionamento = (
   let bancoSugeridoFixo = Math.ceil(mediaKvarCritico / 5) * 5;
   let bancoSugeridoAutomatico = Math.ceil(percentil90KvarCritico / 5) * 5;
 
-  // Limite de segurança baseado na potência instalada (máx 40%)
   const limiteInstalado = potenciaInstalada > 0 ? potenciaInstalada * 0.4 : Infinity;
   const alertaTransformador = bancoSugeridoAutomatico > limiteInstalado;
 
@@ -304,7 +302,7 @@ export default function AnaliseFaturaPage() {
   const [loading, setLoading] = useState(false);
   const [targetFP, setTargetFP] = useState(0.92);
   const [tariff, setTariff] = useState(0.95);
-  const [potenciaInstalada, setPotenciaInstalada] = useState<number>(1575); // NOVO: padrão para 7x225kVA
+  const [potenciaInstalada, setPotenciaInstalada] = useState<number>(1575);
   const [samplingInterval, setSamplingInterval] = useState(15);
   const [fileName, setFileName] = useState<string>('');
   const [showHorariosCriticos, setShowHorariosCriticos] = useState(false);
@@ -397,7 +395,6 @@ export default function AnaliseFaturaPage() {
 
               const timestamp = `${fullDate}T${hora.padStart(5, '0')}`;
               
-              // Marca horário crítico (reativo indutivo significativo)
               const isHorarioCritico = tipoReativo === 'indutivo' && kvar > 5 && fp < targetFP;
 
               return {
@@ -528,7 +525,6 @@ export default function AnaliseFaturaPage() {
     Swal.fire('Sucesso', 'CSV exportado com separação correta!', 'success');
   };
 
-  // Análise de horários críticos
   const horariosCriticos = useMemo(() => {
     if (data.length === 0) return [];
     return analisarHorariosCriticos(data);
@@ -680,7 +676,7 @@ export default function AnaliseFaturaPage() {
       ) : (
         <div id="report-content" className="space-y-8">
           
-          {/* HORÁRIOS CRÍTICOS - NOVO COMPONENTE */}
+          {/* HORÁRIOS CRÍTICOS */}
           {horariosCriticos.length > 0 && (
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
@@ -932,26 +928,6 @@ export default function AnaliseFaturaPage() {
                   Justificativa Técnica
                 </h4>
                 <p className="text-slate-700 leading-relaxed">{dimensionamento.justificativa}</p>
-                
-                <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="p-4 bg-red-50 rounded-xl border border-red-200">
-                    <div className="text-xs font-bold text-red-600 uppercase mb-1">Média Simples</div>
-                    <div className="text-2xl font-bold text-red-700">{dimensionamento.bancoSugeridoFixo} kVAr</div>
-                    <div className="text-xs text-red-600 mt-1">❌ Risco de subdimensionamento</div>
-                  </div>
-                  
-                  <div className="p-4 bg-green-50 rounded-xl border border-green-200 ring-2 ring-green-500">
-                    <div className="text-xs font-bold text-green-600 uppercase mb-1">Percentil 90 (Recomendado)</div>
-                    <div className="text-2xl font-bold text-green-700">{dimensionamento.bancoSugeridoAutomatico} kVAr</div>
-                    <div className="text-xs text-green-600 mt-1">✅ Atende 90% dos casos</div>
-                  </div>
-                  
-                  <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
-                    <div className="text-xs font-bold text-amber-600 uppercase mb-1">Máximo Absoluto</div>
-                    <div className="text-2xl font-bold text-amber-700">{Math.ceil(dimensionamento.maxKvarCritico / 5) * 5} kVAr</div>
-                    <div className="text-xs text-amber-600 mt-1">⚠️ Pode superdimensionar</div>
-                  </div>
-                </div>
               </div>
 
               {dimensionamento.tipoRecomendado !== 'fixo' && dimensionamento.bancoSugeridoAutomatico > 0 && (
@@ -1002,7 +978,7 @@ export default function AnaliseFaturaPage() {
                       </span>
                     </div>
                     <p className="text-xs text-slate-400 leading-relaxed">
-                      * Valores baseados em estimativas de mercado para componentes e montagem. Não inclui instalação no local.
+                      * Valores baseados em estimativas de mercado.
                     </p>
                   </div>
                 </div>
@@ -1156,6 +1132,78 @@ export default function AnaliseFaturaPage() {
             </div>
 
             <div className="space-y-6">
+              {/* PAINEL DE POTÊNCIA INSTALADA */}
+              <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+                <h4 className="font-bold text-primary mb-4 flex items-center gap-2">
+                  <Settings size={16} />
+                  Configuração da Instalação
+                </h4>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
+                      Potência Instalada Total (kVA)
+                    </label>
+                    <input 
+                      type="number" 
+                      step="10" 
+                      min="0" 
+                      value={potenciaInstalada} 
+                      onChange={(e) => setPotenciaInstalada(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/20"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Exemplo: 7 trafos × 225kVA = 1575 kVA
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
+                      Fator de Potência Mínimo (Meta)
+                    </label>
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      min="0.80" 
+                      max="1" 
+                      value={targetFP} 
+                      onChange={(e) => setTargetFP(Math.min(1, Math.max(0.8, parseFloat(e.target.value) || 0.92)))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/20"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">Padrão ANEEL: 0.92 | Grupo A: todo reativo é cobrado</p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
+                      Tarifa de Energia (R$/kWh)
+                    </label>
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      min="0" 
+                      value={tariff} 
+                      onChange={(e) => setTariff(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/20"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">Consulte sua fatura para valor exato</p>
+                  </div>
+                  <div className="pt-2 border-t border-slate-100">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-500">Intervalo detectado:</span>
+                      <span className="font-bold text-primary flex items-center gap-1">
+                        <Clock size={12} />
+                        {samplingInterval} minutos
+                      </span>
+                    </div>
+                    {potenciaInstalada > 0 && (
+                      <div className="flex items-center justify-between text-sm mt-2">
+                        <span className="text-slate-500">Limite seguro (40%):</span>
+                        <span className="font-bold text-primary">
+                          {Math.floor(potenciaInstalada * 0.4)} kVAr
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-primary p-8 rounded-3xl text-white shadow-xl relative overflow-hidden">
                 <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
                 <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
@@ -1215,78 +1263,6 @@ export default function AnaliseFaturaPage() {
                     <FileDown size={18} />
                     Dados Processados (CSV)
                   </button>
-                </div>
-              </div>
-
-              {/* NOVO: PAINEL DE POTÊNCIA INSTALADA */}
-              <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
-                <h4 className="font-bold text-primary mb-4 flex items-center gap-2">
-                  <Settings size={16} />
-                  Configuração da Instalação
-                </h4>
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
-                      Potência Instalada Total (kVA)
-                    </label>
-                    <input 
-                      type="number" 
-                      step="10" 
-                      min="0" 
-                      value={potenciaInstalada} 
-                      onChange={(e) => setPotenciaInstalada(Math.max(0, parseFloat(e.target.value) || 0))}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/20"
-                    />
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      Exemplo: 7 trafos × 225kVA = 1575 kVA (sua instalação)
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
-                      Fator de Potência Mínimo (Meta ANEEL)
-                    </label>
-                    <input 
-                      type="number" 
-                      step="0.01" 
-                      min="0.80" 
-                      max="1" 
-                      value={targetFP} 
-                      onChange={(e) => setTargetFP(Math.min(1, Math.max(0.8, parseFloat(e.target.value) || 0.92)))}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/20"
-                    />
-                    <p className="text-[10px] text-slate-400 mt-1">Padrão ANEEL: 0.92 (Grupo B) | Grupo A: todo reativo é cobrado</p>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
-                      Tarifa de Energia (R$/kWh)
-                    </label>
-                    <input 
-                      type="number" 
-                      step="0.01" 
-                      min="0" 
-                      value={tariff} 
-                      onChange={(e) => setTariff(Math.max(0, parseFloat(e.target.value) || 0))}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/20"
-                    />
-                    <p className="text-[10px] text-slate-400 mt-1">Consulte sua fatura para valor exato</p>
-                  </div>
-                  <div className="pt-2 border-t border-slate-100">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-slate-500">Intervalo detectado:</span>
-                      <span className="font-bold text-primary flex items-center gap-1">
-                        <Clock size={12} />
-                        {samplingInterval} minutos
-                      </span>
-                    </div>
-                    {potenciaInstalada > 0 && (
-                      <div className="flex items-center justify-between text-sm mt-2">
-                        <span className="text-slate-500">Limite seguro (40%):</span>
-                        <span className="font-bold text-primary flex items-center gap-1">
-                          {Math.floor(potenciaInstalada * 0.4)} kVAr
-                        </span>
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
 
