@@ -1283,6 +1283,32 @@ export default function AnaliseFaturaPage() {
               </div>
             </div>
           </div>
+          {/* CARD DE OBSERVAÇÃO TÉCNICA - ADICIONE ESTE BLOCO */}
+{dimensionamento && (
+  <motion.div 
+    initial={{ opacity: 0, scale: 0.95 }}
+    animate={{ opacity: 1, scale: 1 }}
+    className="bg-amber-50 border-2 border-amber-200 p-6 rounded-3xl mt-6 shadow-sm"
+  >
+    <div className="flex items-start gap-4">
+      <div className="bg-amber-100 p-3 rounded-full text-amber-600">
+        <AlertTriangle size={24} />
+      </div>
+      <div className="space-y-2">
+        <h4 className="text-amber-900 font-bold text-lg flex items-center gap-2">
+          Observação de Instalação do Banco
+        </h4>
+        <p className="text-amber-800 leading-relaxed">
+          O sistema solicita <strong>{dimensionamento.tipoRecomendado === 'fixo' ? dimensionamento.bancoSugeridoFixo : dimensionamento.bancoSugeridoAutomatico} kVAr</strong> para corrigir o fator de potência, mas verifique as configurações de instalação do seu banco existente se houver, para ver a real necessidade.
+        </p>
+        <div className="pt-2 flex items-center gap-2 text-xs text-amber-700 font-medium italic">
+          <Info size={14} />
+          <span>Nota técnica: Se houver capacitores fixos instalados após o ponto de medição (TC), a necessidade real pode ser diferente do valor calculado.</span>
+        </div>
+      </div>
+    </div>
+  </motion.div>
+)}
 
           {/* TABELA DE INTERVALOS CRÍTICOS + SIDEBAR */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
