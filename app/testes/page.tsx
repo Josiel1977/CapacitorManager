@@ -251,7 +251,7 @@ export default function RealizarTestePage() {
         payload.tensao_medida_v = vMedida || null;
         payload.corrente_medida_a = iMedida || null;
         payload.corrente_teorica_a = resultado.correnteTeorica;
-        payload.potencia_real_kvar = resultado.potenciaReal;
+        //payload.potencia_real_kvar = resultado.potenciaReal;
       } else {
         payload.capacitancia_medida_uf = cMedida || null;
         payload.capacitancia_teorica_uf = resultado.capacitanciaTeorica;
