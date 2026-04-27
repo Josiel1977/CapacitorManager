@@ -4,6 +4,7 @@ import './globals.css';
 import Sidebar from '@/components/Sidebar';
 import BackToTopButton from '@/components/BackToTopButton';
 import { AuthProvider } from '@/lib/AuthContext';
+import ChatAssistant from '@/components/ChatAssistant';
 
 const inter = Inter({ 
   subsets: ['latin'], 
@@ -73,9 +74,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {children}
           </main>
           <BackToTopButton />
+          {/* Chat Assistant - aparece em todas as páginas */}
+          <ChatAssistant />
         </AuthProvider>
       </body>
     </html>
   );
 }
-
