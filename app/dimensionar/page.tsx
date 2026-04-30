@@ -46,8 +46,14 @@ interface Fatura {
   reativo_ponta_kvarh: number;
   reativo_fora_ponta_kvarh: number;
   total_pagar: number;
-  fp?: number;
-  multa_reativa?: number;
+  dias_ciclo: number;
+  concessionaria: string; // <--- LINHA ADICIONADA!
+  fp_calculado?: number;
+  fp_informado?: number;
+  reativo_excedente_calculado?: number;
+  multa_reativo_calculada?: number;
+  tarifa_reativo_utilizada?: number;
+  validado: boolean;
 }
 
 interface ResultadoDimensionamento {
