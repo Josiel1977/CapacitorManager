@@ -20,7 +20,6 @@ import {
   Edit3,
   X,
   Factory,
-  Sliders,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
@@ -96,9 +95,7 @@ interface Fatura {
   concessionaria: string;
   fp_calculado?: number;
   validado: boolean;
-  multa_reativo_valor?: number;    // ✅ valor real da multa em R$ (extraído da fatura)
-  multa_reativo_calculada?: number; // mantido para compatibilidade
-  reativo_excedente_calculado?: number;
+  multa_reativo_valor?: number;    // Valor real da multa em R$
 }
 
 interface DistribuicaoTrafo {
@@ -122,9 +119,7 @@ interface ResultadoDimensionamento {
   fp_atual_percent: number;
   fp_projetado_percent: number;
   multa_atual_mensal_real: number;
-  consumo_ativo_medio_mensal_kwh: number;
-  consumo_reativo_medio_mensal_kvarh: number;
-  potencia_ativa_media_kw: number;
+  potencia_ativa_utilizada_kw: number;
   precisa_capacitor: boolean;
   grupo_tarifario: "A" | "B";
   motivo_recomendacao: string;
@@ -139,20 +134,24 @@ interface ResultadoDimensionamento {
   economia_anual: number;
   retorno_5_anos: number;
   metodo_calculo_utilizado: "demanda" | "manual" | "startek";
-  fator_carga_utilizado: number;
 }
 
 // ============================================
-// UTILITÁRIOS
+// UTILITÁRIOS - parse melhorado
 // ============================================
 const parseBRLocal = (valor: string | number | undefined): number => {
   if (valor === undefined || valor === null) return 0;
   if (typeof valor === "number") return valor;
   if (valor === "") return 0;
   let limpo = valor.toString().trim();
+  // Remove tudo exceto dígitos, vírgula e ponto
   limpo = limpo.replace(/[^\d,.-]/g, "");
-  if (limpo.includes(",") && limpo.includes(".")) limpo = limpo.replace(/\./g, "").replace(",", ".");
-  else if (limpo.includes(",")) limpo = limpo.replace(",", ".");
+  // Se tem ponto e vírgula, é número com milhar (ex: 8.932,83)
+  if (limpo.includes(".") && limpo.includes(",")) {
+    limpo = limpo.replace(/\./g, "").replace(",", ".");
+  } else if (limpo.includes(",")) {
+    limpo = limpo.replace(",", ".");
+  }
   const numero = parseFloat(limpo);
   return isNaN(numero) ? 0 : numero;
 };
@@ -168,16 +167,6 @@ const calcularFatorPotencia = (ativo_kwh: number, reativo_kvarh: number): number
   const aparente = Math.sqrt(ativo_kwh ** 2 + reativo_kvarh ** 2);
   return aparente === 0 ? 0.92 : Math.min(0.99, Math.max(0.3, ativo_kwh / aparente));
 };
-
-const calcularReativoExcedente = (ativo_kwh: number, reativo_kvarh: number): number => {
-  if (ativo_kwh <= 0) return 0;
-  const tanPhiMinimo = Math.tan(Math.acos(FP_MINIMO_REGULAMENTAR));
-  const permitido = ativo_kwh * tanPhiMinimo;
-  return Math.max(0, reativo_kvarh - permitido);
-};
-
-const calcularMultaReativa = (ativo_kwh: number, reativo_kvarh: number, tarifa_reativo: number): number =>
-  calcularReativoExcedente(ativo_kwh, reativo_kvarh) * tarifa_reativo;
 
 const calcularKvarNecessario = (potencia_ativa_kw: number, fp_atual: number, fp_desejado: number): number => {
   const fp_atual_seguro = Math.min(0.99, Math.max(0.3, fp_atual));
@@ -258,7 +247,6 @@ export default function DimensionarPage() {
   const [editandoFaturaId, setEditandoFaturaId] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [kvarRecomendadoManual, setKvarRecomendadoManual] = useState<number | null>(null);
-  const [fatorCarga, setFatorCarga] = useState<number>(0.65); // ✅ configurável
 
   useEffect(() => carregarDados(), []);
 
@@ -274,7 +262,7 @@ export default function DimensionarPage() {
   };
 
   const carregarFaturaExemploReal = () => {
-    // Exemplo com os valores reais das faturas Equatorial Pará (multas extraídas)
+    // Valores exatos extraídos das faturas Equatorial Pará (com reativos corrigidos)
     const faturasCorretas: Fatura[] = [
       { id: "nov2025", mes_referencia: "11/2025", consumo_ponta_kwh: 457.21, consumo_fora_ponta_kwh: 5179.86, demanda_ponta_kw: 53.42, demanda_fora_ponta_kw: 53.42, reativo_ponta_kvarh: 493.76, reativo_fora_ponta_kvarh: 4696.54, total_pagar: 12617.5, dias_ciclo: 30, concessionaria: "EQUATORIAL_PARA", validado: true, multa_reativo_valor: 1961.05 },
       { id: "dez2025", mes_referencia: "12/2025", consumo_ponta_kwh: 595.56, consumo_fora_ponta_kwh: 6106.21, demanda_ponta_kw: 40.66, demanda_fora_ponta_kw: 40.66, reativo_ponta_kvarh: 1130.49, reativo_fora_ponta_kvarh: 8932.83, total_pagar: 14486.71, dias_ciclo: 31, concessionaria: "EQUATORIAL_PARA", validado: true, multa_reativo_valor: 3796.72 },
@@ -302,13 +290,11 @@ export default function DimensionarPage() {
 
     const ativoTotal = consumoPonta + consumoForaPonta;
     const reativoTotal = reativoPonta + reativoForaPonta;
-    const tarifaBase = TARIFAS_REATIVO[concessionaria as keyof typeof TARIFAS_REATIVO]?.base || TARIFAS_REATIVO.DEFAULT.base;
     const fpCalc = calcularFatorPotencia(ativoTotal, reativoTotal);
-    const multaCalc = calcularMultaReativa(ativoTotal, reativoTotal, tarifaBase);
 
     const confirmar = await Swal.fire({
       title: "Confirmar dados?",
-      html: `<div class="text-left"><p><strong>Mês:</strong> ${currentFatura.mes_referencia}</p><p><strong>Ativo Total:</strong> ${formatNumber(ativoTotal, 0)} kWh</p><p><strong>Reativo Total:</strong> ${formatNumber(reativoTotal, 0)} kVArh</p><p><strong>FP calculado:</strong> ${(fpCalc * 100).toFixed(1)}%</p><p><strong>Multa (calculada):</strong> ${formatMoney(multaCalc)}</p><p><strong>Multa (real, se informado):</strong> ${multaReal ? formatMoney(multaReal) : "não informado"}</p></div>`,
+      html: `<div class="text-left"><p><strong>Mês:</strong> ${currentFatura.mes_referencia}</p><p><strong>Ativo Total:</strong> ${formatNumber(ativoTotal, 0)} kWh</p><p><strong>Reativo Total:</strong> ${formatNumber(reativoTotal, 0)} kVArh</p><p><strong>FP calculado:</strong> ${(fpCalc * 100).toFixed(1)}%</p><p><strong>Multa informada:</strong> ${multaReal ? formatMoney(multaReal) : "não informada"}</p></div>`,
       icon: "question", showCancelButton: true, confirmButtonText: "Salvar", cancelButtonText: "Revisar",
     });
     if (!confirmar.isConfirmed) return;
@@ -379,15 +365,15 @@ export default function DimensionarPage() {
       const concessionarias = [...new Set(faturas.map(f => f.concessionaria))];
       if (concessionarias.length > 1) alertas.push(`⚠️ Faturas de diferentes concessionárias: ${concessionarias.join(", ")}`);
 
+      // Processa faturas, priorizando multa real se existir
       const faturasProcessadas = faturas.map(f => {
         const ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
         const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
         const fp = calcularFatorPotencia(ativoTotal, reativoTotal);
-        const tarifa = TARIFAS_REATIVO[f.concessionaria as keyof typeof TARIFAS_REATIVO]?.base || TARIFAS_REATIVO.DEFAULT.base;
-        const multaCalc = calcularMultaReativa(ativoTotal, reativoTotal, tarifa);
-        const multaReal = f.multa_reativo_valor ?? multaCalc;
+        const multaReal = f.multa_reativo_valor ?? 0;
+        if (multaReal === 0) alertas.push(`⚠️ Fatura ${f.mes_referencia} sem valor de multa informado.`);
         const demandaMaxKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
-        return { ...f, ativoTotal, reativoTotal, fp, tarifa, multaCalc, multaReal, demandaMaxKw };
+        return { ...f, ativoTotal, reativoTotal, fp, multaReal, demandaMaxKw };
       });
 
       const piorMes = faturasProcessadas.reduce((prev, curr) => curr.fp < prev.fp ? curr : prev, faturasProcessadas[0]);
@@ -395,13 +381,8 @@ export default function DimensionarPage() {
       const fpDesejado = targetFP;
       const mediaMulta = faturasProcessadas.reduce((acc, f) => acc + f.multaReal, 0) / faturasProcessadas.length;
 
-      // Estimativa da potência ativa usando fator de carga configurável
-      const potenciaTotalKVA = potenciaTotalTransformadores;
-      const potenciaAparenteMedia = potenciaTotalKVA * fatorCarga;
-      const potenciaAtivaProjetada = potenciaAparenteMedia * fpAtual;
-      // Também considera a demanda máxima registrada (caso seja maior)
-      const demandaMaxRegistrada = Math.max(...faturasProcessadas.map(f => f.demandaMaxKw));
-      const potenciaAtivaFinal = Math.max(potenciaAtivaProjetada, demandaMaxRegistrada);
+      // Usar a MAIOR demanda registrada como potência ativa base (para não superdimensionar)
+      const potenciaAtivaBaseKw = Math.max(...faturasProcessadas.map(f => f.demandaMaxKw));
 
       const precisaCapacitor = fpAtual < FP_MINIMO_REGULAMENTAR || mediaMulta > 200;
       let totalKvar = 0, totalKvarComercial = 0, stages: number[] = [], economiaMensal = 0, metodoCalculo: "demanda" | "manual" | "startek" = "demanda";
@@ -411,16 +392,16 @@ export default function DimensionarPage() {
         if (kvarRecomendadoManual && kvarRecomendadoManual > 0) {
           totalKvar = kvarRecomendadoManual;
           metodoCalculo = "manual";
-          motivo = `Valor definido por especialista: ${totalKvar} kVAr (laudo técnico)`;
+          motivo = `Valor definido por especialista: ${totalKvar} kVAr (alinhado à Startek)`;
         } else {
-          totalKvar = calcularKvarNecessario(potenciaAtivaFinal, fpAtual, fpDesejado);
-          metodoCalculo = "startek";
-          motivo = `Potência ativa projetada = ${potenciaAtivaFinal.toFixed(1)} kW (fator carga ${fatorCarga.toFixed(2)} x ${potenciaTotalKVA} kVA) | FP atual = ${(fpAtual * 100).toFixed(1)}% | Meta = ${(fpDesejado * 100).toFixed(0)}% | Método clássico (P*Δtan)`;
+          totalKvar = calcularKvarNecessario(potenciaAtivaBaseKw, fpAtual, fpDesejado);
+          metodoCalculo = "demanda";
+          motivo = `Potência ativa baseada na demanda medida = ${potenciaAtivaBaseKw.toFixed(1)} kW (maior demanda registrada nas faturas) | FP atual = ${(fpAtual * 100).toFixed(1)}% | Meta = ${(fpDesejado * 100).toFixed(0)}%`;
         }
         totalKvarComercial = Math.ceil(totalKvar / 10) * 10;
         totalKvarComercial = Math.max(totalKvarComercial, CONFIG_CAPACITORES.minimo_kvar_grupo_a);
         stages = distribuirEstagios(totalKvarComercial);
-        economiaMensal = mediaMulta * 0.92; // eficácia típica
+        economiaMensal = mediaMulta * 0.92;
       } else {
         const mediaFp = faturasProcessadas.reduce((a,b)=>a+b.fp,0)/faturasProcessadas.length;
         motivo = `✅ Sistema regularizado (FP médio: ${(mediaFp * 100).toFixed(1)}%)`;
@@ -448,9 +429,7 @@ export default function DimensionarPage() {
         fp_atual_percent: fpAtual * 100,
         fp_projetado_percent: precisaCapacitor ? fpDesejado * 100 : fpAtual * 100,
         multa_atual_mensal_real: mediaMulta,
-        consumo_ativo_medio_mensal_kwh: faturasProcessadas.reduce((a,b)=>a+b.ativoTotal,0)/faturasProcessadas.length,
-        consumo_reativo_medio_mensal_kvarh: faturasProcessadas.reduce((a,b)=>a+b.reativoTotal,0)/faturasProcessadas.length,
-        potencia_ativa_media_kw: potenciaAtivaFinal,
+        potencia_ativa_utilizada_kw: potenciaAtivaBaseKw,
         precisa_capacitor: precisaCapacitor,
         grupo_tarifario: grupoTarifario,
         motivo_recomendacao: motivo,
@@ -465,7 +444,6 @@ export default function DimensionarPage() {
         economia_anual: economiaAnual,
         retorno_5_anos: retorno5Anos,
         metodo_calculo_utilizado: metodoCalculo,
-        fator_carga_utilizado: fatorCarga,
       });
 
       Swal.fire({
@@ -513,7 +491,7 @@ export default function DimensionarPage() {
       </header>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-5 space-y-6">
-          {/* Transformadores */}
+          {/* Bloco Transformadores */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-primary flex gap-2"><Package size={20} /> Transformadores</h2><button onClick={salvarTransformadores} className="text-xs bg-primary text-white px-3 py-1 rounded-lg"><Save size={12} /> Salvar</button></div>
             <div className="space-y-3">
@@ -531,7 +509,7 @@ export default function DimensionarPage() {
             </div>
             <div className="mt-4 p-3 bg-primary/5 rounded-xl"><div className="flex justify-between text-sm"><span>Potência Total Instalada:</span><span className="font-bold text-primary">{formatNumber(potenciaTotalTransformadores, 0)} kVA</span></div><div className="text-xs text-slate-500 mt-1">{transformadores.map(t => `${t.quantidade}x${t.potencia_kva}kVA`).join(" + ")} | {transformadores[0]?.tensao_v}V</div></div>
           </div>
-          {/* Faturas */}
+          {/* Bloco Faturas */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-primary flex gap-2"><History size={20} /> Faturas ({faturas.length})</h2><button onClick={() => { setCurrentFatura({}); setEditandoFaturaId(null); setShowFaturaModal(true); }} className="text-xs bg-primary text-white px-3 py-1 rounded-lg"><Plus size={12} /> Adicionar</button></div>
             <div className="max-h-80 overflow-y-auto space-y-2">
@@ -540,7 +518,7 @@ export default function DimensionarPage() {
                   const ativo = fat.consumo_ponta_kwh + fat.consumo_fora_ponta_kwh;
                   const reativo = fat.reativo_ponta_kvarh + fat.reativo_fora_ponta_kvarh;
                   const fp = calcularFatorPotencia(ativo, reativo);
-                  const multa = fat.multa_reativo_valor ?? calcularMultaReativa(ativo, reativo, TARIFAS_REATIVO[fat.concessionaria]?.base || 0.28622);
+                  const multa = fat.multa_reativo_valor ?? 0;
                   return (
                     <div key={fat.id} className="p-3 rounded-lg bg-slate-50">
                       <div className="flex justify-between"><span className="font-bold">{fat.mes_referencia}</span><div><button onClick={() => { setCurrentFatura(fat); setEditandoFaturaId(fat.id); setShowFaturaModal(true); }} className="text-blue-500"><Edit3 size={14} /></button><button onClick={() => removerFatura(fat.id)} className="text-red-500"><Trash2 size={14} /></button></div></div>
@@ -554,12 +532,7 @@ export default function DimensionarPage() {
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <label className="block text-sm font-medium mb-2">Fator de Potência Desejado</label>
             <select value={targetFP} onChange={(e) => setTargetFP(parseFloat(e.target.value))} className="w-full rounded-xl border p-3 mb-4"><option value={0.92}>0.92 (mínimo ANEEL)</option><option value={0.95}>0.95 (recomendado)</option><option value={0.98}>0.98 (excelente)</option></select>
-            <details className="mb-4"><summary className="text-sm font-medium cursor-pointer text-primary">⚙️ Configurações Avançadas</summary>
-              <div className="mt-3 space-y-3 p-3 bg-slate-50 rounded-lg">
-                <div><label className="text-xs text-slate-600">Fator de Carga (carga média / pot. inst.)</label><input type="range" min="0.3" max="0.9" step="0.05" value={fatorCarga} onChange={(e) => setFatorCarga(parseFloat(e.target.value))} className="w-full" /><div className="flex justify-between text-xs"><span>0.3</span><span className="font-bold">{fatorCarga.toFixed(2)}</span><span>0.9</span></div><p className="text-[10px] text-slate-500">Ajuste conforme carga típica (0,65 para armazéns)</p></div>
-                <div><label className="text-xs text-slate-600">kVAr Recomendado por Especialista (opcional)</label><div className="flex gap-2 mt-1"><input type="number" placeholder="Ex: 160" value={kvarRecomendadoManual || ""} onChange={(e) => setKvarRecomendadoManual(e.target.value ? parseFloat(e.target.value) : null)} className="flex-1 border rounded p-2 text-sm" /><button onClick={() => setKvarRecomendadoManual(160)} className="px-2 bg-primary text-white rounded text-xs whitespace-nowrap">STARTEK</button></div><p className="text-[10px] text-slate-500 mt-1">Se informado, substitui o cálculo automático.</p></div>
-              </div>
-            </details>
+            <details className="mb-4"><summary className="text-sm font-medium cursor-pointer text-primary">⚙️ Configurações Avançadas</summary><div className="mt-3 space-y-3 p-3 bg-slate-50 rounded-lg"><div><label className="text-xs text-slate-600">kVAr Recomendado por Especialista (opcional)</label><div className="flex gap-2 mt-1"><input type="number" placeholder="Ex: 160" value={kvarRecomendadoManual || ""} onChange={(e) => setKvarRecomendadoManual(e.target.value ? parseFloat(e.target.value) : null)} className="flex-1 border rounded p-2 text-sm" /><button onClick={() => setKvarRecomendadoManual(160)} className="px-2 bg-primary text-white rounded text-xs whitespace-nowrap">STARTEK</button></div><p className="text-[10px] text-slate-500 mt-1">Se informado, substitui o cálculo automático e fixa o valor recomendado.</p></div></div></details>
             <button onClick={calcularDimensionamento} disabled={calculando || faturas.length < 2} className="w-full bg-primary text-white py-3 rounded-xl font-bold disabled:opacity-50 flex justify-center gap-2">{calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />} Calcular Dimensionamento</button>
           </div>
         </div>
@@ -571,7 +544,7 @@ export default function DimensionarPage() {
                 <div className="p-6 space-y-6">
                   {result.precisa_capacitor ? (
                     <>
-                      <div className="text-center border-b pb-4"><p className="text-sm text-slate-500">Potência Total Recomendada</p><p className="text-5xl font-bold text-primary">{result.kvar_total.toFixed(1)} <span className="text-lg">kVAr</span></p><p className="text-xs text-slate-400">Grupo {result.grupo_tarifario} • {result.quantidade_faturas_analisadas} faturas • Método: {result.metodo_calculo_utilizado} • Fator carga: {result.fator_carga_utilizado.toFixed(2)}</p></div>
+                      <div className="text-center border-b pb-4"><p className="text-sm text-slate-500">Potência Total Recomendada</p><p className="text-5xl font-bold text-primary">{result.kvar_total.toFixed(1)} <span className="text-lg">kVAr</span></p><p className="text-xs text-slate-400">Grupo {result.grupo_tarifario} • {result.quantidade_faturas_analisadas} faturas • Método: {result.metodo_calculo_utilizado}</p></div>
                       {result.alertas.length > 0 && result.alertas.map((a, i) => <div key={i} className="bg-amber-50 p-3 rounded-xl text-xs text-amber-700 flex gap-2"><AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />{a}</div>)}
                       <div className="bg-blue-50 p-4 rounded-xl"><p className="text-sm font-bold text-blue-700">📌 {result.motivo_recomendacao}</p><p className="text-xs mt-2">FP atual: {result.fp_atual_percent.toFixed(1)}% → Meta: {result.fp_projetado_percent.toFixed(0)}%</p><div className="mt-3"><BarraFP fp={result.fp_atual_percent} /><div className="flex justify-between text-[10px] mt-1"><span>Atual: {result.fp_atual_percent.toFixed(1)}%</span><span>Meta ANEEL: 92%</span></div></div></div>
                       <div className="grid grid-cols-2 gap-4"><div className="bg-red-50 p-4 text-center rounded-xl"><TrendingUp className="mx-auto text-red-600 mb-2" size={24} /><p className="text-xs font-medium">Multa Mensal Média</p><p className="text-2xl font-bold">{formatMoney(result.multa_atual_mensal_real)}</p><p className="text-xs text-red-500 mt-1">Valor real extraído das faturas</p></div><div className="bg-green-50 p-4 text-center rounded-xl"><TrendingUp className="mx-auto text-green-600 mb-2" size={24} /><p className="text-xs font-medium">Economia Projetada</p><p className="text-2xl font-bold text-green-600">{formatMoney(result.economia_mensal_estimada)}/mês</p><p className="text-xs text-green-600 mt-1">Após correção do FP</p></div></div>
@@ -606,7 +579,7 @@ export default function DimensionarPage() {
                 <div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Demanda Ponta (kW)</label><input type="text" placeholder="Ex: 53,42" value={currentFatura.demanda_ponta_kw !== undefined ? formatNumber(currentFatura.demanda_ponta_kw as number, 2) : ""} onChange={(e) => setCurrentFatura({ ...currentFatura, demanda_ponta_kw: parseBRLocal(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Demanda F/Ponta (kW)</label><input type="text" placeholder="Ex: 53,42" value={currentFatura.demanda_fora_ponta_kw !== undefined ? formatNumber(currentFatura.demanda_fora_ponta_kw as number, 2) : ""} onChange={(e) => setCurrentFatura({ ...currentFatura, demanda_fora_ponta_kw: parseBRLocal(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" /></div></div>
                 <div className="grid grid-cols-2 gap-2"><div><label className="text-xs font-medium text-red-600">Reativo Ponta (kVArh) *</label><input type="text" placeholder="Ex: 493,76" value={currentFatura.reativo_ponta_kvarh !== undefined ? formatNumber(currentFatura.reativo_ponta_kvarh as number, 2) : ""} onChange={(e) => setCurrentFatura({ ...currentFatura, reativo_ponta_kvarh: parseBRLocal(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1 border-red-200" /></div><div><label className="text-xs font-medium text-red-600">Reativo F/Ponta (kVArh) *</label><input type="text" placeholder="Ex: 4696,54" value={currentFatura.reativo_fora_ponta_kvarh !== undefined ? formatNumber(currentFatura.reativo_fora_ponta_kvarh as number, 2) : ""} onChange={(e) => setCurrentFatura({ ...currentFatura, reativo_fora_ponta_kvarh: parseBRLocal(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1 border-red-200" /></div></div>
                 <div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Dias do ciclo</label><input type="text" placeholder="30" value={currentFatura.dias_ciclo !== undefined ? formatNumber(currentFatura.dias_ciclo as number, 0) : "30"} onChange={(e) => setCurrentFatura({ ...currentFatura, dias_ciclo: parseBRLocal(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Total a Pagar (R$)</label><input type="text" placeholder="Ex: 12617,50" value={currentFatura.total_pagar !== undefined ? formatMoney(currentFatura.total_pagar as number) : ""} onChange={(e) => setCurrentFatura({ ...currentFatura, total_pagar: parseBRLocal(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" /></div></div>
-                <div><label className="text-xs font-medium text-red-600">Valor da Multa (R$) (opcional, mas recomendado)</label><input type="text" placeholder="Ex: 1961,05" value={currentFatura.multa_reativo_valor !== undefined ? formatMoney(currentFatura.multa_reativo_valor as number) : ""} onChange={(e) => setCurrentFatura({ ...currentFatura, multa_reativo_valor: parseBRLocal(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" /></div>
+                <div><label className="text-xs font-medium text-red-600">Valor da Multa (R$) (obrigatório para cálculo correto)</label><input type="text" placeholder="Ex: 1961,05" value={currentFatura.multa_reativo_valor !== undefined ? formatMoney(currentFatura.multa_reativo_valor as number) : ""} onChange={(e) => setCurrentFatura({ ...currentFatura, multa_reativo_valor: parseBRLocal(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" /></div>
               </div>
               <div className="flex gap-3 mt-6"><button onClick={() => setCurrentFatura({ mes_referencia: "05/2025", consumo_ponta_kwh: 8132, consumo_fora_ponta_kwh: 59050, demanda_ponta_kw: 430, demanda_fora_ponta_kw: 447, reativo_ponta_kvarh: 824, reativo_fora_ponta_kvarh: 4511, total_pagar: 55970.04, dias_ciclo: 30, concessionaria: "RORAIMA_ENERGIA", multa_reativo_valor: 2040.83 })} className="flex-1 py-2 border rounded-lg text-sm hover:bg-slate-50">Exemplo Roraima</button><button onClick={salvarFatura} className="flex-1 py-2 bg-primary text-white rounded-lg text-sm font-medium">Salvar Fatura</button></div>
             </motion.div>
