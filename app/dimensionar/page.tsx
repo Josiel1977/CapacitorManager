@@ -7,7 +7,6 @@ import {
   TrendingUp,
   DollarSign,
   CheckCircle2,
-  FileText,
   Loader2,
   AlertTriangle,
   Package,
@@ -20,9 +19,7 @@ import {
   Save,
   Edit3,
   X,
-  AlertCircle,
   Factory,
-  Truck,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
@@ -59,33 +56,100 @@ const PRECOS_MERCADO_CAPACITORES: Record<
   string,
   { preco_medio: number; faixa_preco: string; fornecedores: string[] }
 > = {
-  "20": { preco_medio: 5400, faixa_preco: "R$ 4.900 - R$ 5.900", fornecedores: ["FASF", "Genérico", "5G"] },
-  "30": { preco_medio: 5300, faixa_preco: "R$ 4.800 - R$ 5.800", fornecedores: ["FASF", "5G", "WEG"] },
-  "50": { preco_medio: 9700, faixa_preco: "R$ 8.900 - R$ 10.500", fornecedores: ["FASF", "5G", "Siemens"] },
-  "70": { preco_medio: 13600, faixa_preco: "R$ 12.500 - R$ 14.800", fornecedores: ["FASF", "ABB"] },
-  "90": { preco_medio: 15300, faixa_preco: "R$ 14.000 - R$ 16.500", fornecedores: ["FASF", "5G"] },
-  "100": { preco_medio: 18700, faixa_preco: "R$ 17.500 - R$ 19.900", fornecedores: ["5G", "FASF", "WEG"] },
-  "120": { preco_medio: 21500, faixa_preco: "R$ 19.900 - R$ 23.000", fornecedores: ["FASF", "5G"] },
-  "150": { preco_medio: 25500, faixa_preco: "R$ 23.500 - R$ 27.500", fornecedores: ["5G", "WEG"] },
-  "180": { preco_medio: 26900, faixa_preco: "R$ 24.900 - R$ 28.900", fornecedores: ["FASF", "5G"] },
-  "210": { preco_medio: 27300, faixa_preco: "R$ 25.500 - R$ 29.500", fornecedores: ["FASF", "5G"] },
-  "240": { preco_medio: 28500, faixa_preco: "R$ 26.500 - R$ 30.500", fornecedores: ["FASF"] },
-  "280": { preco_medio: 29600, faixa_preco: "R$ 27.500 - R$ 31.500", fornecedores: ["FASF"] },
-  "300": { preco_medio: 32500, faixa_preco: "R$ 30.000 - R$ 35.000", fornecedores: ["WEG", "ABB"] },
+  "20": {
+    preco_medio: 5400,
+    faixa_preco: "R$ 4.900 - R$ 5.900",
+    fornecedores: ["FASF", "Genérico", "5G"],
+  },
+  "30": {
+    preco_medio: 5300,
+    faixa_preco: "R$ 4.800 - R$ 5.800",
+    fornecedores: ["FASF", "5G", "WEG"],
+  },
+  "50": {
+    preco_medio: 9700,
+    faixa_preco: "R$ 8.900 - R$ 10.500",
+    fornecedores: ["FASF", "5G", "Siemens"],
+  },
+  "70": {
+    preco_medio: 13600,
+    faixa_preco: "R$ 12.500 - R$ 14.800",
+    fornecedores: ["FASF", "ABB"],
+  },
+  "90": {
+    preco_medio: 15300,
+    faixa_preco: "R$ 14.000 - R$ 16.500",
+    fornecedores: ["FASF", "5G"],
+  },
+  "100": {
+    preco_medio: 18700,
+    faixa_preco: "R$ 17.500 - R$ 19.900",
+    fornecedores: ["5G", "FASF", "WEG"],
+  },
+  "120": {
+    preco_medio: 21500,
+    faixa_preco: "R$ 19.900 - R$ 23.000",
+    fornecedores: ["FASF", "5G"],
+  },
+  "150": {
+    preco_medio: 25500,
+    faixa_preco: "R$ 23.500 - R$ 27.500",
+    fornecedores: ["5G", "WEG"],
+  },
+  "180": {
+    preco_medio: 26900,
+    faixa_preco: "R$ 24.900 - R$ 28.900",
+    fornecedores: ["FASF", "5G"],
+  },
+  "210": {
+    preco_medio: 27300,
+    faixa_preco: "R$ 25.500 - R$ 29.500",
+    fornecedores: ["FASF", "5G"],
+  },
+  "240": {
+    preco_medio: 28500,
+    faixa_preco: "R$ 26.500 - R$ 30.500",
+    fornecedores: ["FASF"],
+  },
+  "280": {
+    preco_medio: 29600,
+    faixa_preco: "R$ 27.500 - R$ 31.500",
+    fornecedores: ["FASF"],
+  },
+  "300": {
+    preco_medio: 32500,
+    faixa_preco: "R$ 30.000 - R$ 35.000",
+    fornecedores: ["WEG", "ABB"],
+  },
 };
 
 const FORNECEDORES_RECOMENDADOS = [
-  { nome: "WEG", site: "www.weg.net", especialidade: "Equipamentos industriais premium" },
-  { nome: "FASF", site: "www.fasf.com.br", especialidade: "Bancos de capacitores especializados" },
-  { nome: "5G Equipamentos", site: "www.5geq.com.br", especialidade: "Custo-benefício" },
+  {
+    nome: "WEG",
+    site: "www.weg.net",
+    especialidade: "Equipamentos industriais premium",
+  },
+  {
+    nome: "FASF",
+    site: "www.fasf.com.br",
+    especialidade: "Bancos de capacitores especializados",
+  },
+  {
+    nome: "5G Equipamentos",
+    site: "www.5geq.com.br",
+    especialidade: "Custo-benefício",
+  },
   { nome: "ABB", site: "new.abb.com/br", especialidade: "Tecnologia suíça" },
-  { nome: "Siemens", site: "www.siemens.com/br", especialidade: "Automação e energia" },
+  {
+    nome: "Siemens",
+    site: "www.siemens.com/br",
+    especialidade: "Automação e energia",
+  },
 ];
 
 const CONFIG_CAPACITORES = {
   tensao_padrao_380v: "440V",
   tensao_padrao_220v: "260V",
-  margem_seguranca: 1.3,
   minimo_kvar_grupo_a: 20,
   minimo_kvar_grupo_b: 10,
   estagios_padrao: [60, 50, 40, 30, 25, 20, 15, 12.5, 10, 7.5, 5, 2.5],
@@ -116,10 +180,6 @@ interface Fatura {
   dias_ciclo: number;
   concessionaria: string;
   fp_calculado?: number;
-  fp_informado?: number;
-  reativo_excedente_calculado?: number;
-  multa_reativo_calculada?: number;
-  tarifa_reativo_utilizada?: number;
   validado: boolean;
 }
 
@@ -139,16 +199,11 @@ interface ResultadoDimensionamento {
   tensao_capacitores: string;
   fator_dessintonia: number;
   economia_mensal_estimada: number;
-  investimento_estimado: number;
-  investimento_estimado_comercial: number;
   investimento_mercado_real: number;
   payback_meses: number;
-  payback_meses_comercial: number;
-  payback_mercado_real: number;
   fp_atual_percent: number;
   fp_projetado_percent: number;
   multa_atual_mensal_real: number;
-  multa_atual_mensal_calculada: number;
   consumo_ativo_medio_mensal_kwh: number;
   consumo_reativo_medio_mensal_kvarh: number;
   potencia_ativa_media_kw: number;
@@ -159,7 +214,6 @@ interface ResultadoDimensionamento {
   quantidade_faturas_analisadas: number;
   pior_mes: Fatura | null;
   media_fp_por_mes: Array<{ mes: string; fp: number; multa: number }>;
-  consistencia_dados: number;
   alertas: string[];
   distribuicao_por_trafo: DistribuicaoTrafo[];
   fornecedores_recomendados: typeof FORNECEDORES_RECOMENDADOS;
@@ -170,7 +224,7 @@ interface ResultadoDimensionamento {
 }
 
 // ============================================
-// UTILITÁRIOS (APENAS UMA VEZ!)
+// UTILITÁRIOS
 // ============================================
 const parseBRLocal = (valor: string | number | undefined): number => {
   if (valor === undefined || valor === null) return 0;
@@ -178,53 +232,51 @@ const parseBRLocal = (valor: string | number | undefined): number => {
   if (valor === "") return 0;
   let limpo = valor.toString().trim();
   limpo = limpo.replace(/[^\d,.-]/g, "");
-  if (limpo.includes(",") && limpo.includes(".")) {
+  if (limpo.includes(",") && limpo.includes("."))
     limpo = limpo.replace(/\./g, "").replace(",", ".");
-  } else if (limpo.includes(",")) {
-    limpo = limpo.replace(",", ".");
-  }
+  else if (limpo.includes(",")) limpo = limpo.replace(",", ".");
   const numero = parseFloat(limpo);
   return isNaN(numero) ? 0 : numero;
 };
 
-const formatMoney = (valor: number): string => {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    minimumFractionDigits: 2,
-  }).format(valor);
-};
+const formatMoney = (valor: number): string =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
+    valor,
+  );
 
-const formatNumber = (valor: number, decimals: number = 2): string => {
-  return new Intl.NumberFormat("pt-BR", {
+const formatNumber = (valor: number, decimals: number = 2): string =>
+  new Intl.NumberFormat("pt-BR", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(valor);
-};
 
-const calcularFatorPotencia = (ativo_kwh: number, reativo_kvarh: number): number => {
+const calcularFatorPotencia = (
+  ativo_kwh: number,
+  reativo_kvarh: number,
+): number => {
   if (ativo_kwh <= 0) return 0.92;
   const aparente = Math.sqrt(ativo_kwh ** 2 + reativo_kvarh ** 2);
-  if (aparente === 0) return 0.92;
-  return Math.min(0.99, Math.max(0.3, ativo_kwh / aparente));
+  return aparente === 0
+    ? 0.92
+    : Math.min(0.99, Math.max(0.3, ativo_kwh / aparente));
 };
 
-const calcularReativoExcedente = (ativo_kwh: number, reativo_kvarh: number): number => {
+const calcularReativoExcedente = (
+  ativo_kwh: number,
+  reativo_kvarh: number,
+): number => {
   if (ativo_kwh <= 0) return 0;
   const tanPhiMinimo = Math.tan(Math.acos(FP_MINIMO_REGULAMENTAR));
   const permitido = ativo_kwh * tanPhiMinimo;
-  const excedente = reativo_kvarh - permitido;
-  return Math.max(0, excedente);
+  return Math.max(0, reativo_kvarh - permitido);
 };
 
 const calcularMultaReativa = (
   ativo_kwh: number,
   reativo_kvarh: number,
   tarifa_reativo: number,
-): number => {
-  const excedente = calcularReativoExcedente(ativo_kwh, reativo_kvarh);
-  return excedente * tarifa_reativo;
-};
+): number =>
+  calcularReativoExcedente(ativo_kwh, reativo_kvarh) * tarifa_reativo;
 
 const calcularKvarNecessario = (
   potencia_ativa_kw: number,
@@ -235,7 +287,8 @@ const calcularKvarNecessario = (
   const fp_desejado_seguro = Math.min(0.99, Math.max(fp_desejado, 0.92));
   const angulo_atual = Math.acos(fp_atual_seguro);
   const angulo_desejado = Math.acos(fp_desejado_seguro);
-  let kvar = potencia_ativa_kw * (Math.tan(angulo_atual) - Math.tan(angulo_desejado));
+  let kvar =
+    potencia_ativa_kw * (Math.tan(angulo_atual) - Math.tan(angulo_desejado));
   kvar = Math.max(0, kvar);
   return Math.ceil(kvar / 2.5) * 2.5;
 };
@@ -250,9 +303,7 @@ const distribuirEstagios = (total_kvar: number): number[] => {
       restante -= size;
     }
   }
-  if (restante >= 2.5) {
-    stages.push(Math.ceil(restante / 2.5) * 2.5);
-  }
+  if (restante >= 2.5) stages.push(Math.ceil(restante / 2.5) * 2.5);
   return stages.sort((a, b) => a - b);
 };
 
@@ -269,19 +320,21 @@ const calcularPrecoMercado = (kvar: number): number => {
       maisProximo = p;
     }
   }
-  const preco = PRECOS_MERCADO_CAPACITORES[maisProximo.toString()]?.preco_medio || 25000;
-  if (kvar !== maisProximo) {
-    const precoPorKvar = preco / maisProximo;
-    return Math.round(kvar * precoPorKvar);
-  }
-  return preco;
+  const preco =
+    PRECOS_MERCADO_CAPACITORES[maisProximo.toString()]?.preco_medio || 25000;
+  return kvar !== maisProximo
+    ? Math.round(kvar * (preco / maisProximo))
+    : preco;
 };
 
 const distribuirKvarPorTrafo = (
   transformadores: Transformador[],
   kvarTotalComercial: number,
 ): DistribuicaoTrafo[] => {
-  const potenciaTotal = transformadores.reduce((acc, t) => acc + t.potencia_kva * t.quantidade, 0);
+  const potenciaTotal = transformadores.reduce(
+    (acc, t) => acc + t.potencia_kva * t.quantidade,
+    0,
+  );
   return transformadores.map((trafo) => {
     const potenciaTrafo = trafo.potencia_kva * trafo.quantidade;
     const percentual = potenciaTrafo / potenciaTotal;
@@ -304,16 +357,10 @@ const distribuirKvarPorTrafo = (
       kvar_recomendado: kvarRecomendado,
       kvar_comercial: kvarComercial,
       preco_estimado: precoEstimado,
-      configuracao_estagios: configuracaoEstagios,
+      configuracao_estagios,
     };
   });
 };
-
-// ============================================
-// COMPONENTE PRINCIPAL
-// ============================================
-export default function DimensionarPage() {
-  // ... (todo o restante do componente permanece igual)
 
 // ============================================
 // COMPONENTE PRINCIPAL
@@ -346,36 +393,27 @@ export default function DimensionarPage() {
   >({});
   const [editandoFaturaId, setEditandoFaturaId] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
-
-  // Configurações avançadas (não mais usadas para dimensionamento principal, mas mantidas para compatibilidade)
-  const [fatorSimultaneidade, setFatorSimultaneidade] = useState(0.65);
   const [kvarRecomendadoManual, setKvarRecomendadoManual] = useState<
     number | null
   >(null);
 
-  useEffect(() => {
-    carregarDados();
-  }, []);
+  useEffect(() => carregarDados(), []);
 
   const carregarDados = () => {
     try {
       const savedTrafos = localStorage.getItem("dimensionar_transformadores");
       if (savedTrafos) setTransformadores(JSON.parse(savedTrafos));
       const savedFaturas = localStorage.getItem("dimensionar_faturas");
-      if (savedFaturas) {
-        setFaturas(JSON.parse(savedFaturas));
-      } else {
-        carregarFaturaExemploReal();
-      }
+      if (savedFaturas) setFaturas(JSON.parse(savedFaturas));
+      else carregarFaturaExemploReal();
     } catch (error) {
-      console.error("Erro ao carregar dados:", error);
+      console.error(error);
     } finally {
       setCarregando(false);
     }
   };
 
   const carregarFaturaExemploReal = () => {
-    // Dados reais extraídos das faturas da WG ARMAZENS GERAIS - Equatorial Pará
     const faturasCorretas: Fatura[] = [
       {
         id: "nov2025",
@@ -427,53 +465,9 @@ export default function DimensionarPage() {
     );
   };
 
-  const validarFatura = (
-    fatura: Partial<Fatura>,
-  ): { valida: boolean; mensagem: string } => {
-    const consumoTotal =
-      ((fatura.consumo_ponta_kwh as number) || 0) +
-      ((fatura.consumo_fora_ponta_kwh as number) || 0);
-    const reativoTotal =
-      ((fatura.reativo_ponta_kvarh as number) || 0) +
-      ((fatura.reativo_fora_ponta_kvarh as number) || 0);
-    if (consumoTotal === 0 && reativoTotal === 0)
-      return { valida: false, mensagem: "Ambos os valores estão zerados." };
-    if (reativoTotal > consumoTotal && consumoTotal > 0) {
-      const percentual = (reativoTotal / consumoTotal) * 100;
-      if (percentual > 200)
-        return {
-          valida: false,
-          mensagem: `Reativo é ${percentual.toFixed(0)}% maior que o Consumo. Verifique se os valores estão trocados.`,
-        };
-    }
-    const fp = calcularFatorPotencia(consumoTotal, reativoTotal);
-    if (fp < 0.5 && consumoTotal > 0 && reativoTotal > 0)
-      return {
-        valida: false,
-        mensagem: `FP calculado é ${(fp * 100).toFixed(1)}%. Verifique os dados.`,
-      };
-    return { valida: true, mensagem: "" };
-  };
-
-  const salvarTransformadores = () => {
-    localStorage.setItem(
-      "dimensionar_transformadores",
-      JSON.stringify(transformadores),
-    );
-    Swal.fire({
-      title: "✅ Sucesso!",
-      text: "Configuração dos transformadores salva!",
-      icon: "success",
-      timer: 1500,
-    });
-  };
-
   const salvarFatura = async () => {
-    if (!currentFatura.mes_referencia) {
-      Swal.fire("Atenção", "Informe o mês de referência", "warning");
-      return;
-    }
-
+    if (!currentFatura.mes_referencia)
+      return Swal.fire("Atenção", "Informe o mês de referência", "warning");
     const consumoPonta = parseBRLocal(currentFatura.consumo_ponta_kwh);
     const consumoForaPonta = parseBRLocal(currentFatura.consumo_fora_ponta_kwh);
     const reativoPonta = parseBRLocal(currentFatura.reativo_ponta_kvarh);
@@ -488,19 +482,6 @@ export default function DimensionarPage() {
     const concessionaria =
       (currentFatura.concessionaria as string) || "EQUATORIAL_PARA";
 
-    if (
-      reativoPonta === 0 &&
-      reativoForaPonta === 0 &&
-      consumoPonta + consumoForaPonta > 0
-    ) {
-      Swal.fire({
-        title: "⚠️ Atenção!",
-        html: "Os valores de energia reativa estão ZERADOS. Isso fará a multa ser zero.<br/>Preencha corretamente os campos <strong>Reativo Ponta</strong> e <strong>Reativo Fora Ponta</strong>.",
-        icon: "warning",
-      });
-      return;
-    }
-
     const ativoTotal = consumoPonta + consumoForaPonta;
     const reativoTotal = reativoPonta + reativoForaPonta;
     const tarifaBase =
@@ -511,13 +492,7 @@ export default function DimensionarPage() {
 
     const confirmar = await Swal.fire({
       title: "Confirmar dados?",
-      html: `<div class="text-left">
-        <p><strong>Mês:</strong> ${currentFatura.mes_referencia}</p>
-        <p><strong>Ativo Total:</strong> ${formatNumber(ativoTotal, 0)} kWh</p>
-        <p><strong>Reativo Total:</strong> ${formatNumber(reativoTotal, 0)} kVArh</p>
-        <p><strong>FP calculado:</strong> ${(fpCalc * 100).toFixed(1)}%</p>
-        <p><strong>Multa estimada:</strong> ${formatMoney(multa)}</p>
-      </div>`,
+      html: `<div class="text-left"><p><strong>Mês:</strong> ${currentFatura.mes_referencia}</p><p><strong>Ativo Total:</strong> ${formatNumber(ativoTotal, 0)} kWh</p><p><strong>Reativo Total:</strong> ${formatNumber(reativoTotal, 0)} kVArh</p><p><strong>FP calculado:</strong> ${(fpCalc * 100).toFixed(1)}%</p><p><strong>Multa estimada:</strong> ${formatMoney(multa)}</p></div>`,
       icon: "question",
       showCancelButton: true,
       confirmButtonText: "Salvar",
@@ -539,25 +514,11 @@ export default function DimensionarPage() {
       concessionaria: concessionaria,
       validado: true,
       fp_calculado: fpCalc,
-      fp_informado: currentFatura.fp_informado
-        ? parseBRLocal(currentFatura.fp_informado)
-        : undefined,
-      reativo_excedente_calculado: calcularReativoExcedente(
-        ativoTotal,
-        reativoTotal,
-      ),
-      multa_reativo_calculada: multa,
-      tarifa_reativo_utilizada: tarifaBase,
     };
 
-    let novasFaturas = [...faturas];
-    if (editandoFaturaId) {
-      const index = faturas.findIndex((f) => f.id === editandoFaturaId);
-      if (index !== -1) novasFaturas[index] = novaFatura;
-      else novasFaturas = [novaFatura, ...novasFaturas];
-    } else {
-      novasFaturas = [novaFatura, ...novasFaturas];
-    }
+    let novasFaturas = editandoFaturaId
+      ? faturas.map((f) => (f.id === editandoFaturaId ? novaFatura : f))
+      : [novaFatura, ...faturas];
     novasFaturas.sort((a, b) =>
       b.mes_referencia.localeCompare(a.mes_referencia),
     );
@@ -566,27 +527,7 @@ export default function DimensionarPage() {
     setShowFaturaModal(false);
     setCurrentFatura({});
     setEditandoFaturaId(null);
-    Swal.fire({
-      title: "✅ Sucesso!",
-      text: "Fatura salva!",
-      icon: "success",
-      timer: 1500,
-    });
-  };
-
-  const carregarFaturaExemplo = () => {
-    setCurrentFatura({
-      mes_referencia: "05/2025",
-      consumo_ponta_kwh: 8132,
-      consumo_fora_ponta_kwh: 59050,
-      demanda_ponta_kw: 430,
-      demanda_fora_ponta_kw: 447,
-      reativo_ponta_kvarh: 824,
-      reativo_fora_ponta_kvarh: 4511,
-      total_pagar: 55970.04,
-      dias_ciclo: 30,
-      concessionaria: "RORAIMA_ENERGIA",
-    });
+    Swal.fire("✅ Sucesso!", "Fatura salva!", "success");
   };
 
   const removerFatura = (id: string) => {
@@ -610,55 +551,57 @@ export default function DimensionarPage() {
     });
   };
 
-  const adicionarTransformador = () => {
-    const newId = (transformadores.length + 1).toString();
+  const salvarTransformadores = () => {
+    localStorage.setItem(
+      "dimensionar_transformadores",
+      JSON.stringify(transformadores),
+    );
+    Swal.fire(
+      "✅ Sucesso!",
+      "Configuração dos transformadores salva!",
+      "success",
+      1500,
+    );
+  };
+
+  const adicionarTransformador = () =>
     setTransformadores([
       ...transformadores,
       {
-        id: newId,
+        id: (transformadores.length + 1).toString(),
         potencia_kva: 100,
         quantidade: 1,
         tensao_v: 220,
         horas_trabalho: 220,
       },
     ]);
-  };
-
-  const removerTransformador = (index: number) => {
+  const removerTransformador = (idx: number) => {
     if (transformadores.length > 1)
-      setTransformadores(transformadores.filter((_, i) => i !== index));
+      setTransformadores(transformadores.filter((_, i) => i !== idx));
   };
-
   const atualizarTransformador = (
-    index: number,
+    idx: number,
     field: keyof Transformador,
     value: number,
   ) => {
     const novos = [...transformadores];
-    novos[index] = { ...novos[index], [field]: value };
+    novos[idx] = { ...novos[idx], [field]: value };
     setTransformadores(novos);
   };
-
   const potenciaTotalTransformadores = transformadores.reduce(
     (acc, t) => acc + t.potencia_kva * t.quantidade,
     0,
   );
 
-  // ============================================
-  // ✅ NOVO CÁLCULO – ALINHADO COM A ENGENHARIA E STARTEK
-  // ============================================
   const calcularDimensionamento = () => {
-    if (faturas.length < 2) {
-      Swal.fire(
+    if (faturas.length < 2)
+      return Swal.fire(
         "Atenção",
         "Mínimo de 2 faturas para dimensionamento confiável",
         "warning",
       );
-      return;
-    }
     setCalculando(true);
     try {
-      console.log("=== INICIANDO DIMENSIONAMENTO CORRIGIDO (Startek) ===");
       const alertas: string[] = [];
       const concessionarias = [
         ...new Set(faturas.map((f) => f.concessionaria)),
@@ -668,7 +611,6 @@ export default function DimensionarPage() {
           `⚠️ Faturas de diferentes concessionárias: ${concessionarias.join(", ")}`,
         );
 
-      // Processa faturas
       const faturasProcessadas = faturas.map((f) => {
         const ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
         const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
@@ -693,66 +635,42 @@ export default function DimensionarPage() {
         };
       });
 
-      // Pior mês (menor FP)
       const piorMes = faturasProcessadas.reduce(
         (prev, curr) => (curr.fp < prev.fp ? curr : prev),
         faturasProcessadas[0],
       );
       const fpAtual = piorMes.fp;
       const fpDesejado = targetFP;
-
-      // Média da multa atual
       const mediaMulta =
         faturasProcessadas.reduce((acc, f) => acc + f.multa, 0) /
         faturasProcessadas.length;
 
-      // Demanda ativa máxima registrada nas faturas
       const demandaMaxRegistrada = Math.max(
         ...faturasProcessadas.map((f) => f.demandaMaxKw),
       );
-
-      // ✅ CHAVE: Estimar a potência ativa real que o banco deve atender
-      // A demanda registrada (53 kW) está muito abaixo da capacidade dos transformadores (525 kVA).
-      // Em projetos de correção de FP, considera-se uma carga típica de 50% a 70% da potência dos trafos.
-      // Para este caso, adotamos 50% (conservador) -> 262,5 kVA.
-      // Potência ativa = 262,5 kVA * FP atual (0,55) ≈ 144 kW.
       const potenciaTotalKVA = potenciaTotalTransformadores;
-      const fatorCargaEstimado = 0.5; // 50% da capacidade nominal (prática comum)
       const potenciaAtivaEstimadaPelaCapacidade =
-        potenciaTotalKVA * fatorCargaEstimado * fpAtual;
-
-      // Usamos o maior valor entre a demanda registrada e a estimativa baseada nos trafos
+        potenciaTotalKVA * 0.5 * fpAtual;
       const potenciaAtivaProjetada = Math.max(
         demandaMaxRegistrada,
         potenciaAtivaEstimadaPelaCapacidade,
       );
 
-      console.log(`Demanda registrada: ${demandaMaxRegistrada.toFixed(1)} kW`);
-      console.log(
-        `Estimativa por trafos (50%): ${potenciaAtivaEstimadaPelaCapacidade.toFixed(1)} kW`,
-      );
-      console.log(
-        `Potência ativa projetada: ${potenciaAtivaProjetada.toFixed(1)} kW`,
-      );
-
-      // Verifica se precisa de capacitor
       const precisaCapacitor =
         fpAtual < FP_MINIMO_REGULAMENTAR || mediaMulta > 200;
-      let totalKvar = 0;
-      let totalKvarComercial = 0;
-      let stages: number[] = [];
-      let economiaMensal = 0;
-      let metodoCalculo: "demanda" | "manual" | "startek" = "demanda";
+      let totalKvar = 0,
+        totalKvarComercial = 0,
+        stages: number[] = [],
+        economiaMensal = 0,
+        metodoCalculo: "demanda" | "manual" | "startek" = "demanda";
       let motivo = "";
 
       if (precisaCapacitor) {
-        // 1. Se o usuário forneceu kVAr manual, usa ele
         if (kvarRecomendadoManual && kvarRecomendadoManual > 0) {
           totalKvar = kvarRecomendadoManual;
           metodoCalculo = "manual";
           motivo = `Valor definido por especialista: ${totalKvar} kVAr (laudo técnico)`;
         } else {
-          // 2. Método clássico (e utilizado pela Startek) baseado na potência ativa projetada
           totalKvar = calcularKvarNecessario(
             potenciaAtivaProjetada,
             fpAtual,
@@ -761,39 +679,17 @@ export default function DimensionarPage() {
           metodoCalculo = "startek";
           motivo = `Potência ativa projetada = ${potenciaAtivaProjetada.toFixed(1)} kW | FP atual = ${(fpAtual * 100).toFixed(1)}% | Meta = ${(fpDesejado * 100).toFixed(0)}% | Método clássico (P*Δtan)`;
         }
-
-        // Arredondar para múltiplo de 10 (valor comercial)
         totalKvarComercial = Math.ceil(totalKvar / 10) * 10;
         totalKvarComercial = Math.max(
           totalKvarComercial,
           CONFIG_CAPACITORES.minimo_kvar_grupo_a,
         );
-
-        // Limite superior para evitar exageros (até 80% da potência total dos trafos)
-        const limiteSuperior = potenciaTotalKVA * 0.8;
-        if (totalKvarComercial > limiteSuperior) {
-          alertas.push(
-            `⚠️ kVAr calculado (${totalKvarComercial}) excede 80% da potência dos trafos. Limitando a ${limiteSuperior.toFixed(0)} kVAr.`,
-          );
-          totalKvarComercial = Math.ceil(limiteSuperior / 10) * 10;
-          totalKvar = totalKvarComercial;
-        }
-
         stages = distribuirEstagios(totalKvarComercial);
-        economiaMensal = mediaMulta * 0.92; // eficácia típica de 92%
-
-        if (economiaMensal < 100 && mediaMulta > 0)
-          alertas.push(
-            "⚠️ Economia mensal muito baixa. Verifique se os valores de reativo estão corretos nas faturas.",
-          );
+        economiaMensal = mediaMulta * 0.92;
       } else {
-        const mediaFp =
-          faturasProcessadas.reduce((a, b) => a + b.fp, 0) /
-          faturasProcessadas.length;
-        motivo = `✅ Sistema regularizado (FP médio: ${(mediaFp * 100).toFixed(1)}%)`;
+        motivo = `✅ Sistema regularizado (FP médio: ${((faturasProcessadas.reduce((a, b) => a + b.fp, 0) / faturasProcessadas.length) * 100).toFixed(1)}%)`;
       }
 
-      // Investimentos e payback
       const investimentoMercadoReal =
         totalKvarComercial > 0 ? calcularPrecoMercado(totalKvarComercial) : 0;
       const payback =
@@ -806,26 +702,17 @@ export default function DimensionarPage() {
         totalKvarComercial > 0
           ? investimentoMercadoReal / totalKvarComercial
           : 0;
-
-      // Distribuição entre transformadores (proporcional à potência)
       const distribuicaoPorTrafo = distribuirKvarPorTrafo(
         transformadores,
         totalKvarComercial,
       );
-
       const tensaoCapacitores =
         transformadores[0]?.tensao_v === 380
           ? CONFIG_CAPACITORES.tensao_padrao_380v
           : CONFIG_CAPACITORES.tensao_padrao_220v;
-
       const mediaFpPorMes = faturasProcessadas
-        .map((f) => ({
-          mes: f.mes_referencia,
-          fp: f.fp * 100,
-          multa: f.multa,
-        }))
+        .map((f) => ({ mes: f.mes_referencia, fp: f.fp * 100, multa: f.multa }))
         .sort((a, b) => a.fp - b.fp);
-
       const grupoTarifario = potenciaTotalTransformadores >= 75 ? "A" : "B";
 
       setResult({
@@ -835,18 +722,13 @@ export default function DimensionarPage() {
         tensao_capacitores: tensaoCapacitores,
         fator_dessintonia: CONFIG_CAPACITORES.dessintonia_padrao,
         economia_mensal_estimada: economiaMensal,
-        investimento_estimado: investimentoMercadoReal * 0.9,
-        investimento_estimado_comercial: investimentoMercadoReal,
         investimento_mercado_real: investimentoMercadoReal,
         payback_meses: payback,
-        payback_meses_comercial: payback,
-        payback_mercado_real: payback,
         fp_atual_percent: fpAtual * 100,
         fp_projetado_percent: precisaCapacitor
           ? fpDesejado * 100
           : fpAtual * 100,
         multa_atual_mensal_real: mediaMulta,
-        multa_atual_mensal_calculada: mediaMulta,
         consumo_ativo_medio_mensal_kwh:
           faturasProcessadas.reduce((a, b) => a + b.ativoTotal, 0) /
           faturasProcessadas.length,
@@ -861,7 +743,6 @@ export default function DimensionarPage() {
         quantidade_faturas_analisadas: faturasProcessadas.length,
         pior_mes: piorMes || null,
         media_fp_por_mes: mediaFpPorMes,
-        consistencia_dados: 100,
         alertas: alertas,
         distribuicao_por_trafo: distribuicaoPorTrafo,
         fornecedores_recomendados: FORNECEDORES_RECOMENDADOS,
@@ -875,13 +756,7 @@ export default function DimensionarPage() {
         title: precisaCapacitor
           ? "✅ Dimensionamento Concluído (Startek-aligned)"
           : "✅ Análise Concluída",
-        html: `<div class="text-center">
-          <p class="text-lg font-bold">FP no pior mês: ${(fpAtual * 100).toFixed(1)}%</p>
-          ${precisaCapacitor ? `<p class="text-primary font-bold mt-2">🔋 Recomendação: ${totalKvar.toFixed(1)} kVAr<br/><span class="text-sm">(Comercial: ${totalKvarComercial} kVAr)</span><br/><span class="text-xs text-slate-500">Método: ${metodoCalculo}</span></p>` : '<p class="text-green-600 mt-2">Sistema dentro das normas ANEEL</p>'}
-          <p class="text-xs text-slate-500 mt-2">💰 Multa média: ${formatMoney(mediaMulta)}/mês</p>
-          <p class="text-xs text-slate-500">💰 Investimento estimado: ${formatMoney(investimentoMercadoReal)}</p>
-          <p class="text-xs text-slate-500">⏱️ Payback: ${payback} meses</p>
-        </div>`,
+        html: `<div class="text-center"><p class="text-lg font-bold">FP no pior mês: ${(fpAtual * 100).toFixed(1)}%</p>${precisaCapacitor ? `<p class="text-primary font-bold mt-2">🔋 Recomendação: ${totalKvar.toFixed(1)} kVAr<br/><span class="text-sm">(Comercial: ${totalKvarComercial} kVAr)</span><br/><span class="text-xs text-slate-500">Método: ${metodoCalculo}</span></p>` : '<p class="text-green-600 mt-2">Sistema dentro das normas ANEEL</p>'}<p class="text-xs text-slate-500 mt-2">💰 Multa média: ${formatMoney(mediaMulta)}/mês</p><p class="text-xs text-slate-500">💰 Investimento estimado: ${formatMoney(investimentoMercadoReal)}</p><p class="text-xs text-slate-500">⏱️ Payback: ${payback} meses</p></div>`,
         icon: precisaCapacitor ? "success" : "info",
         timer: 6000,
       });
@@ -910,9 +785,7 @@ export default function DimensionarPage() {
       const pdfWidth = pdf.internal.pageSize.getWidth() - 20;
       const img = new Image();
       img.src = dataUrl;
-      await new Promise((resolve) => {
-        img.onload = resolve;
-      });
+      await new Promise((resolve) => (img.onload = resolve));
       const finalHeight = (img.height * pdfWidth) / img.width;
       pdf.addImage(dataUrl, "PNG", 10, 10, pdfWidth, finalHeight);
       pdf.save(
@@ -960,9 +833,7 @@ export default function DimensionarPage() {
           Infraestrutura: 1x300kVA + 1x225kVA | 380V | Grupo A4
         </p>
       </header>
-
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Lado esquerdo - configurações */}
         <div className="lg:col-span-5 space-y-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <div className="flex justify-between items-center mb-4">
@@ -1065,7 +936,6 @@ export default function DimensionarPage() {
               </div>
             </div>
           </div>
-
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-bold text-primary flex gap-2">
@@ -1090,19 +960,19 @@ export default function DimensionarPage() {
                     onClick={carregarFaturaExemploReal}
                     className="text-primary text-sm"
                   >
-                    Carregar exemplo real (WG ARMAZENS)
+                    Carregar dados reais da WG ARMAZENS GERAIS →
                   </button>
                 </div>
               ) : (
                 faturas.map((fat) => {
-                  const consumoTotal =
+                  const ativo =
                     fat.consumo_ponta_kwh + fat.consumo_fora_ponta_kwh;
-                  const reativoTotal =
+                  const reativo =
                     fat.reativo_ponta_kvarh + fat.reativo_fora_ponta_kvarh;
-                  const fp = calcularFatorPotencia(consumoTotal, reativoTotal);
-                  const custoReativo = calcularMultaReativa(
-                    consumoTotal,
-                    reativoTotal,
+                  const fp = calcularFatorPotencia(ativo, reativo);
+                  const multa = calcularMultaReativa(
+                    ativo,
+                    reativo,
                     TARIFAS_REATIVO[fat.concessionaria]?.base || 0.28622,
                   );
                   return (
@@ -1112,7 +982,7 @@ export default function DimensionarPage() {
                         <div>
                           <button
                             onClick={() => {
-                              setCurrentFatura(fat as any);
+                              setCurrentFatura(fat);
                               setEditandoFaturaId(fat.id);
                               setShowFaturaModal(true);
                             }}
@@ -1151,9 +1021,9 @@ export default function DimensionarPage() {
                           >
                             FP: {(fp * 100).toFixed(1)}%
                           </span>{" "}
-                          {custoReativo > 50 && (
+                          {multa > 50 && (
                             <span className="ml-2 text-red-500">
-                              Multa: {formatMoney(custoReativo)}
+                              Multa: {formatMoney(multa)}
                             </span>
                           )}
                         </div>
@@ -1164,7 +1034,6 @@ export default function DimensionarPage() {
               )}
             </div>
           </div>
-
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <label className="block text-sm font-medium mb-2">
               Fator de Potência Desejado
@@ -1178,31 +1047,11 @@ export default function DimensionarPage() {
               <option value={0.95}>0.95 (recomendado)</option>
               <option value={0.98}>0.98 (excelente)</option>
             </select>
-
-            {/* Configurações avançadas - apenas para referência (não modificam o cálculo principal) */}
             <details className="mb-4">
               <summary className="text-sm font-medium cursor-pointer text-primary">
                 ⚙️ Configurações Avançadas
               </summary>
               <div className="mt-3 space-y-3 p-3 bg-slate-50 rounded-lg">
-                <div>
-                  <label className="text-xs text-slate-600">
-                    Fator de Carga Estimado (para dimensionamento)
-                  </label>
-                  <input
-                    type="range"
-                    min="0.3"
-                    max="0.8"
-                    step="0.05"
-                    value={0.5}
-                    disabled
-                    className="w-full"
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Fixado em 0,5 (50% da capacidade dos transformadores) –
-                    alinhado à Startek.
-                  </p>
-                </div>
                 <div>
                   <label className="text-xs text-slate-600">
                     kVAr Recomendado por Especialista (opcional)
@@ -1222,7 +1071,6 @@ export default function DimensionarPage() {
                     <button
                       onClick={() => setKvarRecomendadoManual(160)}
                       className="px-2 bg-primary text-white rounded text-xs whitespace-nowrap"
-                      title="Usar valor da proposta STARTEK"
                     >
                       STARTEK
                     </button>
@@ -1233,7 +1081,6 @@ export default function DimensionarPage() {
                 </div>
               </div>
             </details>
-
             <button
               onClick={calcularDimensionamento}
               disabled={calculando || faturas.length < 2}
@@ -1248,8 +1095,6 @@ export default function DimensionarPage() {
             </button>
           </div>
         </div>
-
-        {/* Lado direito - resultados */}
         <div className="lg:col-span-7">
           {result ? (
             <motion.div
@@ -1288,24 +1133,19 @@ export default function DimensionarPage() {
                           Método: {result.metodo_calculo_utilizado}
                         </p>
                       </div>
-
-                      {result.alertas.length > 0 && (
-                        <div className="space-y-2">
-                          {result.alertas.map((a, i) => (
-                            <div
-                              key={i}
-                              className="bg-amber-50 p-3 rounded-xl text-xs text-amber-700 flex gap-2"
-                            >
-                              <AlertTriangle
-                                size={14}
-                                className="mt-0.5 flex-shrink-0"
-                              />
-                              {a}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
+                      {result.alertas.length > 0 &&
+                        result.alertas.map((a, i) => (
+                          <div
+                            key={i}
+                            className="bg-amber-50 p-3 rounded-xl text-xs text-amber-700 flex gap-2"
+                          >
+                            <AlertTriangle
+                              size={14}
+                              className="mt-0.5 flex-shrink-0"
+                            />
+                            {a}
+                          </div>
+                        ))}
                       <div className="bg-blue-50 p-4 rounded-xl">
                         <p className="text-sm font-bold text-blue-700">
                           📌 {result.motivo_recomendacao}
@@ -1324,7 +1164,6 @@ export default function DimensionarPage() {
                           </div>
                         </div>
                       </div>
-
                       <div className="grid grid-cols-2 gap-4">
                         <div className="bg-red-50 p-4 text-center rounded-xl">
                           <TrendingUp
@@ -1355,7 +1194,6 @@ export default function DimensionarPage() {
                           </p>
                         </div>
                       </div>
-
                       <div className="bg-slate-50 rounded-xl p-4">
                         <p className="text-xs font-bold flex gap-2">
                           <Activity size={14} /> Evolução do FP por Mês
@@ -1389,7 +1227,6 @@ export default function DimensionarPage() {
                           ))}
                         </div>
                       </div>
-
                       {result.pior_mes && (
                         <div className="bg-amber-50 p-4 rounded-xl">
                           <p className="text-xs font-bold">
@@ -1407,7 +1244,6 @@ export default function DimensionarPage() {
                           </p>
                         </div>
                       )}
-
                       <div className="bg-indigo-50 p-4 rounded-xl">
                         <p className="text-xs font-bold flex gap-2">
                           <Factory size={14} /> Distribuição entre
@@ -1446,7 +1282,6 @@ export default function DimensionarPage() {
                           </div>
                         ))}
                       </div>
-
                       <div className="bg-emerald-50 p-4 rounded-xl">
                         <p className="text-xs font-bold flex gap-2">
                           <DollarSign size={14} /> Análise Financeira Real
@@ -1475,7 +1310,7 @@ export default function DimensionarPage() {
                               Payback
                             </p>
                             <p className="font-bold text-green-600">
-                              {result.payback_mercado_real} meses
+                              {result.payback_meses} meses
                             </p>
                           </div>
                           <div className="bg-white rounded p-2 border">
@@ -1498,7 +1333,6 @@ export default function DimensionarPage() {
                           </div>
                         </div>
                       </div>
-
                       <div>
                         <h3 className="font-bold mb-2 flex gap-2">
                           <Layers size={18} /> Estágios Recomendados
@@ -1519,7 +1353,6 @@ export default function DimensionarPage() {
                           ))}
                         </div>
                       </div>
-
                       <div className="bg-slate-50 p-4 rounded-xl">
                         <h4 className="font-bold text-sm mb-2">
                           Especificações Técnicas
@@ -1583,8 +1416,6 @@ export default function DimensionarPage() {
           )}
         </div>
       </div>
-
-      {/* Modal de fatura (manter igual) */}
       <AnimatePresence>
         {showFaturaModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
@@ -1634,7 +1465,6 @@ export default function DimensionarPage() {
                     <option value="RORAIMA_ENERGIA">Roraima Energia</option>
                   </select>
                 </div>
-
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs">Consumo Ponta (kWh)</label>
@@ -1642,8 +1472,7 @@ export default function DimensionarPage() {
                       type="text"
                       placeholder="Ex: 457,21"
                       value={
-                        currentFatura.consumo_ponta_kwh !== undefined &&
-                        currentFatura.consumo_ponta_kwh !== ""
+                        currentFatura.consumo_ponta_kwh !== undefined
                           ? formatNumber(
                               currentFatura.consumo_ponta_kwh as number,
                               2,
@@ -1665,8 +1494,7 @@ export default function DimensionarPage() {
                       type="text"
                       placeholder="Ex: 5179,86"
                       value={
-                        currentFatura.consumo_fora_ponta_kwh !== undefined &&
-                        currentFatura.consumo_fora_ponta_kwh !== ""
+                        currentFatura.consumo_fora_ponta_kwh !== undefined
                           ? formatNumber(
                               currentFatura.consumo_fora_ponta_kwh as number,
                               2,
@@ -1683,7 +1511,6 @@ export default function DimensionarPage() {
                     />
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs">Demanda Ponta (kW)</label>
@@ -1691,8 +1518,7 @@ export default function DimensionarPage() {
                       type="text"
                       placeholder="Ex: 53,42"
                       value={
-                        currentFatura.demanda_ponta_kw !== undefined &&
-                        currentFatura.demanda_ponta_kw !== ""
+                        currentFatura.demanda_ponta_kw !== undefined
                           ? formatNumber(
                               currentFatura.demanda_ponta_kw as number,
                               2,
@@ -1714,8 +1540,7 @@ export default function DimensionarPage() {
                       type="text"
                       placeholder="Ex: 53,42"
                       value={
-                        currentFatura.demanda_fora_ponta_kw !== undefined &&
-                        currentFatura.demanda_fora_ponta_kw !== ""
+                        currentFatura.demanda_fora_ponta_kw !== undefined
                           ? formatNumber(
                               currentFatura.demanda_fora_ponta_kw as number,
                               2,
@@ -1732,7 +1557,6 @@ export default function DimensionarPage() {
                     />
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs font-medium text-red-600">
@@ -1742,8 +1566,7 @@ export default function DimensionarPage() {
                       type="text"
                       placeholder="Ex: 493,76"
                       value={
-                        currentFatura.reativo_ponta_kvarh !== undefined &&
-                        currentFatura.reativo_ponta_kvarh !== ""
+                        currentFatura.reativo_ponta_kvarh !== undefined
                           ? formatNumber(
                               currentFatura.reativo_ponta_kvarh as number,
                               2,
@@ -1756,7 +1579,7 @@ export default function DimensionarPage() {
                           reativo_ponta_kvarh: parseBRLocal(e.target.value),
                         })
                       }
-                      className="w-full border rounded p-2 text-sm mt-1 border-red-200 focus:border-red-400"
+                      className="w-full border rounded p-2 text-sm mt-1 border-red-200"
                     />
                   </div>
                   <div>
@@ -1767,8 +1590,7 @@ export default function DimensionarPage() {
                       type="text"
                       placeholder="Ex: 4696,54"
                       value={
-                        currentFatura.reativo_fora_ponta_kvarh !== undefined &&
-                        currentFatura.reativo_fora_ponta_kvarh !== ""
+                        currentFatura.reativo_fora_ponta_kvarh !== undefined
                           ? formatNumber(
                               currentFatura.reativo_fora_ponta_kvarh as number,
                               2,
@@ -1783,11 +1605,10 @@ export default function DimensionarPage() {
                           ),
                         })
                       }
-                      className="w-full border rounded p-2 text-sm mt-1 border-red-200 focus:border-red-400"
+                      className="w-full border rounded p-2 text-sm mt-1 border-red-200"
                     />
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs">Dias do ciclo</label>
@@ -1795,8 +1616,7 @@ export default function DimensionarPage() {
                       type="text"
                       placeholder="30"
                       value={
-                        currentFatura.dias_ciclo !== undefined &&
-                        currentFatura.dias_ciclo !== ""
+                        currentFatura.dias_ciclo !== undefined
                           ? formatNumber(currentFatura.dias_ciclo as number, 0)
                           : "30"
                       }
@@ -1815,8 +1635,7 @@ export default function DimensionarPage() {
                       type="text"
                       placeholder="Ex: 12617,50"
                       value={
-                        currentFatura.total_pagar !== undefined &&
-                        currentFatura.total_pagar !== ""
+                        currentFatura.total_pagar !== undefined
                           ? formatMoney(currentFatura.total_pagar as number)
                           : ""
                       }
@@ -1833,7 +1652,20 @@ export default function DimensionarPage() {
               </div>
               <div className="flex gap-3 mt-6">
                 <button
-                  onClick={carregarFaturaExemplo}
+                  onClick={() =>
+                    setCurrentFatura({
+                      mes_referencia: "05/2025",
+                      consumo_ponta_kwh: 8132,
+                      consumo_fora_ponta_kwh: 59050,
+                      demanda_ponta_kw: 430,
+                      demanda_fora_ponta_kw: 447,
+                      reativo_ponta_kvarh: 824,
+                      reativo_fora_ponta_kvarh: 4511,
+                      total_pagar: 55970.04,
+                      dias_ciclo: 30,
+                      concessionaria: "RORAIMA_ENERGIA",
+                    })
+                  }
                   className="flex-1 py-2 border rounded-lg text-sm hover:bg-slate-50"
                 >
                   Exemplo
