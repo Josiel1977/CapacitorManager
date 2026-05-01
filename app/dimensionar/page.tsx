@@ -26,7 +26,7 @@
  import jsPDF from "jspdf";
  import { toPng } from "html-to-image";
  
-@@ -121,80 +121,93 @@ interface ResultadoDimensionamento {
+interface ResultadoDimensionamento {
    kvar_total_comercial: number;
    // Estágios do banco automático
    estagios_automaticos: number[];
@@ -120,7 +120,7 @@
  };
  
  // Distribuição dos estágios do banco automático (6-8 estágios)
-@@ -212,114 +225,115 @@ const distribuirEstagios = (total_kvar: number, numEstagios: number): number[] =
+const distribuirEstagios = (total_kvar: number, numEstagios: number): number[] =
    }
    // Se ainda há excedente e espaço, adiciona um estágio com o valor restante (arredondado para múltiplo de 2.5)
    if (restante >= 2.5 && stages.length < n) {
@@ -293,7 +293,7 @@
        }
      });
    };
-@@ -474,83 +488,93 @@ export default function DimensionarPage() {
+export default function DimensionarPage() {
  
        if (precisaCapacitor) {
          // Cálculo do banco automático (compensação da carga variável)
@@ -388,7 +388,7 @@
        const pdf = new jsPDF("p", "mm", "a4");
        const pdfWidth = pdf.internal.pageSize.getWidth() - 20;
        const pdfHeight = pdf.internal.pageSize.getHeight() - 20;
-@@ -681,62 +705,93 @@ export default function DimensionarPage() {
+ export default function DimensionarPage() {
                          <p className="text-2xl font-bold text-primary">Banco fixo (célula capacitiva): {formatNumber(result.banco_fixo_kvar, 1)} kVAr</p>
                          <p className="text-2xl font-bold text-primary">Banco automático: {formatNumber(result.banco_automatico_kvar, 1)} kVAr ({result.estagios_automaticos.length} estágios)</p>
                          <p className="text-lg font-bold text-primary mt-2">Total: {formatNumber(result.banco_fixo_kvar + result.banco_automatico_kvar, 1)} kVAr</p>
