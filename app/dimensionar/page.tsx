@@ -304,9 +304,9 @@ export default function DimensionarPage() {
   const reportRef = useRef<HTMLDivElement>(null);
 
   const [transformadores, setTransformadores] = useState<Transformador[]>([
-    { id: "1", potencia_kva: 225, quantidade: 7, tensao_v: 220, horas_trabalho: 220 },
-    { id: "2", potencia_kva: 75, quantidade: 1, tensao_v: 220, horas_trabalho: 220 },
-  ]);
+  { id: "1", potencia_kva: 300, quantidade: 1, tensao_v: 380, horas_trabalho: 220 },
+  { id: "2", potencia_kva: 225, quantidade: 1, tensao_v: 380, horas_trabalho: 220 },
+]);
 
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [targetFP, setTargetFP] = useState<number>(0.95);
@@ -502,17 +502,23 @@ export default function DimensionarPage() {
     }
     const grupoTarifario = potenciaTotalTransformadores >= 75 ? "A" : "B";
 
-    // Processa cada fatura calculando tudo do zero
+    // Processa cada fatura e recalcula tudo do zero, SEM confiar em campos pré-calculados
     const faturasProcessadas = faturas.map(f => {
-      const ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
-      const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
+      const ativoTotal = (f.consumo_ponta_kwh || 0) + (f.consumo_fora_ponta_kwh || 0);
+      const reativoTotal = (f.reativo_ponta_kvarh || 0) + (f.reativo_fora_ponta_kvarh || 0);
+      
+      // SE O REATIVO TOTAL FOR ZERO, EXIBE ALERTA
+      if (reativoTotal === 0 && ativoTotal > 0) {
+        alertas.push(`⚠️ Fatura ${f.mes_referencia} com reativo total ZERO. Verifique os dados.`);
+      }
+      
       const fp = calcularFatorPotencia(ativoTotal, reativoTotal);
-      // Obtém a tarifa de reativo correta para a concessionária
       const tarifa = TARIFAS_REATIVO[f.concessionaria as keyof typeof TARIFAS_REATIVO]?.base || TARIFAS_REATIVO.DEFAULT.base;
-      // Calcula a multa diretamente, sem usar campos salvos
       const multa = calcularMultaReativa(ativoTotal, reativoTotal, tarifa);
-      // Demanda máxima: se os campos estiverem zerados, usa um valor mínimo
-      const demandaMaxKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
+      const demandaMaxKw = Math.max(f.demanda_ponta_kw || 0, f.demanda_fora_ponta_kw || 0, 0.1);
+      
+      console.log(`Fatura ${f.mes_referencia}: Ativo=${ativoTotal}, Reativo=${reativoTotal}, FP=${fp}, Multa=${multa}, Demanda=${demandaMaxKw}`);
+      
       return { ...f, ativoTotal, reativoTotal, fp, tarifa, multa, demandaMaxKw };
     });
 
@@ -531,7 +537,8 @@ export default function DimensionarPage() {
       totalKvar = Math.max(totalKvar, CONFIG_CAPACITORES.minimo_kvar_grupo_a);
       totalKvarComercial = Math.ceil(totalKvar / 10) * 10;
       stages = distribuirEstagios(totalKvar);
-      economiaMensal = mediaMulta * 0.90; // 90% da multa será eliminada
+      // Considera que 90% da multa será eliminada após correção
+      economiaMensal = mediaMulta * 0.90;
       const custoPorKvar = grupoTarifario === "A" ? 85 : 70;
       investimento = totalKvar * custoPorKvar + 2200;
       investimentoComercial = totalKvarComercial * custoPorKvar + 2200;
@@ -542,6 +549,7 @@ export default function DimensionarPage() {
       motivo = `✅ Sistema regularizado (FP médio: ${(mediaFp * 100).toFixed(1)}%)`;
     }
 
+    // Cálculo de preço de mercado (baseado na tabela)
     const investimentoMercadoReal = calcularPrecoMercado(totalKvarComercial);
     const paybackMercadoReal = economiaMensal > 0 ? Math.ceil(investimentoMercadoReal / economiaMensal) : 99;
     const economiaAnual = economiaMensal * 12;
