@@ -260,7 +260,6 @@ export default function DimensionarPage() {
   const [result, setResult] = useState<ResultadoDimensionamento | null>(null);
   const [calculando, setCalculando] = useState(false);
   const [showFaturaModal, setShowFaturaModal] = useState(false);
-  // ✅ CORRIGIDO: currentFatura agora aceita valores string nos campos numéricos temporariamente
   const [currentFatura, setCurrentFatura] = useState<Partial<Record<keyof Fatura, string | number>>>({});
   const [editandoFaturaId, setEditandoFaturaId] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -343,7 +342,6 @@ export default function DimensionarPage() {
       return;
     }
 
-    // ✅ Conversão segura usando parseBRLocal
     const consumoPonta = parseBRLocal(currentFatura.consumo_ponta_kwh);
     const consumoForaPonta = parseBRLocal(currentFatura.consumo_fora_ponta_kwh);
     const reativoPonta = parseBRLocal(currentFatura.reativo_ponta_kvarh);
@@ -637,7 +635,7 @@ export default function DimensionarPage() {
               <button onClick={adicionarTransformador} className="w-full py-2 border-2 border-dashed rounded-xl text-slate-400 text-xs"><Plus size={14} /> Adicionar Transformador</button>
             </div>
             <div className="mt-4 p-3 bg-primary/5 rounded-xl">
-              <div className="flex justify-between text-sm"><span>Potência Total Instalada:</span><span className="font-bold text-primary">{potenciaTotalTransformadores.toLocaleString()} kVA</span></div>
+              <div className="flex justify-between text-sm"><span>Potência Total Instalada:</span><span className="font-bold text-primary">{formatNumber(potenciaTotalTransformadores, 0)} kVA</span></div>
               <div className="text-xs text-slate-500 mt-1">{transformadores.map(t => `${t.quantidade}x${t.potencia_kva}kVA`).join(" + ")} | {transformadores[0]?.tensao_v}V</div>
             </div>
           </div>
@@ -660,10 +658,11 @@ export default function DimensionarPage() {
                     <div key={fat.id} className="p-3 rounded-lg bg-slate-50">
                       <div className="flex justify-between"><span className="font-bold">{fat.mes_referencia}</span><div><button onClick={() => { setCurrentFatura(fat as any); setEditandoFaturaId(fat.id); setShowFaturaModal(true); }} className="text-blue-500"><Edit3 size={14} /></button><button onClick={() => removerFatura(fat.id)} className="text-red-500"><Trash2 size={14} /></button></div></div>
                       <div className="grid grid-cols-2 gap-1 text-xs mt-2">
-                        <div>Consumo Ponta: {fat.consumo_ponta_kwh.toLocaleString()} kWh</div>
-                        <div>Consumo F/Ponta: {fat.consumo_fora_ponta_kwh.toLocaleString()} kWh</div>
-                        <div>Reativo Ponta: {fat.reativo_ponta_kvarh.toLocaleString()} kVArh</div>
-                        <div>Reativo F/Ponta: {fat.reativo_fora_ponta_kvarh.toLocaleString()} kVArh</div>
+                        {/* ✅ CORREÇÃO: Usar formatNumber em vez de toLocaleString() sem opções */}
+                        <div>Consumo Ponta: {formatNumber(fat.consumo_ponta_kwh, 2)} kWh</div>
+                        <div>Consumo F/Ponta: {formatNumber(fat.consumo_fora_ponta_kwh, 2)} kWh</div>
+                        <div>Reativo Ponta: {formatNumber(fat.reativo_ponta_kvarh, 2)} kVArh</div>
+                        <div>Reativo F/Ponta: {formatNumber(fat.reativo_fora_ponta_kvarh, 2)} kVArh</div>
                         <div className="col-span-2"><span className={`text-xs font-bold ${fp >= 0.92 ? "text-green-600" : "text-red-600"}`}>FP: {(fp*100).toFixed(1)}%</span> {custoReativo > 50 && <span className="ml-2 text-red-500">Multa: {formatMoney(custoReativo)}</span>}</div>
                       </div>
                     </div>
@@ -700,9 +699,9 @@ export default function DimensionarPage() {
                         <div className="bg-red-50 p-4 text-center rounded-xl"><TrendingUp className="mx-auto text-red-600" /><p className="text-xs">FP Médio Atual</p><p className="text-2xl font-bold">{result.fp_atual_percent.toFixed(1)}%</p><p className="text-xs text-red-500">Multa: {formatMoney(result.multa_atual_mensal_real)}/mês</p></div>
                         <div className="bg-green-50 p-4 text-center rounded-xl"><TrendingUp className="mx-auto text-green-600" /><p className="text-xs">FP Projetado</p><p className="text-2xl font-bold text-green-600">{result.fp_projetado_percent.toFixed(0)}%</p><p className="text-xs text-green-600">Economia: {formatMoney(result.economia_mensal_estimada)}/mês</p></div>
                       </div>
-                      <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs font-bold flex gap-2"><Activity size={14} /> Evolução do FP por Mês</p><div className="mb-3 p-2 bg-blue-50 rounded-lg text-xs text-blue-800">📊 Demanda máxima considerada: <strong>{result.potencia_ativa_media_kw.toFixed(1)} kW</strong></div><div className="space-y-2">{result.media_fp_por_mes.map((item, idx) => (<div key={idx} className="flex items-center gap-2 text-xs"><span className="w-14">{item.mes}</span><div className="flex-1"><div className="w-full bg-slate-200 rounded-full h-1.5"><div className={`${item.fp >= 92 ? "bg-green-500" : item.fp >= 80 ? "bg-amber-500" : "bg-red-500"} h-1.5 rounded-full`} style={{ width: `${Math.min(100, item.fp)}%` }} /></div></div><span className="w-10 text-right font-bold">{item.fp.toFixed(1)}%</span><span className="w-20 text-right text-red-500 text-[10px]">{formatMoney(item.multa)}</span></div>))}</div></div>
-                      {result.pior_mes && <div className="bg-amber-50 p-4 rounded-xl"><p className="text-xs font-bold">Pior Mês: {result.pior_mes.mes_referencia}</p><p>FP: {(result.pior_mes.fp_calculado! * 100).toFixed(1)}% • Multa: {formatMoney(result.pior_mes.multa_reativo_calculada || 0)}</p></div>}
-                      <div className="bg-indigo-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><Factory size={14} /> Distribuição entre Transformadores</p>{result.distribuicao_por_trafo.map((dist, idx) => (<div key={idx} className="bg-white rounded-lg p-3 mt-2"><div className="flex justify-between"><span className="font-bold">Transformador {dist.trafo_kva} kVA</span><span className="text-xs">{dist.percentual.toFixed(1)}% da carga</span></div><div className="grid grid-cols-2 gap-1 text-sm"><div>Recomendado: {dist.kvar_recomendado.toFixed(1)} kVAr</div><div>Comercial: {dist.kvar_comercial} kVAr</div><div className="col-span-2">Configuração: {dist.configuracao_estagios}</div><div className="col-span-2">Investimento: {formatMoney(dist.preco_estimado)}</div></div></div>))}</div>
+                      <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs font-bold flex gap-2"><Activity size={14} /> Evolução do FP por Mês</p><div className="mb-3 p-2 bg-blue-50 rounded-lg text-xs text-blue-800">📊 Demanda máxima considerada: <strong>{formatNumber(result.potencia_ativa_media_kw, 1)} kW</strong></div><div className="space-y-2">{result.media_fp_por_mes.map((item, idx) => (<div key={idx} className="flex items-center gap-2 text-xs"><span className="w-14">{item.mes}</span><div className="flex-1"><div className="w-full bg-slate-200 rounded-full h-1.5"><div className={`${item.fp >= 92 ? "bg-green-500" : item.fp >= 80 ? "bg-amber-500" : "bg-red-500"} h-1.5 rounded-full`} style={{ width: `${Math.min(100, item.fp)}%` }} /></div></div><span className="w-10 text-right font-bold">{item.fp.toFixed(1)}%</span><span className="w-20 text-right text-red-500 text-[10px]">{formatMoney(item.multa)}</span></div>))}</div></div>
+                      {result.pior_mes && <div className="bg-amber-50 p-4 rounded-xl"><p className="text-xs font-bold">Pior Mês: {result.pior_mes.mes_referencia}</p><p>FP: {((result.pior_mes.fp_calculado || result.pior_mes.fp) * 100).toFixed(1)}% • Multa: {formatMoney(result.pior_mes.multa_reativo_calculada || result.pior_mes.multa || 0)}</p></div>}
+                      <div className="bg-indigo-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><Factory size={14} /> Distribuição entre Transformadores</p>{result.distribuicao_por_trafo.map((dist, idx) => (<div key={idx} className="bg-white rounded-lg p-3 mt-2"><div className="flex justify-between"><span className="font-bold">Transformador {formatNumber(dist.trafo_kva, 0)} kVA</span><span className="text-xs">{dist.percentual.toFixed(1)}% da carga</span></div><div className="grid grid-cols-2 gap-1 text-sm"><div>Recomendado: {formatNumber(dist.kvar_recomendado, 1)} kVAr</div><div>Comercial: {formatNumber(dist.kvar_comercial, 0)} kVAr</div><div className="col-span-2">Configuração: {dist.configuracao_estagios}</div><div className="col-span-2">Investimento: {formatMoney(dist.preco_estimado)}</div></div></div>))}</div>
                       <div className="bg-emerald-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><DollarSign size={14} /> Análise de Mercado</p><div className="grid grid-cols-2 gap-2 text-center"><div className="bg-white rounded p-2"><p className="text-[10px]">Preço mercado</p><p className="font-bold">{formatMoney(result.investimento_mercado_real)}</p></div><div className="bg-white rounded p-2"><p className="text-[10px]">Custo por kVAr</p><p className="font-bold">{formatMoney(result.preco_por_kvar)}/kVAr</p></div></div><div className="grid grid-cols-3 gap-2 text-center mt-2"><div className="bg-white rounded p-1"><p className="text-[10px]">Payback</p><p className="font-bold">{result.payback_mercado_real} meses</p></div><div className="bg-white rounded p-1"><p className="text-[10px]">Economia/ano</p><p className="font-bold">{formatMoney(result.economia_anual)}</p></div><div className="bg-white rounded p-1"><p className="text-[10px]">Retorno 5a</p><p className={`font-bold ${result.retorno_5_anos > 0 ? 'text-green-700' : 'text-red-700'}`}>{formatMoney(result.retorno_5_anos)}</p></div></div></div>
                       <div><h3 className="font-bold mb-2 flex gap-2"><Layers size={18} /> Estágios</h3><div className="flex flex-wrap gap-2">{result.kvar_por_estagio.map((s,i) => <div key={i} className="bg-slate-100 rounded-lg px-3 py-1 border"><span className="font-bold">{s.toFixed(1)} kVAr</span></div>)}</div></div>
                       <div className="bg-slate-50 p-4 rounded-xl"><h4 className="font-bold text-sm mb-2">Especificações Técnicas</h4><div className="grid grid-cols-2 gap-2 text-xs"><div>Tensão: {result.tensao_capacitores} (Δ)</div><div>Reatores: {result.fator_dessintonia}%</div><div>Controlador: Automático</div><div>Grau IP: Mínimo IP54</div></div></div>
@@ -719,7 +718,7 @@ export default function DimensionarPage() {
         </div>
       </div>
 
-      {/* Modal de fatura - ✅ CORRIGIDO: onChange com parseBRLocal */}
+      {/* Modal de fatura - ✅ CORRIGIDO: Exibição e entrada de valores */}
       <AnimatePresence>
         {showFaturaModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
@@ -729,48 +728,96 @@ export default function DimensionarPage() {
                 <div><label>Mês/Ano *</label><input type="text" placeholder="Ex: 11/2025" value={currentFatura.mes_referencia || ""} onChange={(e) => setCurrentFatura({...currentFatura, mes_referencia: e.target.value})} className="w-full border rounded p-2" /></div>
                 <div><label>Concessionária</label><select value={currentFatura.concessionaria || "EQUATORIAL_PARA"} onChange={(e) => setCurrentFatura({...currentFatura, concessionaria: e.target.value})} className="w-full border rounded p-2"><option value="EQUATORIAL_PARA">Equatorial Pará</option><option value="RORAIMA_ENERGIA">Roraima Energia</option></select></div>
                 
-                {/* ✅ Campos numéricos com parseBRLocal no onChange */}
+                {/* ✅ Campos numéricos: exibição formatada + parse na entrada */}
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label>Consumo Ponta (kWh)</label>
-                    <input type="text" placeholder="Ex: 457,21" value={currentFatura.consumo_ponta_kwh || ""} onChange={(e) => setCurrentFatura({...currentFatura, consumo_ponta_kwh: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                    <input type="text" placeholder="Ex: 457,21" 
+                      value={currentFatura.consumo_ponta_kwh !== undefined && currentFatura.consumo_ponta_kwh !== "" 
+                        ? formatNumber(currentFatura.consumo_ponta_kwh as number, 2) 
+                        : ""} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, consumo_ponta_kwh: parseBRLocal(e.target.value)})} 
+                      className="w-full border rounded p-2" 
+                    />
                   </div>
                   <div>
                     <label>Consumo Fora Ponta (kWh)</label>
-                    <input type="text" placeholder="Ex: 5179,86" value={currentFatura.consumo_fora_ponta_kwh || ""} onChange={(e) => setCurrentFatura({...currentFatura, consumo_fora_ponta_kwh: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                    <input type="text" placeholder="Ex: 5179,86" 
+                      value={currentFatura.consumo_fora_ponta_kwh !== undefined && currentFatura.consumo_fora_ponta_kwh !== "" 
+                        ? formatNumber(currentFatura.consumo_fora_ponta_kwh as number, 2) 
+                        : ""} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, consumo_fora_ponta_kwh: parseBRLocal(e.target.value)})} 
+                      className="w-full border rounded p-2" 
+                    />
                   </div>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label>Demanda Ponta (kW)</label>
-                    <input type="text" placeholder="Ex: 53,42" value={currentFatura.demanda_ponta_kw || ""} onChange={(e) => setCurrentFatura({...currentFatura, demanda_ponta_kw: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                    <input type="text" placeholder="Ex: 53,42" 
+                      value={currentFatura.demanda_ponta_kw !== undefined && currentFatura.demanda_ponta_kw !== "" 
+                        ? formatNumber(currentFatura.demanda_ponta_kw as number, 2) 
+                        : ""} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, demanda_ponta_kw: parseBRLocal(e.target.value)})} 
+                      className="w-full border rounded p-2" 
+                    />
                   </div>
                   <div>
                     <label>Demanda Fora Ponta (kW)</label>
-                    <input type="text" placeholder="Ex: 53,42" value={currentFatura.demanda_fora_ponta_kw || ""} onChange={(e) => setCurrentFatura({...currentFatura, demanda_fora_ponta_kw: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                    <input type="text" placeholder="Ex: 53,42" 
+                      value={currentFatura.demanda_fora_ponta_kw !== undefined && currentFatura.demanda_fora_ponta_kw !== "" 
+                        ? formatNumber(currentFatura.demanda_fora_ponta_kw as number, 2) 
+                        : ""} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, demanda_fora_ponta_kw: parseBRLocal(e.target.value)})} 
+                      className="w-full border rounded p-2" 
+                    />
                   </div>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label>Reativo Ponta (kVArh)</label>
-                    <input type="text" placeholder="Ex: 493,76" value={currentFatura.reativo_ponta_kvarh || ""} onChange={(e) => setCurrentFatura({...currentFatura, reativo_ponta_kvarh: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                    <input type="text" placeholder="Ex: 493,76" 
+                      value={currentFatura.reativo_ponta_kvarh !== undefined && currentFatura.reativo_ponta_kvarh !== "" 
+                        ? formatNumber(currentFatura.reativo_ponta_kvarh as number, 2) 
+                        : ""} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, reativo_ponta_kvarh: parseBRLocal(e.target.value)})} 
+                      className="w-full border rounded p-2" 
+                    />
                   </div>
                   <div>
                     <label>Reativo Fora Ponta (kVArh)</label>
-                    <input type="text" placeholder="Ex: 4696,54" value={currentFatura.reativo_fora_ponta_kvarh || ""} onChange={(e) => setCurrentFatura({...currentFatura, reativo_fora_ponta_kvarh: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                    <input type="text" placeholder="Ex: 4696,54" 
+                      value={currentFatura.reativo_fora_ponta_kvarh !== undefined && currentFatura.reativo_fora_ponta_kvarh !== "" 
+                        ? formatNumber(currentFatura.reativo_fora_ponta_kvarh as number, 2) 
+                        : ""} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, reativo_fora_ponta_kvarh: parseBRLocal(e.target.value)})} 
+                      className="w-full border rounded p-2" 
+                    />
                   </div>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label>Dias ciclo</label>
-                    <input type="text" placeholder="30" value={currentFatura.dias_ciclo ?? 30} onChange={(e) => setCurrentFatura({...currentFatura, dias_ciclo: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                    <input type="text" placeholder="30" 
+                      value={currentFatura.dias_ciclo !== undefined && currentFatura.dias_ciclo !== "" 
+                        ? formatNumber(currentFatura.dias_ciclo as number, 0) 
+                        : "30"} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, dias_ciclo: parseBRLocal(e.target.value)})} 
+                      className="w-full border rounded p-2" 
+                    />
                   </div>
                   <div>
                     <label>Total a Pagar (R$)</label>
-                    <input type="text" placeholder="Ex: 12617,50" value={currentFatura.total_pagar || ""} onChange={(e) => setCurrentFatura({...currentFatura, total_pagar: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                    <input type="text" placeholder="Ex: 12617,50" 
+                      value={currentFatura.total_pagar !== undefined && currentFatura.total_pagar !== "" 
+                        ? formatMoney(currentFatura.total_pagar as number) 
+                        : ""} 
+                      onChange={(e) => setCurrentFatura({...currentFatura, total_pagar: parseBRLocal(e.target.value)})} 
+                      className="w-full border rounded p-2" 
+                    />
                   </div>
                 </div>
               </div>
