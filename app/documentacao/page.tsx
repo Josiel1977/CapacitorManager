@@ -220,6 +220,59 @@ const docs = {
       </div>
     )
   },
+  dimensionamento: {
+  title: "📊 Dimensionamento por Faturas",
+  content: (
+    <div className="space-y-4">
+      <h2 className="text-2xl font-bold text-primary">Dimensionamento de Banco de Capacitores</h2>
+      <p className="text-slate-600">
+        A partir de no mínimo 2 faturas de energia (até 12 meses), o sistema calcula automaticamente 
+        a necessidade de correção do fator de potência e sugere um banco de capacitores dimensionado.
+      </p>
+
+      <div className="bg-blue-50 p-4 rounded-lg">
+        <h4 className="font-bold text-blue-700 mb-2">📋 Dados extraídos da fatura:</h4>
+        <ul className="list-disc pl-5 text-sm">
+          <li>Consumo ativo (ponta e fora ponta) – kWh</li>
+          <li>Reativo excedente (ponta e fora ponta) – kVArh</li>
+          <li>Demanda registrada (kW)</li>
+          <li>Concessionária (tarifa aplicada automaticamente)</li>
+        </ul>
+      </div>
+
+      <div className="bg-primary/5 p-4 rounded-lg">
+        <h4 className="font-bold text-primary mb-2">⚙️ Metodologia</h4>
+        <p className="text-sm">Potência ativa estimada = demanda medida ou (potência instalada × fator de carga × FP atual).</p>
+        <p className="text-sm mt-1">kVAr = P × (tanφ_atual – tanφ_desejado).</p>
+        <p className="text-sm mt-1">Resultado dividido em banco fixo (reativo do transformador) + banco automático (compensação da carga).</p>
+      </div>
+
+      <div className="bg-slate-50 p-4 rounded-lg">
+        <h4 className="font-bold mb-2">🎛️ Parâmetros configuráveis pelo usuário:</h4>
+        <ul className="list-disc pl-5 text-sm">
+          <li>Fator de potência desejado (0,92 / 0,95 / 0,98)</li>
+          <li>Fator de carga (0,3 a 0,9) – relaciona carga média com potência instalada</li>
+          <li>Correção fixa (0% a 10%) – célula capacitiva para o transformador</li>
+          <li>Número de estágios automáticos (6 a 8)</li>
+        </ul>
+      </div>
+
+      <div className="bg-green-50 p-4 rounded-lg">
+        <h4 className="font-bold text-green-700 mb-2">💰 Resultados financeiros:</h4>
+        <ul className="list-disc pl-5 text-sm">
+          <li>Multa média mensal atual</li>
+          <li>Economia projetada (92% da multa)</li>
+          <li>Investimento total estimado (fixo + automático)</li>
+          <li>Payback (meses), economia anual, retorno em 5 anos e ROI</li>
+        </ul>
+      </div>
+
+      <div className="bg-amber-50 p-3 rounded-lg text-sm">
+        💡 <strong>Dica:</strong> Use o memorial gerado como proposta comercial para o cliente – ele já contém todas as análises e a recomendação técnica.
+      </div>
+    </div>
+  )
+}
   faq: {
     title: "❓ FAQ - Perguntas Frequentes",
     content: (
