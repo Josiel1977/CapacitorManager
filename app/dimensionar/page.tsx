@@ -303,7 +303,7 @@ interface Fatura {
 export default function DimensionarPage() {
   const reportRef = useRef<HTMLDivElement>(null);
 
-  const [transformadores, setTransformadores] = useState<Transformador[]>([
+ const [transformadores, setTransformadores] = useState<Transformador[]>([
   { id: "1", potencia_kva: 300, quantidade: 1, tensao_v: 380, horas_trabalho: 220 },
   { id: "2", potencia_kva: 225, quantidade: 1, tensao_v: 380, horas_trabalho: 220 },
 ]);
@@ -338,26 +338,40 @@ export default function DimensionarPage() {
       setCarregando(false);
     }
   };
-
-  const carregarFaturaExemploReal = () => {
-    const faturaExemplo: Fatura = {
-      id: "exemplo1",
-      mes_referencia: "05/2025",
-      consumo_ponta_kwh: 8132,
-      consumo_fora_ponta_kwh: 59050,
-      demanda_ponta_kw: 430,
-      demanda_fora_ponta_kw: 447,
-      reativo_ponta_kvarh: 824,
-      reativo_fora_ponta_kvarh: 4511,
-      total_pagar: 55970.04,
+const carregarFaturaExemploReal = () => {
+  const faturasCorretas: Fatura[] = [
+    {
+      id: "nov2025",
+      mes_referencia: "11/2025",
+      consumo_ponta_kwh: 457.21,
+      consumo_fora_ponta_kwh: 5179.86,
+      demanda_ponta_kw: 53.42,
+      demanda_fora_ponta_kw: 53.42,
+      reativo_ponta_kvarh: 493.76,
+      reativo_fora_ponta_kvarh: 4696.54,
+      total_pagar: 12617.50,
       dias_ciclo: 30,
-      concessionaria: "RORAIMA_ENERGIA",
+      concessionaria: "EQUATORIAL_PARA",
       validado: true,
-      fp_calculado: 0.92,
-    };
-    setFaturas([faturaExemplo]);
-    localStorage.setItem("dimensionar_faturas", JSON.stringify([faturaExemplo]));
-  };
+    },
+    {
+      id: "dez2025",
+      mes_referencia: "12/2025",
+      consumo_ponta_kwh: 595.56,
+      consumo_fora_ponta_kwh: 6106.21,
+      demanda_ponta_kw: 40.66,
+      demanda_fora_ponta_kw: 40.66,
+      reativo_ponta_kvarh: 1130.49,
+      reativo_fora_ponta_kvarh: 8932.83,
+      total_pagar: 13728.12,
+      dias_ciclo: 31,
+      concessionaria: "EQUATORIAL_PARA",
+      validado: true,
+    },
+  ];
+  setFaturas(faturasCorretas);
+  localStorage.setItem("dimensionar_faturas", JSON.stringify(faturasCorretas));
+};
 
   const validarFatura = (fatura: Partial<Fatura>): { valida: boolean; mensagem: string } => {
     const consumoTotal = (fatura.consumo_ponta_kwh || 0) + (fatura.consumo_fora_ponta_kwh || 0);
