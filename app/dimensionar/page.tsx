@@ -144,6 +144,9 @@ export default function DimensionarPage() {
       reativo_ponta_kvarh: 824,
       reativo_fora_ponta_kvarh: 4511,
       total_pagar: 55970.04,
+      dias_ciclo: 30, // <-- adicionar
+      concessionaria: "EQUATORIAL_PARA", // <-- adicionar
+      validado: true, // <-- adicionar
     };
     setFaturas([faturaExemplo]);
     localStorage.setItem(
