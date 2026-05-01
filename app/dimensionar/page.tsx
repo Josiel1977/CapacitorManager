@@ -279,16 +279,21 @@ const formatNumber = (valor: number, decimals: number = 2): string => {
 // ============================================
 // UTILITÁRIOS
 // ============================================
-const FP_MINIMO_REGULAMENTAR = 0.92;
 
-const calcularFatorPotencia = (ativo_kwh: number, reativo_kvarh: number): number => {
+const calcularFatorPotencia = (
+  ativo_kwh: number,
+  reativo_kvarh: number,
+): number => {
   if (ativo_kwh <= 0) return 0.92;
   const aparente = Math.sqrt(ativo_kwh ** 2 + reativo_kvarh ** 2);
   if (aparente === 0) return 0.92;
   return Math.min(0.99, Math.max(0.3, ativo_kwh / aparente));
 };
 
-const calcularReativoExcedente = (ativo_kwh: number, reativo_kvarh: number): number => {
+const calcularReativoExcedente = (
+  ativo_kwh: number,
+  reativo_kvarh: number,
+): number => {
   if (ativo_kwh <= 0) return 0;
   const tanPhiMinimo = Math.tan(Math.acos(FP_MINIMO_REGULAMENTAR)); // ~0.426
   const permitido = ativo_kwh * tanPhiMinimo;
