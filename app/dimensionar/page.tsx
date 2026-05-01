@@ -59,95 +59,27 @@ const PRECOS_MERCADO_CAPACITORES: Record<
   string,
   { preco_medio: number; faixa_preco: string; fornecedores: string[] }
 > = {
-  "20": {
-    preco_medio: 5400,
-    faixa_preco: "R$ 4.900 - R$ 5.900",
-    fornecedores: ["FASF", "Genérico", "5G"],
-  },
-  "30": {
-    preco_medio: 5300,
-    faixa_preco: "R$ 4.800 - R$ 5.800",
-    fornecedores: ["FASF", "5G", "WEG"],
-  },
-  "50": {
-    preco_medio: 9700,
-    faixa_preco: "R$ 8.900 - R$ 10.500",
-    fornecedores: ["FASF", "5G", "Siemens"],
-  },
-  "70": {
-    preco_medio: 13600,
-    faixa_preco: "R$ 12.500 - R$ 14.800",
-    fornecedores: ["FASF", "ABB"],
-  },
-  "90": {
-    preco_medio: 15300,
-    faixa_preco: "R$ 14.000 - R$ 16.500",
-    fornecedores: ["FASF", "5G"],
-  },
-  "100": {
-    preco_medio: 18700,
-    faixa_preco: "R$ 17.500 - R$ 19.900",
-    fornecedores: ["5G", "FASF", "WEG"],
-  },
-  "120": {
-    preco_medio: 21500,
-    faixa_preco: "R$ 19.900 - R$ 23.000",
-    fornecedores: ["FASF", "5G"],
-  },
-  "150": {
-    preco_medio: 25500,
-    faixa_preco: "R$ 23.500 - R$ 27.500",
-    fornecedores: ["5G", "WEG"],
-  },
-  "180": {
-    preco_medio: 26900,
-    faixa_preco: "R$ 24.900 - R$ 28.900",
-    fornecedores: ["FASF", "5G"],
-  },
-  "210": {
-    preco_medio: 27300,
-    faixa_preco: "R$ 25.500 - R$ 29.500",
-    fornecedores: ["FASF", "5G"],
-  },
-  "240": {
-    preco_medio: 28500,
-    faixa_preco: "R$ 26.500 - R$ 30.500",
-    fornecedores: ["FASF"],
-  },
-  "280": {
-    preco_medio: 29600,
-    faixa_preco: "R$ 27.500 - R$ 31.500",
-    fornecedores: ["FASF"],
-  },
-  "300": {
-    preco_medio: 32500,
-    faixa_preco: "R$ 30.000 - R$ 35.000",
-    fornecedores: ["WEG", "ABB"],
-  },
+  "20": { preco_medio: 5400, faixa_preco: "R$ 4.900 - R$ 5.900", fornecedores: ["FASF", "Genérico", "5G"] },
+  "30": { preco_medio: 5300, faixa_preco: "R$ 4.800 - R$ 5.800", fornecedores: ["FASF", "5G", "WEG"] },
+  "50": { preco_medio: 9700, faixa_preco: "R$ 8.900 - R$ 10.500", fornecedores: ["FASF", "5G", "Siemens"] },
+  "70": { preco_medio: 13600, faixa_preco: "R$ 12.500 - R$ 14.800", fornecedores: ["FASF", "ABB"] },
+  "90": { preco_medio: 15300, faixa_preco: "R$ 14.000 - R$ 16.500", fornecedores: ["FASF", "5G"] },
+  "100": { preco_medio: 18700, faixa_preco: "R$ 17.500 - R$ 19.900", fornecedores: ["5G", "FASF", "WEG"] },
+  "120": { preco_medio: 21500, faixa_preco: "R$ 19.900 - R$ 23.000", fornecedores: ["FASF", "5G"] },
+  "150": { preco_medio: 25500, faixa_preco: "R$ 23.500 - R$ 27.500", fornecedores: ["5G", "WEG"] },
+  "180": { preco_medio: 26900, faixa_preco: "R$ 24.900 - R$ 28.900", fornecedores: ["FASF", "5G"] },
+  "210": { preco_medio: 27300, faixa_preco: "R$ 25.500 - R$ 29.500", fornecedores: ["FASF", "5G"] },
+  "240": { preco_medio: 28500, faixa_preco: "R$ 26.500 - R$ 30.500", fornecedores: ["FASF"] },
+  "280": { preco_medio: 29600, faixa_preco: "R$ 27.500 - R$ 31.500", fornecedores: ["FASF"] },
+  "300": { preco_medio: 32500, faixa_preco: "R$ 30.000 - R$ 35.000", fornecedores: ["WEG", "ABB"] },
 };
 
 const FORNECEDORES_RECOMENDADOS = [
-  {
-    nome: "WEG",
-    site: "www.weg.net",
-    especialidade: "Equipamentos industriais premium",
-  },
-  {
-    nome: "FASF",
-    site: "www.fasf.com.br",
-    especialidade: "Bancos de capacitores especializados",
-  },
-  {
-    nome: "5G Equipamentos",
-    site: "www.5geq.com.br",
-    especialidade: "Custo-benefício",
-  },
+  { nome: "WEG", site: "www.weg.net", especialidade: "Equipamentos industriais premium" },
+  { nome: "FASF", site: "www.fasf.com.br", especialidade: "Bancos de capacitores especializados" },
+  { nome: "5G Equipamentos", site: "www.5geq.com.br", especialidade: "Custo-benefício" },
   { nome: "ABB", site: "new.abb.com/br", especialidade: "Tecnologia suíça" },
-  {
-    nome: "Siemens",
-    site: "www.siemens.com/br",
-    especialidade: "Automação e energia",
-  },
+  { nome: "Siemens", site: "www.siemens.com/br", especialidade: "Automação e energia" },
 ];
 
 const CONFIG_CAPACITORES = {
@@ -234,16 +166,11 @@ interface ResultadoDimensionamento {
   preco_por_kvar: number;
   economia_anual: number;
   retorno_5_anos: number;
-  metodo_calculo_utilizado:
-    | "reativo_excedente"
-    | "demanda"
-    | "hibrido"
-    | "manual"
-    | "startek";
+  metodo_calculo_utilizado: "demanda" | "manual" | "startek";
 }
 
 // ============================================
-// UTILITÁRIOS
+// UTILITÁRIOS (APENAS UMA VEZ!)
 // ============================================
 const parseBRLocal = (valor: string | number | undefined): number => {
   if (valor === undefined || valor === null) return 0;
@@ -275,27 +202,16 @@ const formatNumber = (valor: number, decimals: number = 2): string => {
   }).format(valor);
 };
 
-// ✅ FUNÇÃO CORRETA para cálculo do reativo excedente
-// ============================================
-// UTILITÁRIOS
-// ============================================
-
-const calcularFatorPotencia = (
-  ativo_kwh: number,
-  reativo_kvarh: number,
-): number => {
+const calcularFatorPotencia = (ativo_kwh: number, reativo_kvarh: number): number => {
   if (ativo_kwh <= 0) return 0.92;
   const aparente = Math.sqrt(ativo_kwh ** 2 + reativo_kvarh ** 2);
   if (aparente === 0) return 0.92;
   return Math.min(0.99, Math.max(0.3, ativo_kwh / aparente));
 };
 
-const calcularReativoExcedente = (
-  ativo_kwh: number,
-  reativo_kvarh: number,
-): number => {
+const calcularReativoExcedente = (ativo_kwh: number, reativo_kvarh: number): number => {
   if (ativo_kwh <= 0) return 0;
-  const tanPhiMinimo = Math.tan(Math.acos(FP_MINIMO_REGULAMENTAR)); // ~0.426
+  const tanPhiMinimo = Math.tan(Math.acos(FP_MINIMO_REGULAMENTAR));
   const permitido = ativo_kwh * tanPhiMinimo;
   const excedente = reativo_kvarh - permitido;
   return Math.max(0, excedente);
@@ -309,17 +225,7 @@ const calcularMultaReativa = (
   const excedente = calcularReativoExcedente(ativo_kwh, reativo_kvarh);
   return excedente * tarifa_reativo;
 };
-// ✅ Calcula multa baseada no reativo excedente
-const calcularMultaReativa = (
-  ativo_kwh: number,
-  reativo_kvarh: number,
-  tarifa_reativo: number,
-): number => {
-  const excedente = calcularReativoExcedente(ativo_kwh, reativo_kvarh);
-  return excedente * tarifa_reativo;
-};
 
-// Calcular kVAr necessários pelo método clássico (P * (tanΦ1 - tanΦ2))
 const calcularKvarNecessario = (
   potencia_ativa_kw: number,
   fp_atual: number,
@@ -329,13 +235,11 @@ const calcularKvarNecessario = (
   const fp_desejado_seguro = Math.min(0.99, Math.max(fp_desejado, 0.92));
   const angulo_atual = Math.acos(fp_atual_seguro);
   const angulo_desejado = Math.acos(fp_desejado_seguro);
-  let kvar =
-    potencia_ativa_kw * (Math.tan(angulo_atual) - Math.tan(angulo_desejado));
+  let kvar = potencia_ativa_kw * (Math.tan(angulo_atual) - Math.tan(angulo_desejado));
   kvar = Math.max(0, kvar);
   return Math.ceil(kvar / 2.5) * 2.5;
 };
 
-// Distribuição de estágios comerciais
 const distribuirEstagios = (total_kvar: number): number[] => {
   const sizes = [...CONFIG_CAPACITORES.estagios_padrao];
   let restante = total_kvar;
@@ -352,7 +256,6 @@ const distribuirEstagios = (total_kvar: number): number[] => {
   return stages.sort((a, b) => a - b);
 };
 
-// Preço estimado de mercado
 const calcularPrecoMercado = (kvar: number): number => {
   const potencias = Object.keys(PRECOS_MERCADO_CAPACITORES)
     .map(Number)
@@ -366,8 +269,7 @@ const calcularPrecoMercado = (kvar: number): number => {
       maisProximo = p;
     }
   }
-  const preco =
-    PRECOS_MERCADO_CAPACITORES[maisProximo.toString()]?.preco_medio || 25000;
+  const preco = PRECOS_MERCADO_CAPACITORES[maisProximo.toString()]?.preco_medio || 25000;
   if (kvar !== maisProximo) {
     const precoPorKvar = preco / maisProximo;
     return Math.round(kvar * precoPorKvar);
@@ -375,20 +277,15 @@ const calcularPrecoMercado = (kvar: number): number => {
   return preco;
 };
 
-// Distribuição kVAr entre transformadores (proporcional à potência)
 const distribuirKvarPorTrafo = (
   transformadores: Transformador[],
   kvarTotalComercial: number,
 ): DistribuicaoTrafo[] => {
-  const potenciaTotal = transformadores.reduce(
-    (acc, t) => acc + t.potencia_kva * t.quantidade,
-    0,
-  );
+  const potenciaTotal = transformadores.reduce((acc, t) => acc + t.potencia_kva * t.quantidade, 0);
   return transformadores.map((trafo) => {
     const potenciaTrafo = trafo.potencia_kva * trafo.quantidade;
     const percentual = potenciaTrafo / potenciaTotal;
     let kvarRecomendado = kvarTotalComercial * percentual;
-    // Arredondar para valores comerciais típicos (10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100...)
     let kvarComercial = Math.ceil(kvarRecomendado / 10) * 10;
     if (kvarComercial < 10 && kvarRecomendado > 0) kvarComercial = 10;
     const precoEstimado = calcularPrecoMercado(kvarComercial);
@@ -411,6 +308,12 @@ const distribuirKvarPorTrafo = (
     };
   });
 };
+
+// ============================================
+// COMPONENTE PRINCIPAL
+// ============================================
+export default function DimensionarPage() {
+  // ... (todo o restante do componente permanece igual)
 
 // ============================================
 // COMPONENTE PRINCIPAL
