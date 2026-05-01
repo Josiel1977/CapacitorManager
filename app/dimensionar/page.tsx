@@ -238,7 +238,8 @@ interface ResultadoDimensionamento {
     | "reativo_excedente"
     | "demanda"
     | "hibrido"
-    | "manual";
+    | "manual"
+    | "startek";
 }
 
 // ============================================
@@ -274,6 +275,7 @@ const formatNumber = (valor: number, decimals: number = 2): string => {
   }).format(valor);
 };
 
+// ✅ FUNÇÃO CORRETA para cálculo do fator de potência
 const calcularFatorPotencia = (
   ativo_kwh: number,
   reativo_kvarh: number,
@@ -284,8 +286,21 @@ const calcularFatorPotencia = (
   return Math.min(0.99, Math.max(0.3, ativo_kwh / aparente));
 };
 
-calcularReativoExcedente;
+// ✅ FUNÇÃO CORRETA para calcular o reativo excedente (segundo ANEEL)
+// Fórmula: reativo excedente = reativo_total - (ativo_total * tan(acos(0.92)))
+const calcularReativoExcedente = (
+  ativo_kwh: number,
+  reativo_kvarh: number,
+): number => {
+  if (ativo_kwh <= 0) return 0;
+  const fpMinimo = FP_MINIMO_REGULAMENTAR; // 0.92
+  const tanPhiMinimo = Math.tan(Math.acos(fpMinimo)); // ~0.426
+  const permitido = ativo_kwh * tanPhiMinimo;
+  const excedente = reativo_kvarh - permitido;
+  return Math.max(0, excedente);
+};
 
+// ✅ Calcula multa baseada no reativo excedente
 const calcularMultaReativa = (
   ativo_kwh: number,
   reativo_kvarh: number,
@@ -295,6 +310,7 @@ const calcularMultaReativa = (
   return excedente * tarifa_reativo;
 };
 
+// Calcular kVAr necessários pelo método clássico (P * (tanΦ1 - tanΦ2))
 const calcularKvarNecessario = (
   potencia_ativa_kw: number,
   fp_atual: number,
@@ -310,20 +326,7 @@ const calcularKvarNecessario = (
   return Math.ceil(kvar / 2.5) * 2.5;
 };
 
-// ✅ NOVO: Calcula kVAr baseado no reativo excedente REAL das faturas (método ANEEL)
-const calcularKvarBaseadoEmReativoReal = (
-  reativoExcedenteMedioKvarh: number,
-  diasCiclo: number,
-  fatorSimultaneidade: number = 0.35,
-  margemSeguranca: number = 1.3,
-): number => {
-  const horasCiclo = diasCiclo * 24;
-  const kvarMedio = reativoExcedenteMedioKvarh / horasCiclo;
-  const kvarPicoEstimado = kvarMedio / fatorSimultaneidade;
-  const kvarComMargem = kvarPicoEstimado * margemSeguranca;
-  return Math.ceil(kvarComMargem / 2.5) * 2.5;
-};
-
+// Distribuição de estágios comerciais
 const distribuirEstagios = (total_kvar: number): number[] => {
   const sizes = [...CONFIG_CAPACITORES.estagios_padrao];
   let restante = total_kvar;
@@ -340,6 +343,7 @@ const distribuirEstagios = (total_kvar: number): number[] => {
   return stages.sort((a, b) => a - b);
 };
 
+// Preço estimado de mercado
 const calcularPrecoMercado = (kvar: number): number => {
   const potencias = Object.keys(PRECOS_MERCADO_CAPACITORES)
     .map(Number)
@@ -362,6 +366,7 @@ const calcularPrecoMercado = (kvar: number): number => {
   return preco;
 };
 
+// Distribuição kVAr entre transformadores (proporcional à potência)
 const distribuirKvarPorTrafo = (
   transformadores: Transformador[],
   kvarTotalComercial: number,
@@ -373,8 +378,10 @@ const distribuirKvarPorTrafo = (
   return transformadores.map((trafo) => {
     const potenciaTrafo = trafo.potencia_kva * trafo.quantidade;
     const percentual = potenciaTrafo / potenciaTotal;
-    const kvarRecomendado = kvarTotalComercial * percentual;
-    const kvarComercial = Math.ceil(kvarRecomendado / 10) * 10;
+    let kvarRecomendado = kvarTotalComercial * percentual;
+    // Arredondar para valores comerciais típicos (10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100...)
+    let kvarComercial = Math.ceil(kvarRecomendado / 10) * 10;
+    if (kvarComercial < 10 && kvarRecomendado > 0) kvarComercial = 10;
     const precoEstimado = calcularPrecoMercado(kvarComercial);
     let configuracaoEstagios = "";
     if (kvarComercial <= 30)
@@ -428,8 +435,8 @@ export default function DimensionarPage() {
   const [editandoFaturaId, setEditandoFaturaId] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
 
-  // ✅ NOVO: Fator de simultaneidade configurável e kVAr manual
-  const [fatorSimultaneidade, setFatorSimultaneidade] = useState(0.35);
+  // Configurações avançadas (não mais usadas para dimensionamento principal, mas mantidas para compatibilidade)
+  const [fatorSimultaneidade, setFatorSimultaneidade] = useState(0.65);
   const [kvarRecomendadoManual, setKvarRecomendadoManual] = useState<
     number | null
   >(null);
@@ -456,7 +463,7 @@ export default function DimensionarPage() {
   };
 
   const carregarFaturaExemploReal = () => {
-    // ✅ Dados REAIS extraídos das faturas da WG ARMAZENS GERAIS - Equatorial Pará
+    // Dados reais extraídos das faturas da WG ARMAZENS GERAIS - Equatorial Pará
     const faturasCorretas: Fatura[] = [
       {
         id: "nov2025",
@@ -725,7 +732,9 @@ export default function DimensionarPage() {
     0,
   );
 
-  // ✅ NOVO: Cálculo híbrido que prioriza dados reais das faturas
+  // ============================================
+  // ✅ NOVO CÁLCULO – ALINHADO COM A ENGENHARIA E STARTEK
+  // ============================================
   const calcularDimensionamento = () => {
     if (faturas.length < 2) {
       Swal.fire(
@@ -737,13 +746,7 @@ export default function DimensionarPage() {
     }
     setCalculando(true);
     try {
-      console.log("=== FATURAS CARREGADAS ===");
-      faturas.forEach((f) => {
-        console.log(
-          `${f.mes_referencia}: Ativo=${f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh}, Reativo=${f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh}`,
-        );
-      });
-
+      console.log("=== INICIANDO DIMENSIONAMENTO CORRIGIDO (Startek) ===");
       const alertas: string[] = [];
       const concessionarias = [
         ...new Set(faturas.map((f) => f.concessionaria)),
@@ -752,140 +755,114 @@ export default function DimensionarPage() {
         alertas.push(
           `⚠️ Faturas de diferentes concessionárias: ${concessionarias.join(", ")}`,
         );
-      const grupoTarifario = potenciaTotalTransformadores >= 75 ? "A" : "B";
 
-      // Processa faturas calculando valores derivados
+      // Processa faturas
       const faturasProcessadas = faturas.map((f) => {
         const ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
         const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
-        const reativoExcedente = calcularReativoExcedente(
-          ativoTotal,
-          reativoTotal,
-        );
-
-        if (reativoTotal === 0 && ativoTotal > 0)
-          alertas.push(`⚠️ Fatura ${f.mes_referencia} com REATIVO ZERO.`);
-
         const fp = calcularFatorPotencia(ativoTotal, reativoTotal);
         const tarifa =
           TARIFAS_REATIVO[f.concessionaria as keyof typeof TARIFAS_REATIVO]
             ?.base || TARIFAS_REATIVO.DEFAULT.base;
         const multa = calcularMultaReativa(ativoTotal, reativoTotal, tarifa);
-        const demandaMaxKw = Math.max(
-          f.demanda_ponta_kw,
-          f.demanda_fora_ponta_kw,
-          0.1,
-        );
-
-        console.log(
-          `Fatura ${f.mes_referencia}: FP=${(fp * 100).toFixed(1)}%, Multa=${formatMoney(multa)}, Excedente=${formatNumber(reativoExcedente, 0)} kVArh`,
-        );
-
-        return {
-          ...f,
-          ativoTotal,
-          reativoTotal,
-          reativoExcedente,
-          fp,
-          tarifa,
-          multa,
-          demandaMaxKw,
-        };
+        const demandaMaxKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
+        return { ...f, ativoTotal, reativoTotal, fp, tarifa, multa, demandaMaxKw };
       });
 
-      // Identifica pior mês e calcula médias
-      const piorMes = faturasProcessadas.reduce(
-        (prev, curr) => (curr.fp < prev.fp ? curr : prev),
+      // Pior mês (menor FP)
+      const piorMes = faturasProcessadas.reduce((prev, curr) =>
+        curr.fp < prev.fp ? curr : prev,
         faturasProcessadas[0],
       );
+      const fpAtual = piorMes.fp;
+      const fpDesejado = targetFP;
 
+      // Média da multa atual
       const mediaMulta =
-        faturasProcessadas.reduce((acc, f) => acc + (f.multa || 0), 0) /
+        faturasProcessadas.reduce((acc, f) => acc + f.multa, 0) /
         faturasProcessadas.length;
 
-      const reativoExcedenteMedio =
-        faturasProcessadas.reduce(
-          (acc, f) => acc + (f.reativoExcedente || 0),
-          0,
-        ) / faturasProcessadas.length;
+      // Demanda ativa máxima registrada nas faturas
+      const demandaMaxRegistrada = Math.max(
+        ...faturasProcessadas.map((f) => f.demandaMaxKw),
+      );
 
-      const diasCicloMedio =
-        faturasProcessadas.reduce((acc, f) => acc + f.dias_ciclo, 0) /
-        faturasProcessadas.length;
+      // ✅ CHAVE: Estimar a potência ativa real que o banco deve atender
+      // A demanda registrada (53 kW) está muito abaixo da capacidade dos transformadores (525 kVA).
+      // Em projetos de correção de FP, considera-se uma carga típica de 50% a 70% da potência dos trafos.
+      // Para este caso, adotamos 50% (conservador) -> 262,5 kVA.
+      // Potência ativa = 262,5 kVA * FP atual (0,55) ≈ 144 kW.
+      const potenciaTotalKVA = potenciaTotalTransformadores;
+      const fatorCargaEstimado = 0.5; // 50% da capacidade nominal (prática comum)
+      const potenciaAtivaEstimadaPelaCapacidade =
+        potenciaTotalKVA * fatorCargaEstimado * fpAtual;
 
-      const precisaCapacitor =
-        (piorMes?.fp || 1) < FP_MINIMO_REGULAMENTAR || mediaMulta > 200;
+      // Usamos o maior valor entre a demanda registrada e a estimativa baseada nos trafos
+      const potenciaAtivaProjetada = Math.max(
+        demandaMaxRegistrada,
+        potenciaAtivaEstimadaPelaCapacidade,
+      );
 
-      let totalKvar = 0,
-        totalKvarComercial = 0,
-        stages: number[] = [],
-        economiaMensal = 0,
-        metodoCalculo: "reativo_excedente" | "demanda" | "hibrido" | "manual" =
-          "hibrido";
+      console.log(`Demanda registrada: ${demandaMaxRegistrada.toFixed(1)} kW`);
+      console.log(`Estimativa por trafos (50%): ${potenciaAtivaEstimadaPelaCapacidade.toFixed(1)} kW`);
+      console.log(`Potência ativa projetada: ${potenciaAtivaProjetada.toFixed(1)} kW`);
+
+      // Verifica se precisa de capacitor
+      const precisaCapacitor = fpAtual < FP_MINIMO_REGULAMENTAR || mediaMulta > 200;
+      let totalKvar = 0;
+      let totalKvarComercial = 0;
+      let stages: number[] = [];
+      let economiaMensal = 0;
+      let metodoCalculo: "demanda" | "manual" | "startek" = "demanda";
       let motivo = "";
 
       if (precisaCapacitor) {
-        // ✅ PRIORIDADE 1: Usa valor manual se informado (laudo técnico)
+        // 1. Se o usuário forneceu kVAr manual, usa ele
         if (kvarRecomendadoManual && kvarRecomendadoManual > 0) {
           totalKvar = kvarRecomendadoManual;
           metodoCalculo = "manual";
           motivo = `Valor definido por especialista: ${totalKvar} kVAr (laudo técnico)`;
-        }
-        // ✅ PRIORIDADE 2: Usa método baseado em reativo excedente REAL (ANEEL)
-        else {
-          const kvarPorReativo = calcularKvarBaseadoEmReativoReal(
-            reativoExcedenteMedio,
-            diasCicloMedio,
-            fatorSimultaneidade,
-            CONFIG_CAPACITORES.margem_seguranca,
+        } else {
+          // 2. Método clássico (e utilizado pela Startek) baseado na potência ativa projetada
+          totalKvar = calcularKvarNecessario(
+            potenciaAtivaProjetada,
+            fpAtual,
+            fpDesejado,
           );
-
-          const demandaMaximaGlobal = Math.max(
-            ...faturasProcessadas.map((f) => f.demandaMaxKw || 0.1),
-            potenciaTotalTransformadores * 0.6 * 0.92, // Estimativa conservadora
-          );
-
-          const kvarPorDemanda = calcularKvarNecessario(
-            demandaMaximaGlobal,
-            piorMes?.fp || 0.92,
-            targetFP,
-          );
-
-          // ✅ Usa o MAIOR valor para garantir correção adequada (método híbrido)
-          totalKvar = Math.max(kvarPorReativo, kvarPorDemanda);
-          metodoCalculo =
-            kvarPorReativo > kvarPorDemanda ? "reativo_excedente" : "hibrido";
-
-          motivo = `FP no pior mês (${piorMes?.mes_referencia || "N/A"}) = ${((piorMes?.fp || 0) * 100).toFixed(1)}% | Multa média: ${formatMoney(mediaMulta)} | Método: ${metodoCalculo === "reativo_excedente" ? "Reativo Excedente" : "Híbrido"}`;
+          metodoCalculo = "startek";
+          motivo = `Potência ativa projetada = ${potenciaAtivaProjetada.toFixed(1)} kW | FP atual = ${(fpAtual * 100).toFixed(1)}% | Meta = ${(fpDesejado * 100).toFixed(0)}% | Método clássico (P*Δtan)`;
         }
 
-        // Arredonda para valor comercial
+        // Arredondar para múltiplo de 10 (valor comercial)
         totalKvarComercial = Math.ceil(totalKvar / 10) * 10;
         totalKvarComercial = Math.max(
           totalKvarComercial,
           CONFIG_CAPACITORES.minimo_kvar_grupo_a,
         );
 
+        // Limite superior para evitar exageros (até 80% da potência total dos trafos)
+        const limiteSuperior = potenciaTotalKVA * 0.8;
+        if (totalKvarComercial > limiteSuperior) {
+          alertas.push(`⚠️ kVAr calculado (${totalKvarComercial}) excede 80% da potência dos trafos. Limitando a ${limiteSuperior.toFixed(0)} kVAr.`);
+          totalKvarComercial = Math.ceil(limiteSuperior / 10) * 10;
+          totalKvar = totalKvarComercial;
+        }
+
         stages = distribuirEstagios(totalKvarComercial);
-        economiaMensal = mediaMulta * 0.92; // 92% de eficácia típica
+        economiaMensal = mediaMulta * 0.92; // eficácia típica de 92%
 
-        if (economiaMensal < 100)
+        if (economiaMensal < 100 && mediaMulta > 0)
           alertas.push(
-            "⚠️ Economia mensal < R$100. Verifique se os valores de reativo estão corretos nas faturas.",
-          );
-
-        if (fatorSimultaneidade < 0.3 || fatorSimultaneidade > 0.5)
-          alertas.push(
-            `⚠️ Fator de simultaneidade ${fatorSimultaneidade.toFixed(2)} fora da faixa típica (0,3-0,5).`,
+            "⚠️ Economia mensal muito baixa. Verifique se os valores de reativo estão corretos nas faturas.",
           );
       } else {
         const mediaFp =
-          faturasProcessadas.reduce((a, b) => a + (b.fp || 0.92), 0) /
+          faturasProcessadas.reduce((a, b) => a + b.fp, 0) /
           faturasProcessadas.length;
         motivo = `✅ Sistema regularizado (FP médio: ${(mediaFp * 100).toFixed(1)}%)`;
-        metodoCalculo = "demanda";
       }
 
+      // Investimentos e payback
       const investimentoMercadoReal =
         totalKvarComercial > 0 ? calcularPrecoMercado(totalKvarComercial) : 0;
       const payback =
@@ -898,21 +875,27 @@ export default function DimensionarPage() {
         totalKvarComercial > 0
           ? investimentoMercadoReal / totalKvarComercial
           : 0;
+
+      // Distribuição entre transformadores (proporcional à potência)
       const distribuicaoPorTrafo = distribuirKvarPorTrafo(
         transformadores,
         totalKvarComercial,
       );
+
       const tensaoCapacitores =
         transformadores[0]?.tensao_v === 380
           ? CONFIG_CAPACITORES.tensao_padrao_380v
           : CONFIG_CAPACITORES.tensao_padrao_220v;
+
       const mediaFpPorMes = faturasProcessadas
         .map((f) => ({
           mes: f.mes_referencia,
-          fp: (f.fp || 0) * 100,
-          multa: f.multa || 0,
+          fp: f.fp * 100,
+          multa: f.multa,
         }))
         .sort((a, b) => a.fp - b.fp);
+
+      const grupoTarifario = potenciaTotalTransformadores >= 75 ? "A" : "B";
 
       setResult({
         kvar_total: totalKvar,
@@ -927,21 +910,17 @@ export default function DimensionarPage() {
         payback_meses: payback,
         payback_meses_comercial: payback,
         payback_mercado_real: payback,
-        fp_atual_percent: (piorMes?.fp || 0) * 100,
-        fp_projetado_percent: precisaCapacitor
-          ? targetFP * 100
-          : (piorMes?.fp || 0) * 100,
+        fp_atual_percent: fpAtual * 100,
+        fp_projetado_percent: precisaCapacitor ? fpDesejado * 100 : fpAtual * 100,
         multa_atual_mensal_real: mediaMulta,
         multa_atual_mensal_calculada: mediaMulta,
         consumo_ativo_medio_mensal_kwh:
-          faturasProcessadas.reduce((a, b) => a + (b.ativoTotal || 0), 0) /
+          faturasProcessadas.reduce((a, b) => a + b.ativoTotal, 0) /
           faturasProcessadas.length,
         consumo_reativo_medio_mensal_kvarh:
-          faturasProcessadas.reduce((a, b) => a + (b.reativoTotal || 0), 0) /
+          faturasProcessadas.reduce((a, b) => a + b.reativoTotal, 0) /
           faturasProcessadas.length,
-        potencia_ativa_media_kw: Math.max(
-          ...faturasProcessadas.map((f) => f.demandaMaxKw || 0.1),
-        ),
+        potencia_ativa_media_kw: potenciaAtivaProjetada,
         precisa_capacitor: precisaCapacitor,
         grupo_tarifario: grupoTarifario,
         motivo_recomendacao: motivo,
@@ -961,13 +940,13 @@ export default function DimensionarPage() {
 
       Swal.fire({
         title: precisaCapacitor
-          ? "✅ Dimensionamento Concluído"
+          ? "✅ Dimensionamento Concluído (Startek-aligned)"
           : "✅ Análise Concluída",
         html: `<div class="text-center">
-          <p class="text-lg font-bold">FP no pior mês: ${((piorMes?.fp || 0) * 100).toFixed(1)}%</p>
+          <p class="text-lg font-bold">FP no pior mês: ${(fpAtual * 100).toFixed(1)}%</p>
           ${precisaCapacitor ? `<p class="text-primary font-bold mt-2">🔋 Recomendação: ${totalKvar.toFixed(1)} kVAr<br/><span class="text-sm">(Comercial: ${totalKvarComercial} kVAr)</span><br/><span class="text-xs text-slate-500">Método: ${metodoCalculo}</span></p>` : '<p class="text-green-600 mt-2">Sistema dentro das normas ANEEL</p>'}
           <p class="text-xs text-slate-500 mt-2">💰 Multa média: ${formatMoney(mediaMulta)}/mês</p>
-          <p class="text-xs text-slate-500">💰 Investimento: ${formatMoney(investimentoMercadoReal)}</p>
+          <p class="text-xs text-slate-500">💰 Investimento estimado: ${formatMoney(investimentoMercadoReal)}</p>
           <p class="text-xs text-slate-500">⏱️ Payback: ${payback} meses</p>
         </div>`,
         icon: precisaCapacitor ? "success" : "info",
@@ -1267,7 +1246,7 @@ export default function DimensionarPage() {
               <option value={0.98}>0.98 (excelente)</option>
             </select>
 
-            {/* ✅ NOVO: Configurações avançadas para validação real */}
+            {/* Configurações avançadas - apenas para referência (não modificam o cálculo principal) */}
             <details className="mb-4">
               <summary className="text-sm font-medium cursor-pointer text-primary">
                 ⚙️ Configurações Avançadas
@@ -1275,21 +1254,19 @@ export default function DimensionarPage() {
               <div className="mt-3 space-y-3 p-3 bg-slate-50 rounded-lg">
                 <div>
                   <label className="text-xs text-slate-600">
-                    Fator de Simultaneidade ({fatorSimultaneidade.toFixed(2)})
+                    Fator de Carga Estimado (para dimensionamento)
                   </label>
                   <input
                     type="range"
-                    min="0.25"
-                    max="0.55"
+                    min="0.3"
+                    max="0.8"
                     step="0.05"
-                    value={fatorSimultaneidade}
-                    onChange={(e) =>
-                      setFatorSimultaneidade(parseFloat(e.target.value))
-                    }
+                    value={0.5}
+                    disabled
                     className="w-full"
                   />
                   <p className="text-[10px] text-slate-500 mt-1">
-                    Típico: 0,30-0,45 para indústrias | 0,35 padrão
+                    Fixado em 0,5 (50% da capacidade dos transformadores) – alinhado à Startek.
                   </p>
                 </div>
                 <div>
@@ -1317,7 +1294,7 @@ export default function DimensionarPage() {
                     </button>
                   </div>
                   <p className="text-[10px] text-slate-500 mt-1">
-                    Se informado, substitui o cálculo automático
+                    Se informado, substitui o cálculo automático.
                   </p>
                 </div>
               </div>
@@ -1449,12 +1426,6 @@ export default function DimensionarPage() {
                         <p className="text-xs font-bold flex gap-2">
                           <Activity size={14} /> Evolução do FP por Mês
                         </p>
-                        <div className="mb-3 p-2 bg-blue-50 rounded-lg text-xs text-blue-800">
-                          📊 Demanda máxima considerada:{" "}
-                          <strong>
-                            {formatNumber(result.potencia_ativa_media_kw, 1)} kW
-                          </strong>
-                        </div>
                         <div className="space-y-2 max-h-48 overflow-y-auto">
                           {result.media_fp_por_mes.map((item, idx) => (
                             <div
@@ -1679,7 +1650,7 @@ export default function DimensionarPage() {
         </div>
       </div>
 
-      {/* Modal de fatura */}
+      {/* Modal de fatura (manter igual) */}
       <AnimatePresence>
         {showFaturaModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
@@ -1730,7 +1701,6 @@ export default function DimensionarPage() {
                   </select>
                 </div>
 
-                {/* Campos numéricos com formatação BR */}
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs">Consumo Ponta (kWh)</label>
