@@ -112,9 +112,7 @@ interface DistribuicaoTrafo {
 }
 
 interface ResultadoDimensionamento {
-  banco_fixo_kvar: number;
   banco_automatico_kvar: number;
-  kvar_total_comercial: number;
   estagios_automaticos: number[];
   tensao_capacitores: string;
   fator_dessintonia: number;
@@ -145,7 +143,6 @@ interface ResultadoDimensionamento {
   roi_5_anos_percent: number;
   metodo_calculo_utilizado: string;
   fator_carga_utilizado: number;
-  correcao_fixa_percent: number;
   numero_estagios: number;
 }
 
@@ -204,33 +201,26 @@ const calcularKvarNecessario = (potencia_ativa_kw: number, fp_atual: number, fp_
 };
 
 const distribuirEstagios = (total_kvar: number, numEstagios: number): number[] => {
-  const n = Math.min(8, Math.max(6, numEstagios)); // força entre 6 e 8
-  // Divide o total em n partes iguais
+  const n = Math.min(8, Math.max(6, numEstagios));
   const parteIdeal = total_kvar / n;
-  // Arredonda cada parte para o múltiplo de 2.5 mais próximo (comercial)
   let stages: number[] = [];
   let soma = 0;
   for (let i = 0; i < n; i++) {
     let valor;
     if (i === n - 1) {
-      // Último estágio: pega o restante para garantir a soma exata
       valor = total_kvar - soma;
     } else {
       valor = Math.round(parteIdeal / 2.5) * 2.5;
     }
-    // Garante valor mínimo de 2.5
     if (valor < 2.5) valor = 2.5;
     stages.push(valor);
     soma += valor;
   }
-  // Ajusta pequenas diferenças de arredondamento no último estágio
   if (Math.abs(soma - total_kvar) > 0.01) {
     const diff = total_kvar - soma;
     stages[stages.length - 1] += diff;
   }
-  // Arredonda cada estágio para múltiplo de 2.5
   stages = stages.map(s => Math.ceil(s / 2.5) * 2.5);
-  // Ordena crescente
   return stages.sort((a, b) => a - b);
 };
 
@@ -246,41 +236,36 @@ const calcularPrecoMercado = (kvar: number): number => {
   return kvar !== maisProximo ? Math.round(kvar * (preco / maisProximo)) : preco;
 };
 
-const distribuirKvarPorTrafoComEstagios = (
+const distribuirKvarPorTrafo = (
   transformadores: Transformador[],
   estagiosGlobais: number[],
-  kvarTotalAutomatico: number
+  kvarTotal: number
 ): DistribuicaoTrafo[] => {
   const potenciaTotal = transformadores.reduce((acc, t) => acc + t.potencia_kva * t.quantidade, 0);
-  if (potenciaTotal <= 0 || kvarTotalAutomatico <= 0) return [];
+  if (potenciaTotal <= 0 || kvarTotal <= 0) return [];
 
   return transformadores.map((trafo) => {
     const potenciaTrafo = trafo.potencia_kva * trafo.quantidade;
     const percentual = potenciaTrafo / potenciaTotal;
-    // Rateia os estágios globais proporcionalmente
     let estagiosTrafo = estagiosGlobais.map(s => s * percentual);
-    // Arredonda cada estágio para múltiplo de 2.5 (valor comercial)
     estagiosTrafo = estagiosTrafo.map(s => Math.ceil(s / 2.5) * 2.5);
-    // Recalcula a soma e ajusta o último estágio para bater o total esperado (kvar_recomendado)
     let soma = estagiosTrafo.reduce((a, b) => a + b, 0);
-    const kvarRecomendado = kvarTotalAutomatico * percentual;
+    const kvarRecomendado = kvarTotal * percentual;
     if (Math.abs(soma - kvarRecomendado) > 0.01) {
       const diff = kvarRecomendado - soma;
       estagiosTrafo[estagiosTrafo.length - 1] += diff;
-      // Arredonda novamente o último
       estagiosTrafo[estagiosTrafo.length - 1] = Math.ceil(estagiosTrafo[estagiosTrafo.length - 1] / 2.5) * 2.5;
     }
-    // Filtra estágios muito pequenos (menores que 2.5)
     estagiosTrafo = estagiosTrafo.filter(s => s >= 2.5);
 
-    const kvarComercial = Math.ceil((kvarTotalAutomatico * percentual) / 10) * 10;
+    const kvarComercial = Math.ceil((kvarTotal * percentual) / 10) * 10;
     const precoEstimado = calcularPrecoMercado(kvarComercial);
     const configuracaoEstagios = estagiosTrafo.map(s => `${s.toFixed(1)}`).join(" + ") + " kVAr";
 
     return {
       trafo_kva: potenciaTrafo,
       percentual: percentual * 100,
-      kvar_recomendado: kvarTotalAutomatico * percentual,
+      kvar_recomendado: kvarTotal * percentual,
       kvar_comercial: kvarComercial,
       preco_estimado: precoEstimado,
       configuracao_estagios: configuracaoEstagios,
@@ -306,7 +291,6 @@ export default function DimensionarPage() {
   const [editandoFaturaId, setEditandoFaturaId] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [fatorCarga, setFatorCarga] = useState<number>(0.65);
-  const [correcaoFixaPercent, setCorrecaoFixaPercent] = useState<number>(5);
   const [numeroEstagios, setNumeroEstagios] = useState<number>(6);
 
   const carregarDados = useCallback(() => {
@@ -497,7 +481,6 @@ export default function DimensionarPage() {
       const precisaCapacitor = fpAtual < FP_MINIMO_REGULAMENTAR || mediaMulta > 200;
 
       let kvarAutomatico = 0;
-      let kvarTotalComercial = 0;
       let estagios: number[] = [];
       let economiaMensal = 0;
       let motivo = "";
@@ -508,18 +491,13 @@ export default function DimensionarPage() {
         kvarAutomatico = Math.max(kvarAutomatico, CONFIG_CAPACITORES.minimo_kvar_grupo_a);
         estagios = distribuirEstagios(kvarAutomatico, numeroEstagios);
         economiaMensal = mediaMulta * 0.92;
-        kvarTotalComercial = kvarAutomatico;
-        motivo = `Potência ativa baseada na demanda medida (${demandaMaxRegistrada.toFixed(1)} kW) e fator de carga (${fatorCarga.toFixed(2)}): estimativa final = ${potenciaAtivaFinal.toFixed(1)} kW | FP atual = ${(fpAtual * 100).toFixed(1)}% | Meta = ${(fpDesejado * 100).toFixed(0)}% | kVAr automático = P × (tanφ1 - tanφ2) = ${kvarAutomatico.toFixed(1)} kVAr.`;
+        motivo = `Potência ativa baseada na demanda medida (${demandaMaxRegistrada.toFixed(1)} kW) e fator de carga (${fatorCarga.toFixed(2)}): estimativa final = ${potenciaAtivaFinal.toFixed(1)} kW | FP atual = ${(fpAtual * 100).toFixed(1)}% | Meta = ${(fpDesejado * 100).toFixed(0)}% | kVAr = P × (tanφ1 - tanφ2) = ${kvarAutomatico.toFixed(1)} kVAr.`;
       } else {
         const mediaFp = faturasProcessadas.reduce((a,b)=>a+b.fp,0)/faturasProcessadas.length;
         motivo = `✅ Sistema regularizado (FP médio: ${(mediaFp * 100).toFixed(1)}%)`;
       }
 
-      const correcaoFixaKvar = (potenciaTotalTransformadores * correcaoFixaPercent) / 100;
-      const investimentoFixo = calcularPrecoMercado(correcaoFixaKvar);
-      const investimentoAutomatico = calcularPrecoMercado(kvarAutomatico);
-      const investimentoTotal = investimentoFixo + investimentoAutomatico;
-
+      const investimentoTotal = calcularPrecoMercado(kvarAutomatico);
       const payback = economiaMensal > 0 ? Math.ceil(investimentoTotal / economiaMensal) : 99;
       const economiaAnual = economiaMensal * 12;
       const retorno5Anos = economiaAnual * 5 - investimentoTotal;
@@ -528,16 +506,14 @@ export default function DimensionarPage() {
       const projecao3Anos = economiaAnual * 3 - investimentoTotal;
       const projecao5Anos = retorno5Anos;
       const roi5AnosPercent = investimentoTotal > 0 ? (projecao5Anos / investimentoTotal) * 100 : 0;
-      const precoPorKvar = kvarTotalComercial > 0 ? investimentoAutomatico / kvarTotalComercial : 0;
-      const distribuicaoPorTrafo = distribuirKvarPorTrafoComEstagios(transformadores, estagios, kvarAutomatico);
+      const precoPorKvar = kvarAutomatico > 0 ? investimentoTotal / kvarAutomatico : 0;
+      const distribuicaoPorTrafo = distribuirKvarPorTrafo(transformadores, estagios, kvarAutomatico);
       const tensaoCapacitores = transformadores[0]?.tensao_v === 380 ? CONFIG_CAPACITORES.tensao_padrao_380v : CONFIG_CAPACITORES.tensao_padrao_220v;
       const mediaFpPorMes = faturasProcessadas.map(f => ({ mes: f.mes_referencia, fp: f.fp * 100, multa: f.multa })).sort((a, b) => a.fp - b.fp);
       const grupoTarifario = potenciaTotalTransformadores >= 75 ? "A" : "B";
 
       setResult({
-        banco_fixo_kvar: correcaoFixaKvar,
         banco_automatico_kvar: kvarAutomatico,
-        kvar_total_comercial: kvarTotalComercial,
         estagios_automaticos: estagios,
         tensao_capacitores: tensaoCapacitores,
         fator_dessintonia: CONFIG_CAPACITORES.dessintonia_padrao,
@@ -566,15 +542,14 @@ export default function DimensionarPage() {
         projecao_3_anos: projecao3Anos,
         projecao_5_anos: projecao5Anos,
         roi_5_anos_percent: roi5AnosPercent,
-        metodo_calculo_utilizado: "Fórmula clássica P×Δtan + célula capacitiva fixa",
+        metodo_calculo_utilizado: "Fórmula clássica P×Δtan",
         fator_carga_utilizado: fatorCarga,
-        correcao_fixa_percent: correcaoFixaPercent,
         numero_estagios: numeroEstagios,
       });
 
       Swal.fire({
         title: precisaCapacitor ? "✅ Dimensionamento Concluído" : "✅ Análise Concluída",
-        html: `<div class="text-center"><p class="text-lg font-bold">FP no pior mês: ${(fpAtual * 100).toFixed(1)}%</p>${precisaCapacitor ? `<p class="text-primary font-bold mt-2">🔋 Recomendação:<br/>• Banco fixo: ${formatNumber(correcaoFixaKvar, 1)} kVAr<br/>• Banco automático: ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios)<br/>• Total: ${formatNumber(correcaoFixaKvar + kvarAutomatico, 1)} kVAr</p>` : '<p class="text-green-600 mt-2">Sistema dentro das normas ANEEL</p>'}<p class="text-xs text-slate-500 mt-2">💰 Multa média: ${formatMoney(mediaMulta)}/mês</p><p class="text-xs text-slate-500">💰 Investimento total estimado: ${formatMoney(investimentoTotal)}</p><p class="text-xs text-slate-500">⏱️ Payback: ${payback} meses</p></div>`,
+        html: `<div class="text-center"><p class="text-lg font-bold">FP no pior mês: ${(fpAtual * 100).toFixed(1)}%</p>${precisaCapacitor ? `<p class="text-primary font-bold mt-2">🔋 Recomendação:<br/>• Banco automático: ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios)</p>` : '<p class="text-green-600 mt-2">Sistema dentro das normas ANEEL</p>'}<p class="text-xs text-slate-500 mt-2">💰 Multa média: ${formatMoney(mediaMulta)}/mês</p><p class="text-xs text-slate-500">💰 Investimento estimado: ${formatMoney(investimentoTotal)}</p><p class="text-xs text-slate-500">⏱️ Payback: ${payback} meses</p></div>`,
         icon: precisaCapacitor ? "success" : "info",
         timer: 6000,
       });
@@ -634,6 +609,7 @@ export default function DimensionarPage() {
       </header>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-5 space-y-6">
+          {/* Transformadores */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-primary flex gap-2"><Package size={20} /> Transformadores</h2><button onClick={salvarTransformadores} className="text-xs bg-primary text-white px-3 py-1 rounded-lg"><Save size={12} /> Salvar</button></div>
             <div className="space-y-3">
@@ -652,6 +628,7 @@ export default function DimensionarPage() {
             <div className="mt-4 p-3 bg-primary/5 rounded-xl"><div className="flex justify-between text-sm"><span>Potência Total Instalada:</span><span className="font-bold text-primary">{formatNumber(potenciaTotalTransformadores, 0)} kVA</span></div><div className="text-xs text-slate-500 mt-1">{transformadores.map(t => `${t.quantidade}x${t.potencia_kva}kVA`).join(" + ")} | {transformadores[0]?.tensao_v}V</div></div>
           </div>
 
+          {/* Faturas */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-primary flex gap-2"><History size={20} /> Faturas ({faturas.length})</h2><button onClick={() => { setCurrentFatura({}); setEditandoFaturaId(null); setShowFaturaModal(true); }} className="text-xs bg-primary text-white px-3 py-1 rounded-lg"><Plus size={12} /> Adicionar</button></div>
             <div className="max-h-80 overflow-y-auto space-y-2">
@@ -671,13 +648,13 @@ export default function DimensionarPage() {
             </div>
           </div>
 
+          {/* Configurações */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <label className="block text-sm font-medium mb-2">Fator de Potência Desejado</label>
             <select value={targetFP} onChange={(e) => setTargetFP(parseFloat(e.target.value))} className="w-full rounded-xl border p-3 mb-4"><option value={0.92}>0.92 (mínimo ANEEL)</option><option value={0.95}>0.95 (recomendado)</option><option value={0.98}>0.98 (excelente)</option></select>
             <details className="mb-4"><summary className="text-sm font-medium cursor-pointer text-primary">⚙️ Configurações Avançadas</summary>
               <div className="mt-3 space-y-4 p-3 bg-slate-50 rounded-lg">
                 <div><label className="text-xs text-slate-600">Fator de Carga (carga média / potência instalada)</label><input type="range" min="0.3" max="0.9" step="0.05" value={fatorCarga} onChange={(e) => setFatorCarga(parseFloat(e.target.value))} className="w-full" /><div className="flex justify-between text-xs"><span>0.3</span><span className="font-bold">{fatorCarga.toFixed(2)}</span><span>0.9</span></div><p className="text-[10px] text-slate-500">Valor típico para armazéns: 0,65. Aumente se a carga média for maior.</p></div>
-                <div><label className="text-xs text-slate-600">Correção fixa (célula capacitiva) - % da potência dos transformadores</label><input type="range" min="0" max="10" step="1" value={correcaoFixaPercent} onChange={(e) => setCorrecaoFixaPercent(parseInt(e.target.value))} className="w-full" /><div className="flex justify-between text-xs"><span>0%</span><span className="font-bold">{correcaoFixaPercent}%</span><span>10%</span></div><p className="text-[10px] text-slate-500">Recomendado 3-5% para compensar o reativo fixo do transformador.</p></div>
                 <div><label className="text-xs text-slate-600">Número de estágios automáticos (6 a 8)</label><input type="range" min="6" max="8" step="1" value={numeroEstagios} onChange={(e) => setNumeroEstagios(parseInt(e.target.value))} className="w-full" /><div className="flex justify-between text-xs"><span>6</span><span className="font-bold">{numeroEstagios}</span><span>8</span></div></div>
               </div>
             </details>
@@ -695,26 +672,25 @@ export default function DimensionarPage() {
                     <>
                       <div className="text-center border-b pb-4">
                         <p className="text-sm text-slate-500">Solução Proposta</p>
-                        <p className="text-2xl font-bold text-primary">Banco fixo (célula capacitiva): {formatNumber(result.banco_fixo_kvar, 1)} kVAr</p>
-                        <p className="text-2xl font-bold text-primary">Banco automático: {formatNumber(result.banco_automatico_kvar, 1)} kVAr ({result.estagios_automaticos.length} estágios)</p>
-                        <p className="text-lg font-bold text-primary mt-2">Total: {formatNumber(result.banco_fixo_kvar + result.banco_automatico_kvar, 1)} kVAr</p>
+                        <p className="text-3xl font-bold text-primary">{formatNumber(result.banco_automatico_kvar, 1)} kVAr</p>
+                        <p className="text-xs text-slate-400">Banco automático com {result.estagios_automaticos.length} estágios</p>
                         <p className="text-xs text-slate-400">Grupo {result.grupo_tarifario} • {result.quantidade_faturas_analisadas} faturas • Método: {result.metodo_calculo_utilizado}</p>
-                        <p className="text-xs text-slate-400">Fator de carga: {result.fator_carga_utilizado.toFixed(2)} • Correção fixa: {result.correcao_fixa_percent}%</p>
+                        <p className="text-xs text-slate-400">Fator de carga: {result.fator_carga_utilizado.toFixed(2)}</p>
                       </div>
                       {result.alertas.length > 0 && result.alertas.map((a, i) => <div key={i} className="bg-amber-50 p-3 rounded-xl text-xs text-amber-700 flex gap-2"><AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />{a}</div>)}
                       <div className="bg-blue-50 p-4 rounded-xl"><p className="text-sm font-bold text-blue-700">📌 {result.motivo_recomendacao}</p><p className="text-xs mt-2">FP atual: {result.fp_atual_percent.toFixed(1)}% → Meta: {result.fp_projetado_percent.toFixed(0)}%</p><div className="mt-3"><BarraFP fp={result.fp_atual_percent} /><div className="flex justify-between text-[10px] mt-1"><span>Atual: {result.fp_atual_percent.toFixed(1)}%</span><span>Meta ANEEL: 92%</span></div></div></div>
                       <div className="grid grid-cols-2 gap-4"><div className="bg-red-50 p-4 text-center rounded-xl"><TrendingUp className="mx-auto text-red-600 mb-2" size={24} /><p className="text-xs font-medium">Multa Mensal Média</p><p className="text-2xl font-bold">{formatMoney(result.multa_atual_mensal_real)}</p><p className="text-xs text-red-500 mt-1">Calculada a partir do reativo excedente</p></div><div className="bg-green-50 p-4 text-center rounded-xl"><TrendingUp className="mx-auto text-green-600 mb-2" size={24} /><p className="text-xs font-medium">Economia Projetada</p><p className="text-2xl font-bold text-green-600">{formatMoney(result.economia_mensal_estimada)}/mês</p><p className="text-xs text-green-600 mt-1">Após correção do FP</p></div></div>
                       <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs font-bold flex gap-2"><Activity size={14} /> Evolução do FP e Multa por Mês</p><div className="space-y-2 max-h-48 overflow-y-auto">{result.media_fp_por_mes.map((item, idx) => (<div key={idx} className="flex items-center gap-2 text-xs"><span className="w-14 font-medium">{item.mes}</span><div className="flex-1"><div className="w-full bg-slate-200 rounded-full h-1.5"><div className={`${item.fp >= 92 ? "bg-green-500" : item.fp >= 80 ? "bg-amber-500" : "bg-red-500"} h-1.5 rounded-full`} style={{ width: `${Math.min(100, item.fp)}%` }} /></div></div><span className="w-10 text-right font-bold">{item.fp.toFixed(1)}%</span><span className="w-20 text-right text-red-500 text-[10px]">{formatMoney(item.multa)}</span></div>))}</div></div>
                       {result.pior_mes && <div className="bg-amber-50 p-4 rounded-xl"><p className="text-xs font-bold">Pior Mês: {result.pior_mes.mes_referencia}</p><p className="text-sm mt-1">FP: {((result.pior_mes.fp_calculado || 0) * 100).toFixed(1)}% • Multa: {formatMoney(result.pior_mes.multa_calculada || 0)}</p></div>}
-                      <div className="bg-indigo-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><Factory size={14} /> Distribuição do Banco Automático entre Transformadores</p>{result.distribuicao_por_trafo.map((dist, idx) => (<div key={idx} className="bg-white rounded-lg p-3 mt-2 border"><div className="flex justify-between"><span className="font-bold text-sm">Transformador {formatNumber(dist.trafo_kva, 0)} kVA</span><span className="text-xs text-slate-500">{dist.percentual.toFixed(1)}% da carga</span></div><div className="grid grid-cols-2 gap-1 text-sm mt-2"><div>Recomendado: {formatNumber(dist.kvar_recomendado, 1)} kVAr</div><div>Comercial: {formatNumber(dist.kvar_comercial, 0)} kVAr</div><div className="col-span-2 text-xs text-slate-600">Configuração de estágios: {dist.configuracao_estagios}</div><div className="col-span-2 font-medium">Investimento (automático): {formatMoney(dist.preco_estimado)}</div></div></div>))}</div>
-                      <div><h3 className="font-bold mb-2 flex gap-2"><Layers size={18} /> Estágios do Banco Automático ({result.estagios_automaticos.length} estágios)</h3><div className="flex flex-wrap gap-2">{result.estagios_automaticos.map((s, i) => (<div key={i} className="bg-slate-100 rounded-lg px-3 py-1 border flex items-center gap-1"><span className="font-bold text-sm">{s.toFixed(1)}</span><span className="text-xs text-slate-500">kVAr</span></div>))}</div></div>
-                      <div className="bg-emerald-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><DollarSign size={14} /> Análise Financeira Real</p><div className="grid grid-cols-2 gap-2 text-center mt-2"><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Investimento Total</p><p className="font-bold text-lg">{formatMoney(result.investimento_estimado_total)}</p><p className="text-[10px] text-slate-500">(Fixo + Automático)</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Custo por kVAr (automático)</p><p className="font-bold">{formatMoney(result.preco_por_kvar)}/kVAr</p></div></div><div className="grid grid-cols-3 gap-2 text-center mt-2"><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Payback</p><p className="font-bold text-green-600">{result.payback_meses} meses</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Economia/ano</p><p className="font-bold">{formatMoney(result.economia_anual)}</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Retorno 5 anos</p><p className={`font-bold ${result.retorno_5_anos > 0 ? "text-green-700" : "text-red-700"}`}>{formatMoney(result.retorno_5_anos)}</p></div></div></div>
+                      <div className="bg-indigo-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><Factory size={14} /> Distribuição do Banco entre Transformadores</p>{result.distribuicao_por_trafo.map((dist, idx) => (<div key={idx} className="bg-white rounded-lg p-3 mt-2 border"><div className="flex justify-between"><span className="font-bold text-sm">Transformador {formatNumber(dist.trafo_kva, 0)} kVA</span><span className="text-xs text-slate-500">{dist.percentual.toFixed(1)}% da carga</span></div><div className="grid grid-cols-2 gap-1 text-sm mt-2"><div>Recomendado: {formatNumber(dist.kvar_recomendado, 1)} kVAr</div><div>Comercial: {formatNumber(dist.kvar_comercial, 0)} kVAr</div><div className="col-span-2 text-xs text-slate-600">Configuração de estágios: {dist.configuracao_estagios}</div><div className="col-span-2 font-medium">Investimento: {formatMoney(dist.preco_estimado)}</div></div></div>))}</div>
+                      <div><h3 className="font-bold mb-2 flex gap-2"><Layers size={18} /> Estágios do Banco ({result.estagios_automaticos.length} estágios)</h3><div className="flex flex-wrap gap-2">{result.estagios_automaticos.map((s, i) => (<div key={i} className="bg-slate-100 rounded-lg px-3 py-1 border flex items-center gap-1"><span className="font-bold text-sm">{s.toFixed(1)}</span><span className="text-xs text-slate-500">kVAr</span></div>))}</div></div>
+                      <div className="bg-emerald-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><DollarSign size={14} /> Análise Financeira Real</p><div className="grid grid-cols-2 gap-2 text-center mt-2"><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Investimento Total</p><p className="font-bold text-lg">{formatMoney(result.investimento_estimado_total)}</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Custo por kVAr</p><p className="font-bold">{formatMoney(result.preco_por_kvar)}/kVAr</p></div></div><div className="grid grid-cols-3 gap-2 text-center mt-2"><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Payback</p><p className="font-bold text-green-600">{result.payback_meses} meses</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Economia/ano</p><p className="font-bold">{formatMoney(result.economia_anual)}</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Retorno 5 anos</p><p className={`font-bold ${result.retorno_5_anos > 0 ? "text-green-700" : "text-red-700"}`}>{formatMoney(result.retorno_5_anos)}</p></div></div></div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div className="bg-red-50 border border-red-200 rounded-xl p-4"><p className="text-xs font-bold text-red-700">a) Prejuízo acumulado</p><p className="text-xl font-black text-red-700 mt-1">{formatMoney(result.prejuizo_acumulado)}</p><p className="text-[10px] text-red-600 mt-1">Soma das multas das faturas analisadas.</p></div>
                         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4"><p className="text-xs font-bold text-blue-700">b) Projeção de economia</p><div className="text-[11px] mt-2 space-y-1"><p><strong>1 ano:</strong> {formatMoney(result.projecao_1_ano)}</p><p><strong>3 anos:</strong> {formatMoney(result.projecao_3_anos)}</p><p><strong>5 anos:</strong> {formatMoney(result.projecao_5_anos)}</p></div></div>
                         <div className="bg-green-50 border border-green-200 rounded-xl p-4"><p className="text-xs font-bold text-green-700">c) ROI em 5 anos</p><p className={`text-xl font-black mt-1 ${result.roi_5_anos_percent >= 0 ? "text-green-700" : "text-red-700"}`}>{formatNumber(result.roi_5_anos_percent, 1)}%</p><p className="text-[10px] text-green-700 mt-1">Indicador de viabilidade financeira do projeto.</p></div>
                       </div>
-                      <div className="bg-white border rounded-xl p-4"><p className="text-xs font-bold">Resumo executivo (proposta comercial)</p><p className="text-sm mt-2 text-slate-700">Com base no diagnóstico do fator de potência e no histórico de multas, recomenda-se a implantação de banco de capacitores fixo + automático para mitigar perdas financeiras recorrentes. A solução projeta redução relevante das penalidades por energia reativa, com retorno estimado em <strong>{result.payback_meses} meses</strong> e ROI de <strong>{formatNumber(result.roi_5_anos_percent, 1)}%</strong> em 5 anos.</p></div>
+                      <div className="bg-white border rounded-xl p-4"><p className="text-xs font-bold">Resumo executivo (proposta comercial)</p><p className="text-sm mt-2 text-slate-700">Com base no diagnóstico do fator de potência e no histórico de multas, recomenda-se a implantação de banco de capacitores automático para mitigar perdas financeiras recorrentes. A solução projeta redução relevante das penalidades por energia reativa, com retorno estimado em <strong>{result.payback_meses} meses</strong> e ROI de <strong>{formatNumber(result.roi_5_anos_percent, 1)}%</strong> em 5 anos.</p></div>
                       <div className="bg-slate-50 p-4 rounded-xl"><h4 className="font-bold text-sm mb-2">Especificações Técnicas</h4><div className="grid grid-cols-2 gap-2 text-xs"><div>• Tensão: {result.tensao_capacitores} (Δ)</div><div>• Reatores: {result.fator_dessintonia}%</div><div>• Controlador: Automático</div><div>• Grau IP: Mínimo IP54</div><div className="col-span-2 text-[10px] text-slate-500 mt-1">• Compatível com rede 380V trifásica • Conformidade NBR 14922/2022</div></div></div>
                     </>
                   ) : (<div className="text-center py-8"><CheckCircle2 size={40} className="mx-auto text-green-600 mb-2" /><p className="text-xl font-bold text-green-700">Instalação Regularizada</p><p className="text-sm mt-2">{result.motivo_recomendacao}</p></div>)}
