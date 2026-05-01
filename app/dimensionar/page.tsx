@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Calculator,
   Zap,
@@ -143,6 +143,11 @@ interface ResultadoDimensionamento {
   preco_por_kvar: number;
   economia_anual: number;
   retorno_5_anos: number;
+  prejuizo_acumulado: number;
+  projecao_1_ano: number;
+  projecao_3_anos: number;
+  projecao_5_anos: number;
+  roi_5_anos_percent: number;
   metodo_calculo_utilizado: string;
   fator_carga_utilizado: number;
   correcao_fixa_percent: number;
@@ -172,6 +177,14 @@ const formatMoney = (valor: number): string =>
 
 const formatNumber = (valor: number, decimals: number = 2): string =>
   new Intl.NumberFormat("pt-BR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(valor);
+
+const parseMesReferencia = (mesRef: string): number => {
+  const [mesStr, anoStr] = (mesRef || "").split("/");
+  const mes = Number(mesStr);
+  const ano = Number(anoStr);
+  if (!Number.isFinite(mes) || !Number.isFinite(ano) || mes < 1 || mes > 12) return Number.NEGATIVE_INFINITY;
+  return ano * 100 + mes;
+};
 
 const calcularFatorPotencia = (ativo_kwh: number, reativo_kvarh: number): number => {
   if (ativo_kwh <= 0) return 0.92;
@@ -234,6 +247,7 @@ const calcularPrecoMercado = (kvar: number): number => {
 // Distribuição proporcional entre transformadores (apenas para o banco automático)
 const distribuirKvarPorTrafo = (transformadores: Transformador[], kvarTotalComercial: number): DistribuicaoTrafo[] => {
   const potenciaTotal = transformadores.reduce((acc, t) => acc + t.potencia_kva * t.quantidade, 0);
+  if (potenciaTotal <= 0 || kvarTotalComercial <= 0) return [];
   return transformadores.map((trafo) => {
     const potenciaTrafo = trafo.potencia_kva * trafo.quantidade;
     const percentual = potenciaTrafo / potenciaTotal;
@@ -278,9 +292,7 @@ export default function DimensionarPage() {
   const [correcaoFixaPercent, setCorrecaoFixaPercent] = useState<number>(5); // 5% da potência dos trafos
   const [numeroEstagios, setNumeroEstagios] = useState<number>(6); // entre 6 e 8
 
-  useEffect(() => carregarDados(), []);
-
-  const carregarDados = () => {
+  const carregarDados = useCallback(() => {
     try {
       const savedTrafos = localStorage.getItem("dimensionar_transformadores");
       if (savedTrafos) setTransformadores(JSON.parse(savedTrafos));
@@ -297,7 +309,9 @@ export default function DimensionarPage() {
       }
     } catch (error) { console.error(error); }
     finally { setCarregando(false); }
-  };
+  }, []);
+
+  useEffect(() => carregarDados(), [carregarDados]);
 
   const carregarFaturaExemploReal = () => {
     // Dados reais das faturas Equatorial Pará (WG ARMAZENS GERAIS)
@@ -395,7 +409,7 @@ export default function DimensionarPage() {
     if (!confirmar.isConfirmed) return;
 
     let novasFaturas = editandoFaturaId ? faturas.map(f => f.id === editandoFaturaId ? novaFatura : f) : [novaFatura, ...faturas];
-    novasFaturas.sort((a, b) => b.mes_referencia.localeCompare(a.mes_referencia));
+    novasFaturas.sort((a, b) => parseMesReferencia(b.mes_referencia) - parseMesReferencia(a.mes_referencia));
     setFaturas(novasFaturas);
     localStorage.setItem("dimensionar_faturas", JSON.stringify(novasFaturas));
     setShowFaturaModal(false);
@@ -496,6 +510,11 @@ export default function DimensionarPage() {
       const payback = economiaMensal > 0 ? Math.ceil(investimentoTotal / economiaMensal) : 99;
       const economiaAnual = economiaMensal * 12;
       const retorno5Anos = economiaAnual * 5 - investimentoTotal;
+      const prejuizoAcumulado = faturasProcessadas.reduce((acc, f) => acc + f.multa, 0);
+      const projecao1Ano = economiaAnual - investimentoTotal;
+      const projecao3Anos = economiaAnual * 3 - investimentoTotal;
+      const projecao5Anos = retorno5Anos;
+      const roi5AnosPercent = investimentoTotal > 0 ? (projecao5Anos / investimentoTotal) * 100 : 0;
       const precoPorKvar = kvarTotalComercial > 0 ? investimentoAutomatico / kvarTotalComercial : 0;
       const distribuicaoPorTrafo = distribuirKvarPorTrafo(transformadores, kvarAutomatico);
       const tensaoCapacitores = transformadores[0]?.tensao_v === 380 ? CONFIG_CAPACITORES.tensao_padrao_380v : CONFIG_CAPACITORES.tensao_padrao_220v;
@@ -521,7 +540,7 @@ export default function DimensionarPage() {
         motivo_recomendacao: motivo,
         concessionaria_identificada: concessionarias[0] || "NÃO IDENTIFICADA",
         quantidade_faturas_analisadas: faturasProcessadas.length,
-        pior_mes: piorMes ? { ...piorMes, multa_calculada: piorMes.multa } : null,
+        pior_mes: piorMes ? { ...piorMes, fp_calculado: piorMes.fp, multa_calculada: piorMes.multa } : null,
         media_fp_por_mes: mediaFpPorMes,
         alertas: alertas,
         distribuicao_por_trafo: distribuicaoPorTrafo,
@@ -529,6 +548,11 @@ export default function DimensionarPage() {
         preco_por_kvar: precoPorKvar,
         economia_anual: economiaAnual,
         retorno_5_anos: retorno5Anos,
+        prejuizo_acumulado: prejuizoAcumulado,
+        projecao_1_ano: projecao1Ano,
+        projecao_3_anos: projecao3Anos,
+        projecao_5_anos: projecao5Anos,
+        roi_5_anos_percent: roi5AnosPercent,
         metodo_calculo_utilizado: "Fórmula clássica P×Δtan + célula capacitiva fixa",
         fator_carga_utilizado: fatorCarga,
         correcao_fixa_percent: correcaoFixaPercent,
@@ -702,6 +726,37 @@ export default function DimensionarPage() {
                       <div><h3 className="font-bold mb-2 flex gap-2"><Layers size={18} /> Estágios do Banco Automático ({result.estagios_automaticos.length} estágios)</h3><div className="flex flex-wrap gap-2">{result.estagios_automaticos.map((s, i) => (<div key={i} className="bg-slate-100 rounded-lg px-3 py-1 border flex items-center gap-1"><span className="font-bold text-sm">{s.toFixed(1)}</span><span className="text-xs text-slate-500">kVAr</span></div>))}</div></div>
 
                       <div className="bg-emerald-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><DollarSign size={14} /> Análise Financeira Real</p><div className="grid grid-cols-2 gap-2 text-center mt-2"><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Investimento Total</p><p className="font-bold text-lg">{formatMoney(result.investimento_estimado_total)}</p><p className="text-[10px] text-slate-500">(Fixo + Automático)</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Custo por kVAr (automático)</p><p className="font-bold">{formatMoney(result.preco_por_kvar)}/kVAr</p></div></div><div className="grid grid-cols-3 gap-2 text-center mt-2"><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Payback</p><p className="font-bold text-green-600">{result.payback_meses} meses</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Economia/ano</p><p className="font-bold">{formatMoney(result.economia_anual)}</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Retorno 5 anos</p><p className={`font-bold ${result.retorno_5_anos > 0 ? "text-green-700" : "text-red-700"}`}>{formatMoney(result.retorno_5_anos)}</p></div></div></div>
+
+                      {/* Blocos comerciais para proposta */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                          <p className="text-xs font-bold text-red-700">a) Prejuízo acumulado</p>
+                          <p className="text-xl font-black text-red-700 mt-1">{formatMoney(result.prejuizo_acumulado)}</p>
+                          <p className="text-[10px] text-red-600 mt-1">Soma das multas das faturas analisadas.</p>
+                        </div>
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                          <p className="text-xs font-bold text-blue-700">b) Projeção de economia</p>
+                          <div className="text-[11px] mt-2 space-y-1">
+                            <p><strong>1 ano:</strong> {formatMoney(result.projecao_1_ano)}</p>
+                            <p><strong>3 anos:</strong> {formatMoney(result.projecao_3_anos)}</p>
+                            <p><strong>5 anos:</strong> {formatMoney(result.projecao_5_anos)}</p>
+                          </div>
+                        </div>
+                        <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                          <p className="text-xs font-bold text-green-700">c) ROI em 5 anos</p>
+                          <p className={`text-xl font-black mt-1 ${result.roi_5_anos_percent >= 0 ? "text-green-700" : "text-red-700"}`}>{formatNumber(result.roi_5_anos_percent, 1)}%</p>
+                          <p className="text-[10px] text-green-700 mt-1">Indicador de viabilidade financeira do projeto.</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border rounded-xl p-4">
+                        <p className="text-xs font-bold">Resumo executivo (proposta comercial)</p>
+                        <p className="text-sm mt-2 text-slate-700">
+                          Com base no diagnóstico do fator de potência e no histórico de multas, recomenda-se a implantação de banco de capacitores
+                          fixo + automático para mitigar perdas financeiras recorrentes. A solução projeta redução relevante das penalidades por energia
+                          reativa, com retorno estimado em <strong>{result.payback_meses} meses</strong> e ROI de <strong>{formatNumber(result.roi_5_anos_percent, 1)}%</strong> em 5 anos.
+                        </p>
+                      </div>
 
                       <div className="bg-slate-50 p-4 rounded-xl"><h4 className="font-bold text-sm mb-2">Especificações Técnicas</h4><div className="grid grid-cols-2 gap-2 text-xs"><div>• Tensão: {result.tensao_capacitores} (Δ)</div><div>• Reatores: {result.fator_dessintonia}%</div><div>• Controlador: Automático</div><div>• Grau IP: Mínimo IP54</div><div className="col-span-2 text-[10px] text-slate-500 mt-1">• Compatível com rede 380V trifásica • Conformidade NBR 14922/2022</div></div></div>
                     </>
