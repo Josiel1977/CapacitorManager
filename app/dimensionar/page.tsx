@@ -204,19 +204,33 @@ const calcularKvarNecessario = (potencia_ativa_kw: number, fp_atual: number, fp_
 };
 
 const distribuirEstagios = (total_kvar: number, numEstagios: number): number[] => {
-  const n = Math.min(8, Math.max(6, numEstagios));
-  let restante = total_kvar;
-  const stages: number[] = [];
-  const tamanhos = [...CONFIG_CAPACITORES.tamanhos_estagios];
-  for (const size of tamanhos) {
-    while (restante >= size && stages.length < n) {
-      stages.push(size);
-      restante -= size;
+  const n = Math.min(8, Math.max(6, numEstagios)); // força entre 6 e 8
+  // Divide o total em n partes iguais
+  const parteIdeal = total_kvar / n;
+  // Arredonda cada parte para o múltiplo de 2.5 mais próximo (comercial)
+  let stages: number[] = [];
+  let soma = 0;
+  for (let i = 0; i < n; i++) {
+    let valor;
+    if (i === n - 1) {
+      // Último estágio: pega o restante para garantir a soma exata
+      valor = total_kvar - soma;
+    } else {
+      valor = Math.round(parteIdeal / 2.5) * 2.5;
     }
+    // Garante valor mínimo de 2.5
+    if (valor < 2.5) valor = 2.5;
+    stages.push(valor);
+    soma += valor;
   }
-  if (restante >= 2.5 && stages.length < n) {
-    stages.push(Math.ceil(restante / 2.5) * 2.5);
+  // Ajusta pequenas diferenças de arredondamento no último estágio
+  if (Math.abs(soma - total_kvar) > 0.01) {
+    const diff = total_kvar - soma;
+    stages[stages.length - 1] += diff;
   }
+  // Arredonda cada estágio para múltiplo de 2.5
+  stages = stages.map(s => Math.ceil(s / 2.5) * 2.5);
+  // Ordena crescente
   return stages.sort((a, b) => a - b);
 };
 
