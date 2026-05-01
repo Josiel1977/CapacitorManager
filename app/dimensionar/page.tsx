@@ -49,7 +49,7 @@ const FORNECEDORES_RECOMENDADOS = [
 const CONFIG_CAPACITORES = {
   tensao_padrao_380v: "440V",
   tensao_padrao_220v: "260V",
-  margem_seguranca: 1.30, // aumentado para maior segurança
+  margem_seguranca: 1.30,
   minimo_kvar_grupo_a: 20,
   minimo_kvar_grupo_b: 10,
   estagios_padrao: [60, 50, 40, 30, 25, 20, 15, 12.5, 10, 7.5, 5, 2.5],
@@ -260,7 +260,8 @@ export default function DimensionarPage() {
   const [result, setResult] = useState<ResultadoDimensionamento | null>(null);
   const [calculando, setCalculando] = useState(false);
   const [showFaturaModal, setShowFaturaModal] = useState(false);
-  const [currentFatura, setCurrentFatura] = useState<Partial<Fatura>>({});
+  // ✅ CORRIGIDO: currentFatura agora aceita valores string nos campos numéricos temporariamente
+  const [currentFatura, setCurrentFatura] = useState<Partial<Record<keyof Fatura, string | number>>>({});
   const [editandoFaturaId, setEditandoFaturaId] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
 
@@ -319,8 +320,8 @@ export default function DimensionarPage() {
   };
 
   const validarFatura = (fatura: Partial<Fatura>): { valida: boolean; mensagem: string } => {
-    const consumoTotal = (fatura.consumo_ponta_kwh || 0) + (fatura.consumo_fora_ponta_kwh || 0);
-    const reativoTotal = (fatura.reativo_ponta_kvarh || 0) + (fatura.reativo_fora_ponta_kvarh || 0);
+    const consumoTotal = (fatura.consumo_ponta_kwh as number || 0) + (fatura.consumo_fora_ponta_kwh as number || 0);
+    const reativoTotal = (fatura.reativo_ponta_kvarh as number || 0) + (fatura.reativo_fora_ponta_kvarh as number || 0);
     if (consumoTotal === 0 && reativoTotal === 0) return { valida: false, mensagem: "Ambos os valores estão zerados." };
     if (reativoTotal > consumoTotal && consumoTotal > 0) {
       const percentual = (reativoTotal / consumoTotal) * 100;
@@ -336,13 +337,13 @@ export default function DimensionarPage() {
     Swal.fire({ title: "✅ Sucesso!", text: "Configuração dos transformadores salva!", icon: "success", timer: 1500 });
   };
 
-  // ========== FUNÇÃO SALVAR FATURA CORRIGIDA (async) ==========
   const salvarFatura = async () => {
     if (!currentFatura.mes_referencia) {
       Swal.fire("Atenção", "Informe o mês de referência", "warning");
       return;
     }
 
+    // ✅ Conversão segura usando parseBRLocal
     const consumoPonta = parseBRLocal(currentFatura.consumo_ponta_kwh);
     const consumoForaPonta = parseBRLocal(currentFatura.consumo_fora_ponta_kwh);
     const reativoPonta = parseBRLocal(currentFatura.reativo_ponta_kvarh);
@@ -351,7 +352,7 @@ export default function DimensionarPage() {
     const demandaForaPonta = parseBRLocal(currentFatura.demanda_fora_ponta_kw);
     const totalPagar = parseBRLocal(currentFatura.total_pagar);
     const diasCiclo = parseInt(currentFatura.dias_ciclo?.toString() || "30") || 30;
-    const concessionaria = currentFatura.concessionaria || "EQUATORIAL_PARA";
+    const concessionaria = currentFatura.concessionaria as string || "EQUATORIAL_PARA";
 
     if (reativoPonta === 0 && reativoForaPonta === 0 && (consumoPonta + consumoForaPonta) > 0) {
       Swal.fire({ title: "⚠️ Atenção!", html: "Os valores de energia reativa estão ZERADOS. Isso fará a multa ser zero.<br/>Preencha corretamente os campos <strong>Reativo Ponta</strong> e <strong>Reativo Fora Ponta</strong>.", icon: "warning" });
@@ -382,7 +383,7 @@ export default function DimensionarPage() {
 
     const novaFatura: Fatura = {
       id: editandoFaturaId || Date.now().toString(),
-      mes_referencia: currentFatura.mes_referencia,
+      mes_referencia: currentFatura.mes_referencia as string,
       consumo_ponta_kwh: consumoPonta,
       consumo_fora_ponta_kwh: consumoForaPonta,
       demanda_ponta_kw: demandaPonta,
@@ -460,7 +461,6 @@ export default function DimensionarPage() {
 
   const potenciaTotalTransformadores = transformadores.reduce((acc, t) => acc + t.potencia_kva * t.quantidade, 0);
 
-  // ========== FUNÇÃO DIMENSIONAMENTO CORRIGIDA ==========
   const calcularDimensionamento = () => {
     if (faturas.length < 2) {
       Swal.fire("Atenção", "Mínimo de 2 faturas para dimensionamento confiável", "warning");
@@ -658,7 +658,7 @@ export default function DimensionarPage() {
                   const custoReativo = calcularMultaReativa(consumoTotal, reativoTotal, TARIFAS_REATIVO[fat.concessionaria]?.base || 0.28622);
                   return (
                     <div key={fat.id} className="p-3 rounded-lg bg-slate-50">
-                      <div className="flex justify-between"><span className="font-bold">{fat.mes_referencia}</span><div><button onClick={() => { setCurrentFatura(fat); setEditandoFaturaId(fat.id); setShowFaturaModal(true); }} className="text-blue-500"><Edit3 size={14} /></button><button onClick={() => removerFatura(fat.id)} className="text-red-500"><Trash2 size={14} /></button></div></div>
+                      <div className="flex justify-between"><span className="font-bold">{fat.mes_referencia}</span><div><button onClick={() => { setCurrentFatura(fat as any); setEditandoFaturaId(fat.id); setShowFaturaModal(true); }} className="text-blue-500"><Edit3 size={14} /></button><button onClick={() => removerFatura(fat.id)} className="text-red-500"><Trash2 size={14} /></button></div></div>
                       <div className="grid grid-cols-2 gap-1 text-xs mt-2">
                         <div>Consumo Ponta: {fat.consumo_ponta_kwh.toLocaleString()} kWh</div>
                         <div>Consumo F/Ponta: {fat.consumo_fora_ponta_kwh.toLocaleString()} kWh</div>
@@ -719,7 +719,7 @@ export default function DimensionarPage() {
         </div>
       </div>
 
-      {/* Modal de fatura */}
+      {/* Modal de fatura - ✅ CORRIGIDO: onChange com parseBRLocal */}
       <AnimatePresence>
         {showFaturaModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
@@ -728,12 +728,56 @@ export default function DimensionarPage() {
               <div className="space-y-3">
                 <div><label>Mês/Ano *</label><input type="text" placeholder="Ex: 11/2025" value={currentFatura.mes_referencia || ""} onChange={(e) => setCurrentFatura({...currentFatura, mes_referencia: e.target.value})} className="w-full border rounded p-2" /></div>
                 <div><label>Concessionária</label><select value={currentFatura.concessionaria || "EQUATORIAL_PARA"} onChange={(e) => setCurrentFatura({...currentFatura, concessionaria: e.target.value})} className="w-full border rounded p-2"><option value="EQUATORIAL_PARA">Equatorial Pará</option><option value="RORAIMA_ENERGIA">Roraima Energia</option></select></div>
-                <div className="grid grid-cols-2 gap-2"><div><label>Consumo Ponta (kWh)</label><input type="text" placeholder="Ex: 457,21" value={currentFatura.consumo_ponta_kwh || ""} onChange={(e) => setCurrentFatura({...currentFatura, consumo_ponta_kwh: e.target.value})} className="w-full border rounded p-2" /></div><div><label>Consumo Fora Ponta (kWh)</label><input type="text" placeholder="Ex: 5179,86" value={currentFatura.consumo_fora_ponta_kwh || ""} onChange={(e) => setCurrentFatura({...currentFatura, consumo_fora_ponta_kwh: e.target.value})} className="w-full border rounded p-2" /></div></div>
-                <div className="grid grid-cols-2 gap-2"><div><label>Demanda Ponta (kW)</label><input type="text" placeholder="Ex: 53,42" value={currentFatura.demanda_ponta_kw || ""} onChange={(e) => setCurrentFatura({...currentFatura, demanda_ponta_kw: e.target.value})} className="w-full border rounded p-2" /></div><div><label>Demanda Fora Ponta (kW)</label><input type="text" placeholder="Ex: 53,42" value={currentFatura.demanda_fora_ponta_kw || ""} onChange={(e) => setCurrentFatura({...currentFatura, demanda_fora_ponta_kw: e.target.value})} className="w-full border rounded p-2" /></div></div>
-                <div className="grid grid-cols-2 gap-2"><div><label>Reativo Ponta (kVArh)</label><input type="text" placeholder="Ex: 493,76" value={currentFatura.reativo_ponta_kvarh || ""} onChange={(e) => setCurrentFatura({...currentFatura, reativo_ponta_kvarh: e.target.value})} className="w-full border rounded p-2" /></div><div><label>Reativo Fora Ponta (kVArh)</label><input type="text" placeholder="Ex: 4696,54" value={currentFatura.reativo_fora_ponta_kvarh || ""} onChange={(e) => setCurrentFatura({...currentFatura, reativo_fora_ponta_kvarh: e.target.value})} className="w-full border rounded p-2" /></div></div>
-                <div className="grid grid-cols-2 gap-2"><div><label>Dias ciclo</label><input type="text" placeholder="30" value={currentFatura.dias_ciclo || 30} onChange={(e) => setCurrentFatura({...currentFatura, dias_ciclo: e.target.value})} className="w-full border rounded p-2" /></div><div><label>Total a Pagar (R$)</label><input type="text" placeholder="Ex: 12617,50" value={currentFatura.total_pagar || ""} onChange={(e) => setCurrentFatura({...currentFatura, total_pagar: e.target.value})} className="w-full border rounded p-2" /></div></div>
+                
+                {/* ✅ Campos numéricos com parseBRLocal no onChange */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label>Consumo Ponta (kWh)</label>
+                    <input type="text" placeholder="Ex: 457,21" value={currentFatura.consumo_ponta_kwh || ""} onChange={(e) => setCurrentFatura({...currentFatura, consumo_ponta_kwh: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                  </div>
+                  <div>
+                    <label>Consumo Fora Ponta (kWh)</label>
+                    <input type="text" placeholder="Ex: 5179,86" value={currentFatura.consumo_fora_ponta_kwh || ""} onChange={(e) => setCurrentFatura({...currentFatura, consumo_fora_ponta_kwh: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label>Demanda Ponta (kW)</label>
+                    <input type="text" placeholder="Ex: 53,42" value={currentFatura.demanda_ponta_kw || ""} onChange={(e) => setCurrentFatura({...currentFatura, demanda_ponta_kw: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                  </div>
+                  <div>
+                    <label>Demanda Fora Ponta (kW)</label>
+                    <input type="text" placeholder="Ex: 53,42" value={currentFatura.demanda_fora_ponta_kw || ""} onChange={(e) => setCurrentFatura({...currentFatura, demanda_fora_ponta_kw: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label>Reativo Ponta (kVArh)</label>
+                    <input type="text" placeholder="Ex: 493,76" value={currentFatura.reativo_ponta_kvarh || ""} onChange={(e) => setCurrentFatura({...currentFatura, reativo_ponta_kvarh: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                  </div>
+                  <div>
+                    <label>Reativo Fora Ponta (kVArh)</label>
+                    <input type="text" placeholder="Ex: 4696,54" value={currentFatura.reativo_fora_ponta_kvarh || ""} onChange={(e) => setCurrentFatura({...currentFatura, reativo_fora_ponta_kvarh: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label>Dias ciclo</label>
+                    <input type="text" placeholder="30" value={currentFatura.dias_ciclo ?? 30} onChange={(e) => setCurrentFatura({...currentFatura, dias_ciclo: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                  </div>
+                  <div>
+                    <label>Total a Pagar (R$)</label>
+                    <input type="text" placeholder="Ex: 12617,50" value={currentFatura.total_pagar || ""} onChange={(e) => setCurrentFatura({...currentFatura, total_pagar: parseBRLocal(e.target.value)})} className="w-full border rounded p-2" />
+                  </div>
+                </div>
               </div>
-              <div className="flex gap-3 mt-6"><button onClick={carregarFaturaExemplo} className="flex-1 py-2 border rounded-lg">Exemplo</button><button onClick={salvarFatura} className="flex-1 py-2 bg-primary text-white rounded-lg">Salvar</button></div>
+              <div className="flex gap-3 mt-6">
+                <button onClick={carregarFaturaExemplo} className="flex-1 py-2 border rounded-lg">Exemplo</button>
+                <button onClick={salvarFatura} className="flex-1 py-2 bg-primary text-white rounded-lg">Salvar</button>
+              </div>
             </motion.div>
           </div>
         )}
