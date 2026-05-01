@@ -267,6 +267,33 @@ const docs = {
             <li>Previsão de substituição</li>
           </ul>
         </div>
+
+        desenvolvedores: {
+  title: "👨‍💻 Desenvolvedores",
+  content: (
+    <div className="space-y-4">
+      <h2 className="text-2xl font-bold text-primary">Equipe de Desenvolvimento</h2>
+      <p className="text-slate-600">
+        O CapacitorManager foi projetado e desenvolvido por profissionais com vasta experiência em engenharia elétrica, eficiência energética e tecnologia da informação.
+      </p>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="bg-slate-50 p-4 rounded-lg">
+          <h3 className="font-bold text-primary">🧑‍🏫 Eng. Eletricista Francisco Rodrigues</h3>
+          <p className="text-sm text-slate-600">Especialista em sistemas de potência, fator de potência e eficiência energética.</p>
+          <p className="text-xs text-slate-500 mt-1">Responsável pela concepção dos algoritmos de dimensionamento e validação técnica das soluções.</p>
+        </div>
+        <div className="bg-slate-50 p-4 rounded-lg">
+          <h3 className="font-bold text-primary">⚡ Tecnólogo em Eletrônica Josiel Maia</h3>
+          <p className="text-sm text-slate-600">Desenvolvedor Full Stack e entusiasta de automação.</p>
+          <p className="text-xs text-slate-500 mt-1">Implementou a plataforma web, integração com faturas e geração de relatórios.</p>
+        </div>
+      </div>
+      <div className="bg-primary/5 p-4 rounded-lg text-center">
+        <p className="text-sm">📧 Para suporte, sugestões ou parcerias, entre em contato pelo e-mail: <a href="mailto:contato@capacitormanager.com.br" className="text-primary font-medium">contato@capacitormanager.com.br</a></p>
+      </div>
+    </div>
+  )
+}
         
         <div className="bg-amber-50 p-3 rounded-lg text-sm">
           💡 <strong>Dica:</strong> Os relatórios podem ser exportados em PDF para compartilhamento com clientes.
@@ -315,7 +342,9 @@ export default function DocumentacaoPage() {
     { id: 'manutencao', label: 'Manutenção', icon: Wrench },
     { id: 'relatorios', label: 'Relatórios', icon: FileText },
     { id: 'faq', label: 'FAQ', icon: HelpCircle },
-  ];
+    { id: 'desenvolvedores', label: 'Desenvolvedores', icon: Users },
+ ];
+  
 
   const filteredDocs = sections.filter(section =>
     section.label.toLowerCase().includes(searchTerm.toLowerCase())
