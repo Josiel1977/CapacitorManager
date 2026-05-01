@@ -283,7 +283,7 @@ const docs = {
           <p className="text-xs text-slate-500 mt-1">Responsável pela concepção dos algoritmos de dimensionamento e validação técnica das soluções.</p>
         </div>
         <div className="bg-slate-50 p-4 rounded-lg">
-          <h3 className="font-bold text-primary">⚡ Tecnólogo em Eletrônica Josiel Maia</h3>
+          <h3 className="font-bold text-primary">⚡ Tecnólogo em Eletroténica Josiel Maia</h3>
           <p className="text-sm text-slate-600">Desenvolvedor Full Stack e entusiasta de automação.</p>
           <p className="text-xs text-slate-500 mt-1">Implementou a plataforma web, integração com faturas e geração de relatórios.</p>
         </div>
