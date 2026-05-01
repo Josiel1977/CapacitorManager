@@ -95,6 +95,8 @@ interface Fatura {
   concessionaria: string;
   fp_calculado?: number;
   validado: boolean;
+  multa_reativo_calculada?: number;  // ✅ adicionado
+  reativo_excedente_calculado?: number; // opcional
 }
 
 interface DistribuicaoTrafo {
@@ -444,7 +446,7 @@ export default function DimensionarPage() {
         motivo_recomendacao: motivo,
         concessionaria_identificada: concessionarias[0] || "NÃO IDENTIFICADA",
         quantidade_faturas_analisadas: faturasProcessadas.length,
-        pior_mes: piorMes || null,
+        pior_mes: piorMes ? { ...piorMes, multa_reativo_calculada: piorMes.multa } : null,
         media_fp_por_mes: mediaFpPorMes,
         alertas: alertas,
         distribuicao_por_trafo: distribuicaoPorTrafo,
