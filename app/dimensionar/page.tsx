@@ -246,25 +246,41 @@ const calcularPrecoMercado = (kvar: number): number => {
   return kvar !== maisProximo ? Math.round(kvar * (preco / maisProximo)) : preco;
 };
 
-const distribuirKvarPorTrafo = (transformadores: Transformador[], kvarTotalComercial: number): DistribuicaoTrafo[] => {
+const distribuirKvarPorTrafoComEstagios = (
+  transformadores: Transformador[],
+  estagiosGlobais: number[],
+  kvarTotalAutomatico: number
+): DistribuicaoTrafo[] => {
   const potenciaTotal = transformadores.reduce((acc, t) => acc + t.potencia_kva * t.quantidade, 0);
-  if (potenciaTotal <= 0 || kvarTotalComercial <= 0) return [];
+  if (potenciaTotal <= 0 || kvarTotalAutomatico <= 0) return [];
+
   return transformadores.map((trafo) => {
     const potenciaTrafo = trafo.potencia_kva * trafo.quantidade;
     const percentual = potenciaTrafo / potenciaTotal;
-    let kvarRecomendado = kvarTotalComercial * percentual;
-    let kvarComercial = Math.ceil(kvarRecomendado / 10) * 10;
-    if (kvarComercial < 10 && kvarRecomendado > 0) kvarComercial = 10;
+    // Rateia os estágios globais proporcionalmente
+    let estagiosTrafo = estagiosGlobais.map(s => s * percentual);
+    // Arredonda cada estágio para múltiplo de 2.5 (valor comercial)
+    estagiosTrafo = estagiosTrafo.map(s => Math.ceil(s / 2.5) * 2.5);
+    // Recalcula a soma e ajusta o último estágio para bater o total esperado (kvar_recomendado)
+    let soma = estagiosTrafo.reduce((a, b) => a + b, 0);
+    const kvarRecomendado = kvarTotalAutomatico * percentual;
+    if (Math.abs(soma - kvarRecomendado) > 0.01) {
+      const diff = kvarRecomendado - soma;
+      estagiosTrafo[estagiosTrafo.length - 1] += diff;
+      // Arredonda novamente o último
+      estagiosTrafo[estagiosTrafo.length - 1] = Math.ceil(estagiosTrafo[estagiosTrafo.length - 1] / 2.5) * 2.5;
+    }
+    // Filtra estágios muito pequenos (menores que 2.5)
+    estagiosTrafo = estagiosTrafo.filter(s => s >= 2.5);
+
+    const kvarComercial = Math.ceil((kvarTotalAutomatico * percentual) / 10) * 10;
     const precoEstimado = calcularPrecoMercado(kvarComercial);
-    let configuracaoEstagios = "";
-    if (kvarComercial <= 30) configuracaoEstagios = `${kvarComercial} kVAr (estágio único)`;
-    else if (kvarComercial <= 60) configuracaoEstagios = `${Math.round(kvarComercial / 2)} + ${Math.round(kvarComercial / 2)} kVAr`;
-    else if (kvarComercial <= 100) configuracaoEstagios = `${Math.round(kvarComercial / 3)} + ${Math.round(kvarComercial / 3)} + ${Math.round(kvarComercial / 3)} kVAr`;
-    else configuracaoEstagios = `${Math.round(kvarComercial / 0.6 / 100) * 60} + ${kvarComercial - Math.round(kvarComercial / 0.6 / 100) * 60} kVAr`;
+    const configuracaoEstagios = estagiosTrafo.map(s => `${s.toFixed(1)}`).join(" + ") + " kVAr";
+
     return {
       trafo_kva: potenciaTrafo,
       percentual: percentual * 100,
-      kvar_recomendado: kvarRecomendado,
+      kvar_recomendado: kvarTotalAutomatico * percentual,
       kvar_comercial: kvarComercial,
       preco_estimado: precoEstimado,
       configuracao_estagios: configuracaoEstagios,
@@ -513,7 +529,7 @@ export default function DimensionarPage() {
       const projecao5Anos = retorno5Anos;
       const roi5AnosPercent = investimentoTotal > 0 ? (projecao5Anos / investimentoTotal) * 100 : 0;
       const precoPorKvar = kvarTotalComercial > 0 ? investimentoAutomatico / kvarTotalComercial : 0;
-      const distribuicaoPorTrafo = distribuirKvarPorTrafo(transformadores, kvarAutomatico);
+      const distribuicaoPorTrafo = distribuirKvarPorTrafoComEstagios(transformadores, estagios, kvarAutomatico);
       const tensaoCapacitores = transformadores[0]?.tensao_v === 380 ? CONFIG_CAPACITORES.tensao_padrao_380v : CONFIG_CAPACITORES.tensao_padrao_220v;
       const mediaFpPorMes = faturasProcessadas.map(f => ({ mes: f.mes_referencia, fp: f.fp * 100, multa: f.multa })).sort((a, b) => a.fp - b.fp);
       const grupoTarifario = potenciaTotalTransformadores >= 75 ? "A" : "B";
