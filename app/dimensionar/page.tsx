@@ -234,7 +234,11 @@ interface ResultadoDimensionamento {
   preco_por_kvar: number;
   economia_anual: number;
   retorno_5_anos: number;
-  metodo_calculo_utilizado: "reativo_excedente" | "demanda" | "hibrido" | "manual";
+  metodo_calculo_utilizado:
+    | "reativo_excedente"
+    | "demanda"
+    | "hibrido"
+    | "manual";
 }
 
 // ============================================
@@ -280,15 +284,7 @@ const calcularFatorPotencia = (
   return Math.min(0.99, Math.max(0.3, ativo_kwh / aparente));
 };
 
-const calcularReativoExcedente = (
-  ativo_kwh: number,
-  reativo_kvarh: number,
-): number => {
-  const fp = calcularFatorPotencia(ativo_kwh, reativo_kvarh);
-  if (fp >= FP_MINIMO_REGULAMENTAR) return 0;
-  const reativo_permitido = FP_MINIMO_REGULAMENTAR * ativo_kwh;
-  return Math.max(0, reativo_kvarh - reativo_permitido);
-};
+calcularReativoExcedente;
 
 const calcularMultaReativa = (
   ativo_kwh: number,
@@ -319,7 +315,7 @@ const calcularKvarBaseadoEmReativoReal = (
   reativoExcedenteMedioKvarh: number,
   diasCiclo: number,
   fatorSimultaneidade: number = 0.35,
-  margemSeguranca: number = 1.3
+  margemSeguranca: number = 1.3,
 ): number => {
   const horasCiclo = diasCiclo * 24;
   const kvarMedio = reativoExcedenteMedioKvarh / horasCiclo;
@@ -431,10 +427,12 @@ export default function DimensionarPage() {
   >({});
   const [editandoFaturaId, setEditandoFaturaId] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
-  
+
   // ✅ NOVO: Fator de simultaneidade configurável e kVAr manual
   const [fatorSimultaneidade, setFatorSimultaneidade] = useState(0.35);
-  const [kvarRecomendadoManual, setKvarRecomendadoManual] = useState<number | null>(null);
+  const [kvarRecomendadoManual, setKvarRecomendadoManual] = useState<
+    number | null
+  >(null);
 
   useEffect(() => {
     carregarDados();
@@ -469,7 +467,7 @@ export default function DimensionarPage() {
         demanda_fora_ponta_kw: 53.42,
         reativo_ponta_kvarh: 493.76,
         reativo_fora_ponta_kvarh: 4696.54,
-        total_pagar: 12617.50,
+        total_pagar: 12617.5,
         dias_ciclo: 30,
         concessionaria: "EQUATORIAL_PARA",
         validado: true,
@@ -492,10 +490,10 @@ export default function DimensionarPage() {
         id: "jan2026",
         mes_referencia: "01/2026",
         consumo_ponta_kwh: 558.52,
-        consumo_fora_ponta_kwh: 5974.50,
+        consumo_fora_ponta_kwh: 5974.5,
         demanda_ponta_kw: 37.96,
         demanda_fora_ponta_kw: 39.98,
-        reativo_ponta_kvarh: 993.00,
+        reativo_ponta_kvarh: 993.0,
         reativo_fora_ponta_kvarh: 8690.47,
         total_pagar: 13728.12,
         dias_ciclo: 31,
@@ -760,11 +758,14 @@ export default function DimensionarPage() {
       const faturasProcessadas = faturas.map((f) => {
         const ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
         const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
-        const reativoExcedente = calcularReativoExcedente(ativoTotal, reativoTotal);
-        
+        const reativoExcedente = calcularReativoExcedente(
+          ativoTotal,
+          reativoTotal,
+        );
+
         if (reativoTotal === 0 && ativoTotal > 0)
           alertas.push(`⚠️ Fatura ${f.mes_referencia} com REATIVO ZERO.`);
-        
+
         const fp = calcularFatorPotencia(ativoTotal, reativoTotal);
         const tarifa =
           TARIFAS_REATIVO[f.concessionaria as keyof typeof TARIFAS_REATIVO]
@@ -775,11 +776,11 @@ export default function DimensionarPage() {
           f.demanda_fora_ponta_kw,
           0.1,
         );
-        
+
         console.log(
-          `Fatura ${f.mes_referencia}: FP=${(fp*100).toFixed(1)}%, Multa=${formatMoney(multa)}, Excedente=${formatNumber(reativoExcedente,0)} kVArh`,
+          `Fatura ${f.mes_referencia}: FP=${(fp * 100).toFixed(1)}%, Multa=${formatMoney(multa)}, Excedente=${formatNumber(reativoExcedente, 0)} kVArh`,
         );
-        
+
         return {
           ...f,
           ativoTotal,
@@ -797,16 +798,18 @@ export default function DimensionarPage() {
         (prev, curr) => (curr.fp < prev.fp ? curr : prev),
         faturasProcessadas[0],
       );
-      
+
       const mediaMulta =
         faturasProcessadas.reduce((acc, f) => acc + (f.multa || 0), 0) /
         faturasProcessadas.length;
-      
-      const reativoExcedenteMedio = 
-        faturasProcessadas.reduce((acc, f) => acc + (f.reativoExcedente || 0), 0) /
-        faturasProcessadas.length;
-      
-      const diasCicloMedio = 
+
+      const reativoExcedenteMedio =
+        faturasProcessadas.reduce(
+          (acc, f) => acc + (f.reativoExcedente || 0),
+          0,
+        ) / faturasProcessadas.length;
+
+      const diasCicloMedio =
         faturasProcessadas.reduce((acc, f) => acc + f.dias_ciclo, 0) /
         faturasProcessadas.length;
 
@@ -817,7 +820,8 @@ export default function DimensionarPage() {
         totalKvarComercial = 0,
         stages: number[] = [],
         economiaMensal = 0,
-        metodoCalculo: "reativo_excedente" | "demanda" | "hibrido" | "manual" = "hibrido";
+        metodoCalculo: "reativo_excedente" | "demanda" | "hibrido" | "manual" =
+          "hibrido";
       let motivo = "";
 
       if (precisaCapacitor) {
@@ -826,51 +830,54 @@ export default function DimensionarPage() {
           totalKvar = kvarRecomendadoManual;
           metodoCalculo = "manual";
           motivo = `Valor definido por especialista: ${totalKvar} kVAr (laudo técnico)`;
-        } 
+        }
         // ✅ PRIORIDADE 2: Usa método baseado em reativo excedente REAL (ANEEL)
         else {
           const kvarPorReativo = calcularKvarBaseadoEmReativoReal(
             reativoExcedenteMedio,
             diasCicloMedio,
             fatorSimultaneidade,
-            CONFIG_CAPACITORES.margem_seguranca
+            CONFIG_CAPACITORES.margem_seguranca,
           );
-          
+
           const demandaMaximaGlobal = Math.max(
             ...faturasProcessadas.map((f) => f.demandaMaxKw || 0.1),
-            potenciaTotalTransformadores * 0.6 * 0.92 // Estimativa conservadora
+            potenciaTotalTransformadores * 0.6 * 0.92, // Estimativa conservadora
           );
-          
+
           const kvarPorDemanda = calcularKvarNecessario(
             demandaMaximaGlobal,
             piorMes?.fp || 0.92,
             targetFP,
           );
-          
+
           // ✅ Usa o MAIOR valor para garantir correção adequada (método híbrido)
           totalKvar = Math.max(kvarPorReativo, kvarPorDemanda);
-          metodoCalculo = kvarPorReativo > kvarPorDemanda ? "reativo_excedente" : "hibrido";
-          
+          metodoCalculo =
+            kvarPorReativo > kvarPorDemanda ? "reativo_excedente" : "hibrido";
+
           motivo = `FP no pior mês (${piorMes?.mes_referencia || "N/A"}) = ${((piorMes?.fp || 0) * 100).toFixed(1)}% | Multa média: ${formatMoney(mediaMulta)} | Método: ${metodoCalculo === "reativo_excedente" ? "Reativo Excedente" : "Híbrido"}`;
         }
-        
+
         // Arredonda para valor comercial
         totalKvarComercial = Math.ceil(totalKvar / 10) * 10;
-        totalKvarComercial = Math.max(totalKvarComercial, CONFIG_CAPACITORES.minimo_kvar_grupo_a);
-        
+        totalKvarComercial = Math.max(
+          totalKvarComercial,
+          CONFIG_CAPACITORES.minimo_kvar_grupo_a,
+        );
+
         stages = distribuirEstagios(totalKvarComercial);
         economiaMensal = mediaMulta * 0.92; // 92% de eficácia típica
-        
+
         if (economiaMensal < 100)
           alertas.push(
             "⚠️ Economia mensal < R$100. Verifique se os valores de reativo estão corretos nas faturas.",
           );
-          
+
         if (fatorSimultaneidade < 0.3 || fatorSimultaneidade > 0.5)
           alertas.push(
             `⚠️ Fator de simultaneidade ${fatorSimultaneidade.toFixed(2)} fora da faixa típica (0,3-0,5).`,
           );
-          
       } else {
         const mediaFp =
           faturasProcessadas.reduce((a, b) => a + (b.fp || 0.92), 0) /
@@ -900,7 +907,11 @@ export default function DimensionarPage() {
           ? CONFIG_CAPACITORES.tensao_padrao_380v
           : CONFIG_CAPACITORES.tensao_padrao_220v;
       const mediaFpPorMes = faturasProcessadas
-        .map((f) => ({ mes: f.mes_referencia, fp: (f.fp || 0) * 100, multa: f.multa || 0 }))
+        .map((f) => ({
+          mes: f.mes_referencia,
+          fp: (f.fp || 0) * 100,
+          multa: f.multa || 0,
+        }))
         .sort((a, b) => a.fp - b.fp);
 
       setResult({
@@ -928,7 +939,9 @@ export default function DimensionarPage() {
         consumo_reativo_medio_mensal_kvarh:
           faturasProcessadas.reduce((a, b) => a + (b.reativoTotal || 0), 0) /
           faturasProcessadas.length,
-        potencia_ativa_media_kw: Math.max(...faturasProcessadas.map(f => f.demandaMaxKw || 0.1)),
+        potencia_ativa_media_kw: Math.max(
+          ...faturasProcessadas.map((f) => f.demandaMaxKw || 0.1),
+        ),
         precisa_capacitor: precisaCapacitor,
         grupo_tarifario: grupoTarifario,
         motivo_recomendacao: motivo,
@@ -1253,7 +1266,7 @@ export default function DimensionarPage() {
               <option value={0.95}>0.95 (recomendado)</option>
               <option value={0.98}>0.98 (excelente)</option>
             </select>
-            
+
             {/* ✅ NOVO: Configurações avançadas para validação real */}
             <details className="mb-4">
               <summary className="text-sm font-medium cursor-pointer text-primary">
@@ -1270,7 +1283,9 @@ export default function DimensionarPage() {
                     max="0.55"
                     step="0.05"
                     value={fatorSimultaneidade}
-                    onChange={(e) => setFatorSimultaneidade(parseFloat(e.target.value))}
+                    onChange={(e) =>
+                      setFatorSimultaneidade(parseFloat(e.target.value))
+                    }
                     className="w-full"
                   />
                   <p className="text-[10px] text-slate-500 mt-1">
@@ -1286,9 +1301,11 @@ export default function DimensionarPage() {
                       type="number"
                       placeholder="Ex: 160"
                       value={kvarRecomendadoManual || ""}
-                      onChange={(e) => setKvarRecomendadoManual(
-                        e.target.value ? parseFloat(e.target.value) : null
-                      )}
+                      onChange={(e) =>
+                        setKvarRecomendadoManual(
+                          e.target.value ? parseFloat(e.target.value) : null,
+                        )
+                      }
                       className="flex-1 border rounded p-2 text-sm"
                     />
                     <button
@@ -1305,7 +1322,7 @@ export default function DimensionarPage() {
                 </div>
               </div>
             </details>
-            
+
             <button
               onClick={calcularDimensionamento}
               disabled={calculando || faturas.length < 2}
@@ -1355,10 +1372,12 @@ export default function DimensionarPage() {
                           <span className="text-lg">kVAr</span>
                         </p>
                         <p className="text-xs text-slate-400">
-                          Grupo {result.grupo_tarifario} • {result.quantidade_faturas_analisadas} faturas • Método: {result.metodo_calculo_utilizado}
+                          Grupo {result.grupo_tarifario} •{" "}
+                          {result.quantidade_faturas_analisadas} faturas •
+                          Método: {result.metodo_calculo_utilizado}
                         </p>
                       </div>
-                      
+
                       {result.alertas.length > 0 && (
                         <div className="space-y-2">
                           {result.alertas.map((a, i) => (
@@ -1366,13 +1385,16 @@ export default function DimensionarPage() {
                               key={i}
                               className="bg-amber-50 p-3 rounded-xl text-xs text-amber-700 flex gap-2"
                             >
-                              <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+                              <AlertTriangle
+                                size={14}
+                                className="mt-0.5 flex-shrink-0"
+                              />
                               {a}
                             </div>
                           ))}
                         </div>
                       )}
-                      
+
                       <div className="bg-blue-50 p-4 rounded-xl">
                         <p className="text-sm font-bold text-blue-700">
                           📌 {result.motivo_recomendacao}
@@ -1391,30 +1413,38 @@ export default function DimensionarPage() {
                           </div>
                         </div>
                       </div>
-                      
+
                       <div className="grid grid-cols-2 gap-4">
                         <div className="bg-red-50 p-4 text-center rounded-xl">
-                          <TrendingUp className="mx-auto text-red-600 mb-2" size={24} />
+                          <TrendingUp
+                            className="mx-auto text-red-600 mb-2"
+                            size={24}
+                          />
                           <p className="text-xs font-medium">FP Médio Atual</p>
                           <p className="text-2xl font-bold">
                             {result.fp_atual_percent.toFixed(1)}%
                           </p>
                           <p className="text-xs text-red-500 mt-1">
-                            Multa: {formatMoney(result.multa_atual_mensal_real)}/mês
+                            Multa: {formatMoney(result.multa_atual_mensal_real)}
+                            /mês
                           </p>
                         </div>
                         <div className="bg-green-50 p-4 text-center rounded-xl">
-                          <TrendingUp className="mx-auto text-green-600 mb-2" size={24} />
+                          <TrendingUp
+                            className="mx-auto text-green-600 mb-2"
+                            size={24}
+                          />
                           <p className="text-xs font-medium">FP Projetado</p>
                           <p className="text-2xl font-bold text-green-600">
                             {result.fp_projetado_percent.toFixed(0)}%
                           </p>
                           <p className="text-xs text-green-600 mt-1">
-                            Economia: {formatMoney(result.economia_mensal_estimada)}/mês
+                            Economia:{" "}
+                            {formatMoney(result.economia_mensal_estimada)}/mês
                           </p>
                         </div>
                       </div>
-                      
+
                       <div className="bg-slate-50 rounded-xl p-4">
                         <p className="text-xs font-bold flex gap-2">
                           <Activity size={14} /> Evolução do FP por Mês
@@ -1431,7 +1461,9 @@ export default function DimensionarPage() {
                               key={idx}
                               className="flex items-center gap-2 text-xs"
                             >
-                              <span className="w-14 font-medium">{item.mes}</span>
+                              <span className="w-14 font-medium">
+                                {item.mes}
+                              </span>
                               <div className="flex-1">
                                 <div className="w-full bg-slate-200 rounded-full h-1.5">
                                   <div
@@ -1452,22 +1484,29 @@ export default function DimensionarPage() {
                           ))}
                         </div>
                       </div>
-                      
+
                       {result.pior_mes && (
                         <div className="bg-amber-50 p-4 rounded-xl">
                           <p className="text-xs font-bold">
                             Pior Mês: {result.pior_mes.mes_referencia}
                           </p>
                           <p className="text-sm mt-1">
-                            FP: {((result.pior_mes.fp_calculado || 0) * 100).toFixed(1)}% • 
-                            Multa: {formatMoney(result.pior_mes.multa_reativo_calculada || 0)}
+                            FP:{" "}
+                            {(
+                              (result.pior_mes.fp_calculado || 0) * 100
+                            ).toFixed(1)}
+                            % • Multa:{" "}
+                            {formatMoney(
+                              result.pior_mes.multa_reativo_calculada || 0,
+                            )}
                           </p>
                         </div>
                       )}
-                      
+
                       <div className="bg-indigo-50 p-4 rounded-xl">
                         <p className="text-xs font-bold flex gap-2">
-                          <Factory size={14} /> Distribuição entre Transformadores
+                          <Factory size={14} /> Distribuição entre
+                          Transformadores
                         </p>
                         {result.distribuicao_por_trafo.map((dist, idx) => (
                           <div
@@ -1476,54 +1515,85 @@ export default function DimensionarPage() {
                           >
                             <div className="flex justify-between">
                               <span className="font-bold text-sm">
-                                Transformador {formatNumber(dist.trafo_kva, 0)} kVA
+                                Transformador {formatNumber(dist.trafo_kva, 0)}{" "}
+                                kVA
                               </span>
                               <span className="text-xs text-slate-500">
                                 {dist.percentual.toFixed(1)}% da carga
                               </span>
                             </div>
                             <div className="grid grid-cols-2 gap-1 text-sm mt-2">
-                              <div>Recomendado: {formatNumber(dist.kvar_recomendado, 1)} kVAr</div>
-                              <div>Comercial: {formatNumber(dist.kvar_comercial, 0)} kVAr</div>
-                              <div className="col-span-2 text-xs text-slate-600">Config: {dist.configuracao_estagios}</div>
-                              <div className="col-span-2 font-medium">Investimento: {formatMoney(dist.preco_estimado)}</div>
+                              <div>
+                                Recomendado:{" "}
+                                {formatNumber(dist.kvar_recomendado, 1)} kVAr
+                              </div>
+                              <div>
+                                Comercial:{" "}
+                                {formatNumber(dist.kvar_comercial, 0)} kVAr
+                              </div>
+                              <div className="col-span-2 text-xs text-slate-600">
+                                Config: {dist.configuracao_estagios}
+                              </div>
+                              <div className="col-span-2 font-medium">
+                                Investimento: {formatMoney(dist.preco_estimado)}
+                              </div>
                             </div>
                           </div>
                         ))}
                       </div>
-                      
+
                       <div className="bg-emerald-50 p-4 rounded-xl">
                         <p className="text-xs font-bold flex gap-2">
                           <DollarSign size={14} /> Análise Financeira Real
                         </p>
                         <div className="grid grid-cols-2 gap-2 text-center mt-2">
                           <div className="bg-white rounded p-2 border">
-                            <p className="text-[10px] text-slate-500">Investimento Mercado</p>
-                            <p className="font-bold text-lg">{formatMoney(result.investimento_mercado_real)}</p>
+                            <p className="text-[10px] text-slate-500">
+                              Investimento Mercado
+                            </p>
+                            <p className="font-bold text-lg">
+                              {formatMoney(result.investimento_mercado_real)}
+                            </p>
                           </div>
                           <div className="bg-white rounded p-2 border">
-                            <p className="text-[10px] text-slate-500">Custo por kVAr</p>
-                            <p className="font-bold">{formatMoney(result.preco_por_kvar)}/kVAr</p>
+                            <p className="text-[10px] text-slate-500">
+                              Custo por kVAr
+                            </p>
+                            <p className="font-bold">
+                              {formatMoney(result.preco_por_kvar)}/kVAr
+                            </p>
                           </div>
                         </div>
                         <div className="grid grid-cols-3 gap-2 text-center mt-2">
                           <div className="bg-white rounded p-2 border">
-                            <p className="text-[10px] text-slate-500">Payback</p>
-                            <p className="font-bold text-green-600">{result.payback_mercado_real} meses</p>
+                            <p className="text-[10px] text-slate-500">
+                              Payback
+                            </p>
+                            <p className="font-bold text-green-600">
+                              {result.payback_mercado_real} meses
+                            </p>
                           </div>
                           <div className="bg-white rounded p-2 border">
-                            <p className="text-[10px] text-slate-500">Economia/ano</p>
-                            <p className="font-bold">{formatMoney(result.economia_anual)}</p>
+                            <p className="text-[10px] text-slate-500">
+                              Economia/ano
+                            </p>
+                            <p className="font-bold">
+                              {formatMoney(result.economia_anual)}
+                            </p>
                           </div>
                           <div className="bg-white rounded p-2 border">
-                            <p className="text-[10px] text-slate-500">Retorno 5 anos</p>
-                            <p className={`font-bold ${result.retorno_5_anos > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                            <p className="text-[10px] text-slate-500">
+                              Retorno 5 anos
+                            </p>
+                            <p
+                              className={`font-bold ${result.retorno_5_anos > 0 ? "text-green-700" : "text-red-700"}`}
+                            >
                               {formatMoney(result.retorno_5_anos)}
                             </p>
                           </div>
                         </div>
                       </div>
-                      
+
                       <div>
                         <h3 className="font-bold mb-2 flex gap-2">
                           <Layers size={18} /> Estágios Recomendados
@@ -1534,13 +1604,17 @@ export default function DimensionarPage() {
                               key={i}
                               className="bg-slate-100 rounded-lg px-3 py-1 border flex items-center gap-1"
                             >
-                              <span className="font-bold text-sm">{s.toFixed(1)}</span>
-                              <span className="text-xs text-slate-500">kVAr</span>
+                              <span className="font-bold text-sm">
+                                {s.toFixed(1)}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                kVAr
+                              </span>
                             </div>
                           ))}
                         </div>
                       </div>
-                      
+
                       <div className="bg-slate-50 p-4 rounded-xl">
                         <h4 className="font-bold text-sm mb-2">
                           Especificações Técnicas
@@ -1551,7 +1625,8 @@ export default function DimensionarPage() {
                           <div>• Controlador: Automático</div>
                           <div>• Grau IP: Mínimo IP54</div>
                           <div className="col-span-2 text-[10px] text-slate-500 mt-1">
-                            • Compatível com rede 380V trifásica • Conformidade NBR 14922/2022
+                            • Compatível com rede 380V trifásica • Conformidade
+                            NBR 14922/2022
                           </div>
                         </div>
                       </div>
@@ -1565,11 +1640,16 @@ export default function DimensionarPage() {
                       <p className="text-xl font-bold text-green-700">
                         Instalação Regularizada
                       </p>
-                      <p className="text-sm mt-2">{result.motivo_recomendacao}</p>
+                      <p className="text-sm mt-2">
+                        {result.motivo_recomendacao}
+                      </p>
                     </div>
                   )}
                   <div className="text-center text-[10px] text-slate-400 border-t pt-4">
-                    <p>Cálculos baseados em ANEEL, NBR 14922/2022 e dados reais de fatura</p>
+                    <p>
+                      Cálculos baseados em ANEEL, NBR 14922/2022 e dados reais
+                      de fatura
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1585,7 +1665,8 @@ export default function DimensionarPage() {
               <Calculator size={64} className="text-slate-300 mb-4" />
               <h3 className="text-xl font-bold">Aguardando Dados</h3>
               <p className="text-sm text-slate-400 mt-2">
-                Configure transformadores e adicione pelo menos 2 faturas da Equatorial Pará
+                Configure transformadores e adicione pelo menos 2 faturas da
+                Equatorial Pará
               </p>
               <button
                 onClick={carregarFaturaExemploReal}
@@ -1750,7 +1831,9 @@ export default function DimensionarPage() {
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs font-medium text-red-600">Reativo Ponta (kVArh) *</label>
+                    <label className="text-xs font-medium text-red-600">
+                      Reativo Ponta (kVArh) *
+                    </label>
                     <input
                       type="text"
                       placeholder="Ex: 493,76"
@@ -1773,7 +1856,9 @@ export default function DimensionarPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-red-600">Reativo F/Ponta (kVArh) *</label>
+                    <label className="text-xs font-medium text-red-600">
+                      Reativo F/Ponta (kVArh) *
+                    </label>
                     <input
                       type="text"
                       placeholder="Ex: 4696,54"
@@ -1789,7 +1874,9 @@ export default function DimensionarPage() {
                       onChange={(e) =>
                         setCurrentFatura({
                           ...currentFatura,
-                          reativo_fora_ponta_kvarh: parseBRLocal(e.target.value),
+                          reativo_fora_ponta_kvarh: parseBRLocal(
+                            e.target.value,
+                          ),
                         })
                       }
                       className="w-full border rounded p-2 text-sm mt-1 border-red-200 focus:border-red-400"
