@@ -466,8 +466,14 @@ export default function DimensionarPage() {
   };
 
   const salvarFatura = async () => {
-    if (!currentFatura.mes_referencia)
-      return Swal.fire("Atenção", "Informe o mês de referência", "warning");
+    if (!currentFatura.mes_referencia) {
+      Swal.fire({
+        title: "Atenção",
+        text: "Informe o mês de referência",
+        icon: "warning",
+      });
+      return;
+    }
     const consumoPonta = parseBRLocal(currentFatura.consumo_ponta_kwh);
     const consumoForaPonta = parseBRLocal(currentFatura.consumo_fora_ponta_kwh);
     const reativoPonta = parseBRLocal(currentFatura.reativo_ponta_kvarh);
@@ -527,7 +533,12 @@ export default function DimensionarPage() {
     setShowFaturaModal(false);
     setCurrentFatura({});
     setEditandoFaturaId(null);
-    Swal.fire("✅ Sucesso!", "Fatura salva!", "success");
+    Swal.fire({
+      title: "✅ Sucesso!",
+      text: "Fatura salva!",
+      icon: "success",
+      timer: 1500,
+    });
   };
 
   const removerFatura = (id: string) => {
@@ -546,7 +557,11 @@ export default function DimensionarPage() {
           "dimensionar_faturas",
           JSON.stringify(novasFaturas),
         );
-        Swal.fire("Removida!", "Fatura removida com sucesso.", "success");
+        Swal.fire({
+          title: "Removida!",
+          text: "Fatura removida com sucesso.",
+          icon: "success",
+        });
       }
     });
   };
@@ -556,12 +571,13 @@ export default function DimensionarPage() {
       "dimensionar_transformadores",
       JSON.stringify(transformadores),
     );
-   Swal.fire({
-  title: "✅ Sucesso!",
-  text: "Configuração dos transformadores salva!",
-  icon: "success",
-  timer: 1500,
-});
+    Swal.fire({
+      title: "✅ Sucesso!",
+      text: "Configuração dos transformadores salva!",
+      icon: "success",
+      timer: 1500,
+    });
+  };
 
   const adicionarTransformador = () =>
     setTransformadores([
@@ -593,12 +609,14 @@ export default function DimensionarPage() {
   );
 
   const calcularDimensionamento = () => {
-    if (faturas.length < 2)
-      return Swal.fire(
-        "Atenção",
-        "Mínimo de 2 faturas para dimensionamento confiável",
-        "warning",
-      );
+    if (faturas.length < 2) {
+      Swal.fire({
+        title: "Atenção",
+        text: "Mínimo de 2 faturas para dimensionamento confiável",
+        icon: "warning",
+      });
+      return;
+    }
     setCalculando(true);
     try {
       const alertas: string[] = [];
@@ -686,7 +704,10 @@ export default function DimensionarPage() {
         stages = distribuirEstagios(totalKvarComercial);
         economiaMensal = mediaMulta * 0.92;
       } else {
-        motivo = `✅ Sistema regularizado (FP médio: ${((faturasProcessadas.reduce((a, b) => a + b.fp, 0) / faturasProcessadas.length) * 100).toFixed(1)}%)`;
+        const mediaFp =
+          faturasProcessadas.reduce((a, b) => a + b.fp, 0) /
+          faturasProcessadas.length;
+        motivo = `✅ Sistema regularizado (FP médio: ${(mediaFp * 100).toFixed(1)}%)`;
       }
 
       const investimentoMercadoReal =
@@ -761,7 +782,11 @@ export default function DimensionarPage() {
       });
     } catch (error) {
       console.error(error);
-      Swal.fire("Erro", "Falha ao processar dimensionamento", "error");
+      Swal.fire({
+        title: "Erro",
+        text: "Falha ao processar dimensionamento",
+        icon: "error",
+      });
     } finally {
       setCalculando(false);
     }
@@ -791,10 +816,14 @@ export default function DimensionarPage() {
         `Dimensionamento_Capacitor_${new Date().toISOString().slice(0, 10)}.pdf`,
       );
       Swal.close();
-      Swal.fire("PDF gerado!", "Memorial exportado com sucesso.", "success");
+      Swal.fire({
+        title: "PDF gerado!",
+        text: "Memorial exportado com sucesso.",
+        icon: "success",
+      });
     } catch (error) {
       Swal.close();
-      Swal.fire("Erro", "Falha ao gerar PDF", "error");
+      Swal.fire({ title: "Erro", text: "Falha ao gerar PDF", icon: "error" });
     }
   };
 
