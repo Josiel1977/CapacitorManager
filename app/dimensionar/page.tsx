@@ -556,13 +556,12 @@ export default function DimensionarPage() {
       "dimensionar_transformadores",
       JSON.stringify(transformadores),
     );
-    Swal.fire(
-      "✅ Sucesso!",
-      "Configuração dos transformadores salva!",
-      "success",
-      1500,
-    );
-  };
+   Swal.fire({
+  title: "✅ Sucesso!",
+  text: "Configuração dos transformadores salva!",
+  icon: "success",
+  timer: 1500,
+});
 
   const adicionarTransformador = () =>
     setTransformadores([
