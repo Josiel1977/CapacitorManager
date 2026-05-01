@@ -357,7 +357,7 @@ const distribuirKvarPorTrafo = (
       kvar_recomendado: kvarRecomendado,
       kvar_comercial: kvarComercial,
       preco_estimado: precoEstimado,
-      configuracao_estagios,
+      configuracao_estagios: configuracaoEstagios,
     };
   });
 };
