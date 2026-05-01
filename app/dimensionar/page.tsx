@@ -231,15 +231,30 @@ export default function DimensionarPage() {
     }
 
     const novaFatura: Fatura = {
-      id: Date.now().toString(),
+      id: editandoFaturaId || Date.now().toString(),
       mes_referencia: currentFatura.mes_referencia,
-      consumo_ponta_kwh: currentFatura.consumo_ponta_kwh || 0,
-      consumo_fora_ponta_kwh: currentFatura.consumo_fora_ponta_kwh || 0,
-      demanda_ponta_kw: currentFatura.demanda_ponta_kw || 0,
-      demanda_fora_ponta_kw: currentFatura.demanda_fora_ponta_kw || 0,
-      reativo_ponta_kvarh: currentFatura.reativo_ponta_kvarh || 0,
-      reativo_fora_ponta_kvarh: currentFatura.reativo_fora_ponta_kvarh || 0,
-      total_pagar: currentFatura.total_pagar || 0,
+      consumo_ponta_kwh: consumoPonta,
+      consumo_fora_ponta_kwh: consumoForaPonta,
+      demanda_ponta_kw: parseBRLocal(currentFatura.demanda_ponta_kw),
+      demanda_fora_ponta_kw: parseBRLocal(currentFatura.demanda_fora_ponta_kw),
+      reativo_ponta_kvarh: reativoPonta,
+      reativo_fora_ponta_kvarh: reativoForaPonta,
+      total_pagar: parseBRLocal(currentFatura.total_pagar),
+      dias_ciclo: parseInt(currentFatura.dias_ciclo) || 30, // ✅ adicionado
+      concessionaria: currentFatura.concessionaria, // ✅ adicionado
+      validado: Math.abs((fpInf || fpCalc) - fpCalc) < 0.05, // ✅ adicionado
+      fp_calculado: fpCalc,
+      fp_informado: fpInf,
+      reativo_excedente_calculado: calcularReativoExcedente(
+        ativoTotal,
+        reativoTotal,
+      ),
+      multa_reativo_calculada: calcularMultaReativa(
+        ativoTotal,
+        reativoTotal,
+        tarifaBase,
+      ),
+      tarifa_reativo_utilizada: tarifaBase,
     };
 
     let novasFaturas = [...faturas];
