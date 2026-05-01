@@ -523,22 +523,52 @@ export default function DimensionarPage() {
   };
 
   const exportMemorial = async () => {
-    if (!reportRef.current) return;
-    try {
-      Swal.fire({ title: "Gerando PDF...", didOpen: () => Swal.showLoading(), allowOutsideClick: false });
-      const dataUrl = await toPng(reportRef.current, { quality: 1.0, backgroundColor: "#ffffff", pixelRatio: 3 });
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pdfWidth = pdf.internal.pageSize.getWidth() - 20;
-      const img = new Image();
-      img.src = dataUrl;
-      await new Promise(resolve => img.onload = resolve);
-      const finalHeight = (img.height * pdfWidth) / img.width;
-      pdf.addImage(dataUrl, "PNG", 10, 10, pdfWidth, finalHeight);
-      pdf.save(`Dimensionamento_Capacitor_${new Date().toISOString().slice(0, 10)}.pdf`);
-      Swal.close();
-      Swal.fire({ title: "PDF gerado!", text: "Memorial exportado com sucesso.", icon: "success" });
-    } catch (error) { Swal.close(); Swal.fire({ title: "Erro", text: "Falha ao gerar PDF", icon: "error" }); }
-  };
+  if (!reportRef.current) return;
+  try {
+    Swal.fire({ title: "Gerando PDF...", didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+    
+    const element = reportRef.current;
+    const originalHeight = element.scrollHeight;
+    const originalWidth = element.scrollWidth;
+    
+    // Captura a imagem em alta resolução
+    const dataUrl = await toPng(element, { quality: 1.0, backgroundColor: "#ffffff", pixelRatio: 2 });
+    
+    const pdf = new jsPDF("p", "mm", "a4");
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+    
+    const img = new Image();
+    img.src = dataUrl;
+    await new Promise((resolve) => { img.onload = resolve; });
+    
+    const imgWidth = pdfWidth - 20; // margem de 10mm cada lado
+    const imgHeight = (img.height * imgWidth) / img.width;
+    
+    let heightLeft = imgHeight;
+    let position = 0;
+    let page = 1;
+    
+    // Adiciona primeira página
+    pdf.addImage(dataUrl, "PNG", 10, position, imgWidth, imgHeight);
+    heightLeft -= pdfHeight;
+    
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight;
+      pdf.addPage();
+      pdf.addImage(dataUrl, "PNG", 10, position, imgWidth, imgHeight);
+      heightLeft -= pdfHeight;
+      page++;
+    }
+    
+    pdf.save(`Dimensionamento_Capacitor_${new Date().toISOString().slice(0, 10)}.pdf`);
+    Swal.close();
+    Swal.fire({ title: "PDF gerado!", text: `Memorial exportado em ${page} página(s).`, icon: "success" });
+  } catch (error) {
+    Swal.close();
+    Swal.fire({ title: "Erro", text: "Falha ao gerar PDF", icon: "error" });
+  }
+};
 
   if (carregando) return <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin text-primary" size={32} /></div>;
 
