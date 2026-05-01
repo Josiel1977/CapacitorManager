@@ -18,10 +18,11 @@ const docs = {
       <div className="space-y-4">
         <h2 className="text-2xl font-bold text-primary">Bem-vindo ao CapacitorManager</h2>
         <p className="text-slate-600">
-          O CapacitorManager é um sistema profissional para gestão, monitoramento e manutenção preditiva de bancos de capacitores. 
+          O CapacitorManager é um sistema profissional para dimensionamento, gestão e manutenção preditiva de bancos de capacitores. 
           Desenvolvido para engenheiros eletricistas e gestores de energia, a plataforma oferece ferramentas completas para:
         </p>
         <ul className="list-disc pl-5 space-y-2 text-slate-600">
+          <li>Dimensionamento automático a partir de faturas de energia</li>
           <li>Cadastro e gestão de clientes</li>
           <li>Configuração de bancos de capacitores</li>
           <li>Registro e validação de medições</li>
@@ -30,7 +31,7 @@ const docs = {
           <li>Relatórios técnicos profissionais</li>
         </ul>
         <div className="bg-primary/5 p-4 rounded-lg mt-4">
-          <p className="text-sm font-medium text-primary">🎯 Versão: 2.0 | Última atualização: Abril/2026</p>
+          <p className="text-sm font-medium text-primary">🎯 Versão: 2.0 | Última atualização: Maio/2026</p>
         </div>
       </div>
     )
@@ -43,10 +44,10 @@ const docs = {
         <div className="grid gap-4">
           {[
             { step: 1, title: "Cadastre seus clientes", desc: "Acesse a aba 'Clientes' e adicione as empresas que serão monitoradas." },
-            { step: 2, title: "Configure os bancos", desc: "Para cada cliente, crie os bancos de capacitores com suas especificações." },
-            { step: 3, title: "Adicione capacitores", desc: "Registre cada capacitor com potência, tensão e capacitância nominal." },
-            { step: 4, title: "Realize medições", desc: "Insira os valores medidos em campo ou bancada e valide automaticamente." },
-            { step: 5, title: "Analise resultados", desc: "Acompanhe gráficos, tendências e recomendações de manutenção." }
+            { step: 2, title: "Configure os transformadores", desc: "Informe a potência (kVA), quantidade e tensão dos transformadores da instalação." },
+            { step: 3, title: "Adicione faturas de energia", desc: "Insira no mínimo 2 faturas (até 12) com os dados de consumo ativo, reativo excedente e demanda." },
+            { step: 4, title: "Ajuste parâmetros avançados", desc: "Defina fator de potência desejado, fator de carga, correção fixa e número de estágios." },
+            { step: 5, title: "Calcule e analise", desc: "Gere o dimensionamento, visualize o memorial e exporte em PDF." }
           ].map((item) => (
             <div key={item.step} className="flex gap-3 p-3 bg-slate-50 rounded-lg">
               <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold">
@@ -58,6 +59,59 @@ const docs = {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    )
+  },
+  dimensionamento: {
+    title: "📊 Dimensionamento por Faturas",
+    content: (
+      <div className="space-y-4">
+        <h2 className="text-2xl font-bold text-primary">Dimensionamento de Banco de Capacitores</h2>
+        <p className="text-slate-600">
+          A partir de no mínimo 2 faturas de energia (até 12 meses), o sistema calcula automaticamente 
+          a necessidade de correção do fator de potência e sugere um banco de capacitores dimensionado.
+        </p>
+
+        <div className="bg-blue-50 p-4 rounded-lg">
+          <h4 className="font-bold text-blue-700 mb-2">📋 Dados extraídos da fatura:</h4>
+          <ul className="list-disc pl-5 text-sm">
+            <li>Consumo ativo (ponta e fora ponta) – kWh</li>
+            <li>Reativo excedente (ponta e fora ponta) – kVArh</li>
+            <li>Demanda registrada (kW)</li>
+            <li>Concessionária (tarifa aplicada automaticamente)</li>
+          </ul>
+        </div>
+
+        <div className="bg-primary/5 p-4 rounded-lg">
+          <h4 className="font-bold text-primary mb-2">⚙️ Metodologia</h4>
+          <p className="text-sm">Potência ativa estimada = demanda medida ou (potência instalada × fator de carga × FP atual).</p>
+          <p className="text-sm mt-1">kVAr = P × (tanφ_atual – tanφ_desejado).</p>
+          <p className="text-sm mt-1">Resultado dividido em banco fixo (reativo do transformador) + banco automático (compensação da carga).</p>
+        </div>
+
+        <div className="bg-slate-50 p-4 rounded-lg">
+          <h4 className="font-bold mb-2">🎛️ Parâmetros configuráveis pelo usuário:</h4>
+          <ul className="list-disc pl-5 text-sm">
+            <li>Fator de potência desejado (0,92 / 0,95 / 0,98)</li>
+            <li>Fator de carga (0,3 a 0,9) – relaciona carga média com potência instalada</li>
+            <li>Correção fixa (0% a 10%) – célula capacitiva para o transformador</li>
+            <li>Número de estágios automáticos (6 a 8)</li>
+          </ul>
+        </div>
+
+        <div className="bg-green-50 p-4 rounded-lg">
+          <h4 className="font-bold text-green-700 mb-2">💰 Resultados financeiros:</h4>
+          <ul className="list-disc pl-5 text-sm">
+            <li>Multa média mensal atual</li>
+            <li>Economia projetada (92% da multa)</li>
+            <li>Investimento total estimado (fixo + automático)</li>
+            <li>Payback (meses), economia anual, retorno em 5 anos e ROI</li>
+          </ul>
+        </div>
+
+        <div className="bg-amber-50 p-3 rounded-lg text-sm">
+          💡 <strong>Dica:</strong> Use o memorial gerado como proposta comercial para o cliente – ele já contém todas as análises e a recomendação técnica.
         </div>
       </div>
     )
@@ -220,59 +274,6 @@ const docs = {
       </div>
     )
   },
-  dimensionamento: {
-  title: "📊 Dimensionamento por Faturas",
-  content: (
-    <div className="space-y-4">
-      <h2 className="text-2xl font-bold text-primary">Dimensionamento de Banco de Capacitores</h2>
-      <p className="text-slate-600">
-        A partir de no mínimo 2 faturas de energia (até 12 meses), o sistema calcula automaticamente 
-        a necessidade de correção do fator de potência e sugere um banco de capacitores dimensionado.
-      </p>
-
-      <div className="bg-blue-50 p-4 rounded-lg">
-        <h4 className="font-bold text-blue-700 mb-2">📋 Dados extraídos da fatura:</h4>
-        <ul className="list-disc pl-5 text-sm">
-          <li>Consumo ativo (ponta e fora ponta) – kWh</li>
-          <li>Reativo excedente (ponta e fora ponta) – kVArh</li>
-          <li>Demanda registrada (kW)</li>
-          <li>Concessionária (tarifa aplicada automaticamente)</li>
-        </ul>
-      </div>
-
-      <div className="bg-primary/5 p-4 rounded-lg">
-        <h4 className="font-bold text-primary mb-2">⚙️ Metodologia</h4>
-        <p className="text-sm">Potência ativa estimada = demanda medida ou (potência instalada × fator de carga × FP atual).</p>
-        <p className="text-sm mt-1">kVAr = P × (tanφ_atual – tanφ_desejado).</p>
-        <p className="text-sm mt-1">Resultado dividido em banco fixo (reativo do transformador) + banco automático (compensação da carga).</p>
-      </div>
-
-      <div className="bg-slate-50 p-4 rounded-lg">
-        <h4 className="font-bold mb-2">🎛️ Parâmetros configuráveis pelo usuário:</h4>
-        <ul className="list-disc pl-5 text-sm">
-          <li>Fator de potência desejado (0,92 / 0,95 / 0,98)</li>
-          <li>Fator de carga (0,3 a 0,9) – relaciona carga média com potência instalada</li>
-          <li>Correção fixa (0% a 10%) – célula capacitiva para o transformador</li>
-          <li>Número de estágios automáticos (6 a 8)</li>
-        </ul>
-      </div>
-
-      <div className="bg-green-50 p-4 rounded-lg">
-        <h4 className="font-bold text-green-700 mb-2">💰 Resultados financeiros:</h4>
-        <ul className="list-disc pl-5 text-sm">
-          <li>Multa média mensal atual</li>
-          <li>Economia projetada (92% da multa)</li>
-          <li>Investimento total estimado (fixo + automático)</li>
-          <li>Payback (meses), economia anual, retorno em 5 anos e ROI</li>
-        </ul>
-      </div>
-
-      <div className="bg-amber-50 p-3 rounded-lg text-sm">
-        💡 <strong>Dica:</strong> Use o memorial gerado como proposta comercial para o cliente – ele já contém todas as análises e a recomendação técnica.
-      </div>
-    </div>
-  )
-}
   faq: {
     title: "❓ FAQ - Perguntas Frequentes",
     content: (
@@ -283,7 +284,7 @@ const docs = {
           {[
             { q: "O CapacitorManager é gratuito?", a: "Oferecemos uma versão de demonstração gratuita com testes limitados. Para acesso completo, consulte nossos planos." },
             { q: "Preciso instalar algum software?", a: "Não! O CapacitorManager é 100% web (SaaS). Basta acessar pelo navegador." },
-            { q: "Quais normas técnicas são utilizadas?", a: "O sistema segue a norma IEC 60831-1/2 para bancos de capacitores." },
+            { q: "Quais normas técnicas são utilizadas?", a: "O sistema segue a norma IEC 60831-1/2 para bancos de capacitores e critérios da ANEEL para fator de potência." },
             { q: "Posso exportar relatórios?", a: "Sim! Você pode gerar relatórios em PDF com todos os dados e análises." },
             { q: "Como funciona o suporte?", a: "Oferecemos suporte por e-mail e WhatsApp para clientes dos planos pagos." }
           ].map((item, idx) => (
@@ -306,6 +307,7 @@ export default function DocumentacaoPage() {
   const sections = [
     { id: 'introducao', label: 'Introdução', icon: BookOpen },
     { id: 'primeirosPassos', label: 'Primeiros Passos', icon: Play },
+    { id: 'dimensionamento', label: 'Dimensionamento por Faturas', icon: BarChart3 },
     { id: 'clientes', label: 'Clientes', icon: Users },
     { id: 'bancos', label: 'Bancos', icon: Database },
     { id: 'capacitores', label: 'Capacitores', icon: Zap },
@@ -321,7 +323,6 @@ export default function DocumentacaoPage() {
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Header */}
       <header className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-primary to-primary/80 p-8 text-white shadow-xl md:p-12">
         <div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-secondary/20 blur-3xl" />
         <div className="relative z-10">
@@ -340,7 +341,6 @@ export default function DocumentacaoPage() {
         </div>
       </header>
 
-      {/* Busca e Download */}
       <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
         <div className="relative w-full md:w-96">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -362,9 +362,7 @@ export default function DocumentacaoPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Sidebar */}
         <div className="lg:col-span-1">
-          {/* Mobile Toggle */}
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="lg:hidden w-full flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200 mb-3"
@@ -373,7 +371,6 @@ export default function DocumentacaoPage() {
             {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
 
-          {/* Sidebar Content */}
           <div className={cn(
             "bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden",
             sidebarOpen ? "block" : "hidden lg:block"
@@ -405,7 +402,6 @@ export default function DocumentacaoPage() {
           </div>
         </div>
 
-        {/* Conteúdo */}
         <div className="lg:col-span-3">
           <motion.div
             key={activeSection}
@@ -413,13 +409,12 @@ export default function DocumentacaoPage() {
             animate={{ opacity: 1, y: 0 }}
             className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6"
           >
-            {docs[activeSection as keyof typeof docs]?.content || docs.introducao.content}
+            {docs[activeSection as keyof typeof docs]?.content}
           </motion.div>
 
-          {/* Footer da documentação */}
           <div className="mt-6 text-center text-xs text-slate-400">
             <p>© 2026 CapacitorManager - Todos os direitos reservados</p>
-            <p className="mt-1">Documentação versão 2.0 | Última atualização: Abril/2026</p>
+            <p className="mt-1">Documentação versão 2.0 | Última atualização: Maio/2026</p>
           </div>
         </div>
       </div>
