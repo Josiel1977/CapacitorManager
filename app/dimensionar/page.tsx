@@ -276,30 +276,34 @@ const formatNumber = (valor: number, decimals: number = 2): string => {
 };
 
 // ✅ FUNÇÃO CORRETA para cálculo do reativo excedente
-const calcularReativoExcedente = (
-  ativo_kwh: number,
-  reativo_kvarh: number,
-): number => {
+// ============================================
+// UTILITÁRIOS
+// ============================================
+const FP_MINIMO_REGULAMENTAR = 0.92;
+
+const calcularFatorPotencia = (ativo_kwh: number, reativo_kvarh: number): number => {
   if (ativo_kwh <= 0) return 0.92;
   const aparente = Math.sqrt(ativo_kwh ** 2 + reativo_kvarh ** 2);
   if (aparente === 0) return 0.92;
   return Math.min(0.99, Math.max(0.3, ativo_kwh / aparente));
 };
 
-// ✅ FUNÇÃO CORRETA para calcular o reativo excedente (segundo ANEEL)
-// Fórmula: reativo excedente = reativo_total - (ativo_total * tan(acos(0.92)))
-const calcularReativoExcedente = (
-  ativo_kwh: number,
-  reativo_kvarh: number,
-): number => {
+const calcularReativoExcedente = (ativo_kwh: number, reativo_kvarh: number): number => {
   if (ativo_kwh <= 0) return 0;
-  const fpMinimo = FP_MINIMO_REGULAMENTAR; // 0.92
-  const tanPhiMinimo = Math.tan(Math.acos(fpMinimo)); // ~0.426
+  const tanPhiMinimo = Math.tan(Math.acos(FP_MINIMO_REGULAMENTAR)); // ~0.426
   const permitido = ativo_kwh * tanPhiMinimo;
   const excedente = reativo_kvarh - permitido;
   return Math.max(0, excedente);
 };
 
+const calcularMultaReativa = (
+  ativo_kwh: number,
+  reativo_kvarh: number,
+  tarifa_reativo: number,
+): number => {
+  const excedente = calcularReativoExcedente(ativo_kwh, reativo_kvarh);
+  return excedente * tarifa_reativo;
+};
 // ✅ Calcula multa baseada no reativo excedente
 const calcularMultaReativa = (
   ativo_kwh: number,
