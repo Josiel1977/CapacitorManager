@@ -19,7 +19,7 @@ export default function HomePage() {
   return (
     <>
       <DemoBanner />
-      {mode === 'authenticated' ? <DashboardReal /> : <DashboardDemo />}
+      {mode === 'authenticated' ? <DashboardReal /> : <DashboardDemo />} //teste
     </>
   );
 }
