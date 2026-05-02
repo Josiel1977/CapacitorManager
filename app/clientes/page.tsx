@@ -6,6 +6,9 @@ import { Plus, Search, Edit2, Trash2, X, Save } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '@/lib/AuthContext';
+import { supabase } from '@/lib/supabaseClient';
+
+const TENANT_ID = '11111111-1111-1111-1111-111111111111';
 
 interface Cliente {
   id: string;
@@ -33,55 +36,33 @@ export default function ClientesPage() {
     email: '',
   });
 
-  // Redirecionar se não autenticado
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.push('/login');
     }
   }, [isAuthenticated, isLoading, router]);
 
-  // Carregar clientes do localStorage
-  const fetchClientes = () => {
+  const fetchClientes = async () => {
     try {
       setLoading(true);
-      const stored = localStorage.getItem('capacitor_clientes');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setClientes(parsed.filter((c: Cliente) => c.ativo !== false));
-      } else {
-        setClientes([]);
-      }
+      const { data, error } = await supabase
+        .from('clientes')
+        .select('*')
+        .eq('tenant_id', TENANT_ID)
+        .eq('ativo', true)
+        .order('nome');
+      if (error) throw error;
+      setClientes(data || []);
     } catch (error) {
       console.error('Erro ao carregar clientes:', error);
+      Swal.fire('Erro', 'Não foi possível carregar os clientes.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  // Salvar clientes no localStorage
-  const saveClientes = (novosClientes: Cliente[]) => {
-    localStorage.setItem('capacitor_clientes', JSON.stringify(novosClientes));
-    setClientes(novosClientes.filter(c => c.ativo !== false));
-  };
-
-  // Inicializar dados de exemplo (se vazio)
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      const stored = localStorage.getItem('capacitor_clientes');
-      if (!stored) {
-        const exemplo: Cliente[] = [
-          {
-            id: crypto.randomUUID(),
-            nome: 'Empresa Exemplo Ltda',
-            cnpj_cpf: '12.345.678/0001-90',
-            contato_responsavel: 'João Silva',
-            telefone: '(11) 99999-9999',
-            email: 'contato@exemplo.com',
-            ativo: true,
-          },
-        ];
-        localStorage.setItem('capacitor_clientes', JSON.stringify(exemplo));
-      }
       fetchClientes();
     }
   }, [isLoading, isAuthenticated]);
@@ -114,65 +95,56 @@ export default function ClientesPage() {
     setIsModalOpen(true);
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-
-    const stored = localStorage.getItem('capacitor_clientes');
-    let clientesAtuais: Cliente[] = stored ? JSON.parse(stored) : [];
-
-    if (editingCliente) {
-      // Atualizar cliente existente
-      const index = clientesAtuais.findIndex(c => c.id === editingCliente.id);
-      if (index !== -1) {
-        clientesAtuais[index] = {
-          ...clientesAtuais[index],
-          ...formData,
-        };
-        Swal.fire('Sucesso', 'Cliente atualizado com sucesso!', 'success');
+    try {
+      const dataToSave = { ...formData, tenant_id: TENANT_ID, ativo: true };
+      if (editingCliente) {
+        const { error } = await supabase
+          .from('clientes')
+          .update(dataToSave)
+          .eq('id', editingCliente.id);
+        if (error) throw error;
+        Swal.fire('Sucesso', 'Cliente atualizado!', 'success');
+      } else {
+        const { error } = await supabase.from('clientes').insert([dataToSave]);
+        if (error) throw error;
+        Swal.fire('Sucesso', 'Cliente cadastrado!', 'success');
       }
-    } else {
-      // Criar novo cliente
-      const novoCliente: Cliente = {
-        id: crypto.randomUUID(),
-        ...formData,
-        ativo: true,
-      };
-      clientesAtuais.push(novoCliente);
-      Swal.fire('Sucesso', 'Cliente cadastrado com sucesso!', 'success');
+      setIsModalOpen(false);
+      await fetchClientes();
+    } catch (error: any) {
+      Swal.fire('Erro', error.message, 'error');
     }
-
-    saveClientes(clientesAtuais);
-    setIsModalOpen(false);
-    fetchClientes();
   }
 
-  function handleDelete(id: string) {
-    Swal.fire({
+  async function handleDelete(id: string) {
+    const result = await Swal.fire({
       title: 'Tem certeza?',
-      text: "O cliente será desativado do sistema.",
+      text: "O cliente será desativado.",
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#0a2b3c',
       cancelButtonColor: '#e74c3c',
       confirmButtonText: 'Sim, excluir!',
       cancelButtonText: 'Cancelar'
-    }).then(async (result) => {
-      if (result.isConfirmed) {
-        const stored = localStorage.getItem('capacitor_clientes');
-        if (stored) {
-          let clientesAtuais: Cliente[] = JSON.parse(stored);
-          clientesAtuais = clientesAtuais.map(c =>
-            c.id === id ? { ...c, ativo: false } : c
-          );
-          saveClientes(clientesAtuais);
-          Swal.fire('Excluído!', 'Cliente removido com sucesso.', 'success');
-          fetchClientes();
-        }
-      }
     });
+    if (result.isConfirmed) {
+      try {
+        const { error } = await supabase
+          .from('clientes')
+          .update({ ativo: false })
+          .eq('id', id);
+        if (error) throw error;
+        Swal.fire('Excluído!', 'Cliente removido.', 'success');
+        await fetchClientes();
+      } catch (error: any) {
+        Swal.fire('Erro', error.message, 'error');
+      }
+    }
   }
 
-  if (isLoading || (isAuthenticated && loading)) {
+  if (isLoading || loading) {
     return (
       <div className="space-y-6">
         <div className="h-32 animate-pulse rounded-xl bg-slate-100" />
