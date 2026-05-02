@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense } from 'react';
+import {useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'motion/react';
 import { Zap, Lock, Mail, ArrowRight, Eye, EyeOff, Sparkles } from 'lucide-react';
