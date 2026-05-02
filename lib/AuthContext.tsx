@@ -24,20 +24,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const auth = localStorage.getItem('capacitor_auth');
     const expires = localStorage.getItem('capacitor_expires');
-    
     if (auth === 'true' && expires && new Date().getTime() < parseInt(expires)) {
       setMode('authenticated');
-    } else {
-      setMode('demo');
     }
     setIsLoading(false);
   }, []);
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string) => {
     if (email === VALID_EMAIL && password === VALID_PASSWORD) {
       const expires = new Date().getTime() + 30 * 24 * 60 * 60 * 1000;
       localStorage.setItem('capacitor_auth', 'true');
-      localStorage.setItem('capacitor_user', email);
       localStorage.setItem('capacitor_expires', expires.toString());
       setMode('authenticated');
       return true;
@@ -47,13 +43,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     localStorage.removeItem('capacitor_auth');
-    localStorage.removeItem('capacitor_user');
     localStorage.removeItem('capacitor_expires');
     setMode('demo');
   };
 
   return (
-    <AuthContext.Provider value={{ mode, isAuthenticated: mode === 'authenticated', isLoading, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        mode,
+        isAuthenticated: mode === 'authenticated',
+        isLoading,
+        login,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

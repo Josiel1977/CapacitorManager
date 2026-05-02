@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   Calculator,
   Zap,
@@ -25,6 +26,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
 import jsPDF from "jspdf";
 import { toPng } from "html-to-image";
+import { supabase } from "@/lib/supabase";
 
 // ============================================
 // CONSTANTES
@@ -74,7 +76,7 @@ const CONFIG_CAPACITORES = {
 };
 
 // ============================================
-// INTERFACES
+// INTERFACES (refletindo as colunas reais da tabela faturas)
 // ============================================
 interface Transformador {
   id: string;
@@ -96,10 +98,9 @@ interface Fatura {
   total_pagar: number;
   dias_ciclo: number;
   concessionaria: string;
+  multa_reativo_calculada?: number; // calculado localmente, não inserido
   fp_calculado?: number;
-  validado: boolean;
-  multa_calculada?: number;
-  multa_informada?: number;
+  tenant_id?: string; // será preenchido pelo sistema
 }
 
 interface DistribuicaoTrafo {
@@ -147,7 +148,7 @@ interface ResultadoDimensionamento {
 }
 
 // ============================================
-// UTILITÁRIOS
+// UTILITÁRIOS (os mesmos)
 // ============================================
 const parseBRLocal = (valor: string | number | undefined): number => {
   if (valor === undefined || valor === null) return 0;
@@ -274,14 +275,12 @@ const distribuirKvarPorTrafo = (
 };
 
 // ============================================
-// COMPONENTE PRINCIPAL
+// COMPONENTE
 // ============================================
 export default function DimensionarPage() {
+  const router = useRouter();
   const reportRef = useRef<HTMLDivElement>(null);
-  const [transformadores, setTransformadores] = useState<Transformador[]>([
-    { id: "1", potencia_kva: 300, quantidade: 1, tensao_v: 380, horas_trabalho: 220 },
-    { id: "2", potencia_kva: 225, quantidade: 1, tensao_v: 380, horas_trabalho: 220 },
-  ]);
+  const [transformadores, setTransformadores] = useState<Transformador[]>([]);
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [targetFP, setTargetFP] = useState<number>(0.92);
   const [result, setResult] = useState<ResultadoDimensionamento | null>(null);
@@ -292,165 +291,241 @@ export default function DimensionarPage() {
   const [carregando, setCarregando] = useState(true);
   const [fatorCarga, setFatorCarga] = useState<number>(0.65);
   const [numeroEstagios, setNumeroEstagios] = useState<number>(6);
-
-  const carregarDados = useCallback(() => {
-    try {
-      const savedTrafos = localStorage.getItem("dimensionar_transformadores");
-      if (savedTrafos) setTransformadores(JSON.parse(savedTrafos));
-      const savedFaturas = localStorage.getItem("dimensionar_faturas");
-      if (savedFaturas) {
-        const loaded = JSON.parse(savedFaturas);
-        const faturasComMulta = loaded.map((f: Fatura) => ({
-          ...f,
-          multa_calculada: calcularMultaDaFatura(f),
-        }));
-        setFaturas(faturasComMulta);
-      } else {
-        carregarFaturaExemploReal();
-      }
-    } catch (error) { console.error(error); }
-    finally { setCarregando(false); }
-  }, []);
+  const [tenantId, setTenantId] = useState<string | null>(null);
 
   useEffect(() => {
-    carregarDados();
-  }, [carregarDados]);
+    const verificarAutenticacao = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login");
+        return;
+      }
 
-  const carregarFaturaExemploReal = () => {
-    const faturasRaw: Fatura[] = [
-      {
-        id: "nov2025",
-        mes_referencia: "11/2025",
-        consumo_ponta_kwh: 457.21,
-        consumo_fora_ponta_kwh: 5179.86,
-        demanda_ponta_kw: 53.42,
-        demanda_fora_ponta_kw: 53.42,
-        reativo_ponta_kvarh: 493.76,
-        reativo_fora_ponta_kvarh: 4696.54,
-        total_pagar: 12617.5,
-        dias_ciclo: 30,
-        concessionaria: "EQUATORIAL_PARA",
-        validado: true,
-      },
-      {
-        id: "dez2025",
-        mes_referencia: "12/2025",
-        consumo_ponta_kwh: 595.56,
-        consumo_fora_ponta_kwh: 6106.21,
-        demanda_ponta_kw: 40.66,
-        demanda_fora_ponta_kw: 40.66,
-        reativo_ponta_kvarh: 1130.49,
-        reativo_fora_ponta_kvarh: 8932.83,
-        total_pagar: 14486.71,
-        dias_ciclo: 31,
-        concessionaria: "EQUATORIAL_PARA",
-        validado: true,
-      },
-      {
-        id: "jan2026",
-        mes_referencia: "01/2026",
-        consumo_ponta_kwh: 558.52,
-        consumo_fora_ponta_kwh: 5974.5,
-        demanda_ponta_kw: 37.96,
-        demanda_fora_ponta_kw: 39.98,
-        reativo_ponta_kvarh: 993.0,
-        reativo_fora_ponta_kvarh: 8690.47,
-        total_pagar: 13728.12,
-        dias_ciclo: 31,
-        concessionaria: "EQUATORIAL_PARA",
-        validado: true,
-      },
-    ];
-    const faturasComMulta = faturasRaw.map(f => ({
-      ...f,
-      multa_calculada: calcularMultaDaFatura(f),
-    }));
-    setFaturas(faturasComMulta);
-    localStorage.setItem("dimensionar_faturas", JSON.stringify(faturasComMulta));
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("tenant_id")
+        .eq("id", user.id)
+        .single();
+
+      if (profileError || !profile?.tenant_id) {
+        console.error("Perfil sem tenant_id:", profileError);
+        Swal.fire("Erro", "Perfil não configurado. Contate o administrador.", "error");
+        router.push("/login");
+        return;
+      }
+
+      setTenantId(profile.tenant_id);
+      await carregarDados(profile.tenant_id);
+      setCarregando(false);
+    };
+
+    verificarAutenticacao();
+  }, [router]);
+
+  const carregarDados = async (tenant: string) => {
+    try {
+      // Transformadores
+      const { data: trafosDB, error: trafoError } = await supabase
+        .from("transformadores")
+        .select("*")
+        .eq("tenant_id", tenant)
+        .order("created_at", { ascending: true });
+
+      if (trafoError) throw trafoError;
+
+      if (trafosDB && trafosDB.length > 0) {
+        setTransformadores(trafosDB);
+      } else {
+        const defaultTrafos = [
+          { id: crypto.randomUUID(), potencia_kva: 300, quantidade: 1, tensao_v: 380, horas_trabalho: 220, tenant_id: tenant },
+          { id: crypto.randomUUID(), potencia_kva: 225, quantidade: 1, tensao_v: 380, horas_trabalho: 220, tenant_id: tenant },
+        ];
+        const { error: insertError } = await supabase.from("transformadores").insert(defaultTrafos);
+        if (insertError) throw insertError;
+        setTransformadores(defaultTrafos.map(({ tenant_id, ...rest }) => rest));
+      }
+
+      // Faturas
+      const { data: faturasDB, error: faturaError } = await supabase
+        .from("faturas")
+        .select("*")
+        .eq("tenant_id", tenant)
+        .order("mes_referencia", { ascending: false });
+
+      if (faturaError) throw faturaError;
+
+      if (faturasDB && faturasDB.length > 0) {
+        setFaturas(faturasDB);
+      } else {
+        // Inserir faturas de exemplo (somente colunas existentes)
+        const faturasRaw = [
+          {
+            id: crypto.randomUUID(),
+            mes_referencia: "11/2025",
+            consumo_ponta_kwh: 457.21,
+            consumo_fora_ponta_kwh: 5179.86,
+            demanda_ponta_kw: 53.42,
+            demanda_fora_ponta_kw: 53.42,
+            reativo_ponta_kvarh: 493.76,
+            reativo_fora_ponta_kvarh: 4696.54,
+            total_pagar: 12617.5,
+            dias_ciclo: 30,
+            concessionaria: "EQUATORIAL_PARA",
+            tenant_id: tenant,
+          },
+          {
+            id: crypto.randomUUID(),
+            mes_referencia: "12/2025",
+            consumo_ponta_kwh: 595.56,
+            consumo_fora_ponta_kwh: 6106.21,
+            demanda_ponta_kw: 40.66,
+            demanda_fora_ponta_kw: 40.66,
+            reativo_ponta_kvarh: 1130.49,
+            reativo_fora_ponta_kvarh: 8932.83,
+            total_pagar: 14486.71,
+            dias_ciclo: 31,
+            concessionaria: "EQUATORIAL_PARA",
+            tenant_id: tenant,
+          },
+          {
+            id: crypto.randomUUID(),
+            mes_referencia: "01/2026",
+            consumo_ponta_kwh: 558.52,
+            consumo_fora_ponta_kwh: 5974.5,
+            demanda_ponta_kw: 37.96,
+            demanda_fora_ponta_kw: 39.98,
+            reativo_ponta_kvarh: 993.0,
+            reativo_fora_ponta_kvarh: 8690.47,
+            total_pagar: 13728.12,
+            dias_ciclo: 31,
+            concessionaria: "EQUATORIAL_PARA",
+            tenant_id: tenant,
+          },
+        ];
+        const { error: insertFatError } = await supabase.from("faturas").insert(faturasRaw);
+        if (insertFatError) throw insertFatError;
+        setFaturas(faturasRaw);
+      }
+    } catch (error: any) {
+      console.error("Erro ao carregar dados:", error);
+      Swal.fire("Erro", error.message || "Não foi possível carregar os dados.", "error");
+    } finally {
+      setCarregando(false);
+    }
   };
 
+  // ============================================
+  // CRUD TRANSFORMADORES
+  // ============================================
+  const salvarTransformadores = async () => {
+    if (!tenantId) return;
+    const trafosComTenant = transformadores.map(t => ({ ...t, tenant_id: tenantId }));
+    const { error } = await supabase.from("transformadores").upsert(trafosComTenant, { onConflict: "id" });
+    if (error) {
+      Swal.fire("Erro", "Não foi possível salvar os transformadores.", "error");
+    } else {
+      Swal.fire("✅ Sucesso!", "Configuração salva!", "success");
+    }
+  };
+
+  const adicionarTransformador = () => {
+    const novo: Transformador = {
+      id: crypto.randomUUID(),
+      potencia_kva: 100,
+      quantidade: 1,
+      tensao_v: 220,
+      horas_trabalho: 220,
+    };
+    setTransformadores([...transformadores, novo]);
+  };
+
+  const removerTransformador = async (index: number) => {
+    if (transformadores.length <= 1) return;
+    const removido = transformadores[index];
+    const novos = transformadores.filter((_, i) => i !== index);
+    setTransformadores(novos);
+    if (removido.id && !removido.id.startsWith("temp_")) {
+      await supabase.from("transformadores").delete().eq("id", removido.id);
+    }
+  };
+
+  const atualizarTransformador = (idx: number, field: keyof Transformador, value: number) => {
+    const novos = [...transformadores];
+    novos[idx] = { ...novos[idx], [field]: value };
+    setTransformadores(novos);
+  };
+
+  const potenciaTotalTransformadores = transformadores.reduce((acc, t) => acc + t.potencia_kva * t.quantidade, 0);
+
+  // ============================================
+  // CRUD FATURAS
+  // ============================================
   const salvarFatura = async () => {
     if (!currentFatura.mes_referencia) {
-      Swal.fire({ title: "Atenção", text: "Informe o mês de referência", icon: "warning" });
+      Swal.fire("Atenção", "Informe o mês de referência", "warning");
       return;
     }
-    const consumoPonta = parseBRLocal(currentFatura.consumo_ponta_kwh);
-    const consumoForaPonta = parseBRLocal(currentFatura.consumo_fora_ponta_kwh);
-    const reativoPonta = parseBRLocal(currentFatura.reativo_ponta_kvarh);
-    const reativoForaPonta = parseBRLocal(currentFatura.reativo_fora_ponta_kvarh);
-    const demandaPonta = parseBRLocal(currentFatura.demanda_ponta_kw);
-    const demandaForaPonta = parseBRLocal(currentFatura.demanda_fora_ponta_kw);
-    const totalPagar = parseBRLocal(currentFatura.total_pagar);
-    const diasCiclo = parseInt(currentFatura.dias_ciclo?.toString() || "30") || 30;
-    const concessionaria = (currentFatura.concessionaria as string) || "EQUATORIAL_PARA";
-    const multaInformada = parseBRLocal(currentFatura.multa_informada);
+    if (!tenantId) return;
 
-    const novaFaturaRaw: Fatura = {
-      id: editandoFaturaId || Date.now().toString(),
+    const novaFatura = {
+      id: editandoFaturaId || crypto.randomUUID(),
       mes_referencia: currentFatura.mes_referencia as string,
-      consumo_ponta_kwh: consumoPonta,
-      consumo_fora_ponta_kwh: consumoForaPonta,
-      demanda_ponta_kw: demandaPonta,
-      demanda_fora_ponta_kw: demandaForaPonta,
-      reativo_ponta_kvarh: reativoPonta,
-      reativo_fora_ponta_kvarh: reativoForaPonta,
-      total_pagar: totalPagar,
-      dias_ciclo: diasCiclo,
-      concessionaria: concessionaria,
-      validado: true,
-      multa_informada: multaInformada || undefined,
+      consumo_ponta_kwh: parseBRLocal(currentFatura.consumo_ponta_kwh),
+      consumo_fora_ponta_kwh: parseBRLocal(currentFatura.consumo_fora_ponta_kwh),
+      demanda_ponta_kw: parseBRLocal(currentFatura.demanda_ponta_kw),
+      demanda_fora_ponta_kw: parseBRLocal(currentFatura.demanda_fora_ponta_kw),
+      reativo_ponta_kvarh: parseBRLocal(currentFatura.reativo_ponta_kvarh),
+      reativo_fora_ponta_kvarh: parseBRLocal(currentFatura.reativo_fora_ponta_kvarh),
+      total_pagar: parseBRLocal(currentFatura.total_pagar),
+      dias_ciclo: parseInt(currentFatura.dias_ciclo?.toString() || "30"),
+      concessionaria: (currentFatura.concessionaria as string) || "EQUATORIAL_PARA",
+      tenant_id: tenantId,
     };
-    const multaCalculada = calcularMultaDaFatura(novaFaturaRaw);
-    const novaFatura = { ...novaFaturaRaw, multa_calculada: multaCalculada };
 
-    const confirmar = await Swal.fire({
-      title: "Confirmar dados?",
-      html: `<div class="text-left"><p><strong>Mês:</strong> ${novaFatura.mes_referencia}</p><p><strong>Consumo Total:</strong> ${formatNumber(consumoPonta + consumoForaPonta, 0)} kWh</p><p><strong>Reativo Excedente Total:</strong> ${formatNumber(reativoPonta + reativoForaPonta, 0)} kVArh</p><p><strong>FP calculado:</strong> ${(calcularFatorPotencia(consumoPonta + consumoForaPonta, reativoPonta + reativoForaPonta) * 100).toFixed(1)}%</p><p><strong>Multa calculada:</strong> ${formatMoney(multaCalculada)}</p>${multaInformada ? `<p><strong>Multa informada:</strong> ${formatMoney(multaInformada)}</p>` : ''}</div>`,
-      icon: "question", showCancelButton: true, confirmButtonText: "Salvar", cancelButtonText: "Revisar",
-    });
-    if (!confirmar.isConfirmed) return;
+    const { error } = await supabase.from("faturas").upsert(novaFatura, { onConflict: "id" });
+    if (error) {
+      Swal.fire("Erro", "Não foi possível salvar a fatura.", "error");
+      return;
+    }
 
-    let novasFaturas = editandoFaturaId ? faturas.map(f => f.id === editandoFaturaId ? novaFatura : f) : [novaFatura, ...faturas];
+    let novasFaturas = editandoFaturaId
+      ? faturas.map(f => (f.id === editandoFaturaId ? novaFatura : f))
+      : [novaFatura, ...faturas];
     novasFaturas.sort((a, b) => parseMesReferencia(b.mes_referencia) - parseMesReferencia(a.mes_referencia));
     setFaturas(novasFaturas);
-    localStorage.setItem("dimensionar_faturas", JSON.stringify(novasFaturas));
     setShowFaturaModal(false);
     setCurrentFatura({});
     setEditandoFaturaId(null);
-    Swal.fire({ title: "✅ Sucesso!", text: "Fatura salva!", icon: "success", timer: 1500 });
+    Swal.fire("✅ Sucesso!", "Fatura salva!", "success");
   };
 
-  const removerFatura = (id: string) => {
-    Swal.fire({
+  const removerFatura = async (id: string) => {
+    const result = await Swal.fire({
       title: "Remover fatura?",
       text: "Esta ação não pode ser desfeita.",
       icon: "warning",
       showCancelButton: true,
       confirmButtonColor: "#e74c3c",
       confirmButtonText: "Remover",
-    }).then((result) => {
-      if (result.isConfirmed) {
+    });
+    if (result.isConfirmed) {
+      const { error } = await supabase.from("faturas").delete().eq("id", id);
+      if (error) {
+        Swal.fire("Erro", "Não foi possível remover a fatura.", "error");
+      } else {
         const novasFaturas = faturas.filter(f => f.id !== id);
         setFaturas(novasFaturas);
-        localStorage.setItem("dimensionar_faturas", JSON.stringify(novasFaturas));
-        Swal.fire({ title: "Removida!", text: "Fatura removida com sucesso.", icon: "success" });
+        Swal.fire("Removida!", "Fatura removida com sucesso.", "success");
       }
-    });
+    }
   };
 
-  const salvarTransformadores = () => {
-    localStorage.setItem("dimensionar_transformadores", JSON.stringify(transformadores));
-    Swal.fire({ title: "✅ Sucesso!", text: "Configuração dos transformadores salva!", icon: "success", timer: 1500 });
-  };
-
-  const adicionarTransformador = () => setTransformadores([...transformadores, { id: (transformadores.length + 1).toString(), potencia_kva: 100, quantidade: 1, tensao_v: 220, horas_trabalho: 220 }]);
-  const removerTransformador = (idx: number) => { if (transformadores.length > 1) setTransformadores(transformadores.filter((_, i) => i !== idx)); };
-  const atualizarTransformador = (idx: number, field: keyof Transformador, value: number) => { const novos = [...transformadores]; novos[idx] = { ...novos[idx], [field]: value }; setTransformadores(novos); };
-  const potenciaTotalTransformadores = transformadores.reduce((acc, t) => acc + t.potencia_kva * t.quantidade, 0);
-
+  // ============================================
+  // DIMENSIONAMENTO
+  // ============================================
   const calcularDimensionamento = () => {
     if (faturas.length < 2) {
-      Swal.fire({ title: "Atenção", text: "Mínimo de 2 faturas para dimensionamento confiável", icon: "warning" });
+      Swal.fire("Atenção", "Mínimo de 2 faturas para dimensionamento confiável", "warning");
       return;
     }
     setCalculando(true);
@@ -463,12 +538,12 @@ export default function DimensionarPage() {
         const ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
         const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
         const fp = calcularFatorPotencia(ativoTotal, reativoTotal);
-        const multa = f.multa_informada ?? f.multa_calculada ?? 0;
+        const multa = calcularMultaDaFatura(f); // calcula sempre em tempo real
         const demandaMaxKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
         return { ...f, ativoTotal, reativoTotal, fp, multa, demandaMaxKw };
       });
 
-      const piorMes = faturasProcessadas.reduce((prev, curr) => curr.fp < prev.fp ? curr : prev, faturasProcessadas[0]);
+      const piorMes = faturasProcessadas.reduce((prev, curr) => (curr.fp < prev.fp ? curr : prev), faturasProcessadas[0]);
       const fpAtual = piorMes.fp;
       const fpDesejado = targetFP;
       const mediaMulta = faturasProcessadas.reduce((acc, f) => acc + f.multa, 0) / faturasProcessadas.length;
@@ -493,7 +568,7 @@ export default function DimensionarPage() {
         economiaMensal = mediaMulta * 0.92;
         motivo = `Potência ativa baseada na demanda medida (${demandaMaxRegistrada.toFixed(1)} kW) e fator de carga (${fatorCarga.toFixed(2)}): estimativa final = ${potenciaAtivaFinal.toFixed(1)} kW | FP atual = ${(fpAtual * 100).toFixed(1)}% | Meta = ${(fpDesejado * 100).toFixed(0)}% | kVAr = P × (tanφ1 - tanφ2) = ${kvarAutomatico.toFixed(1)} kVAr.`;
       } else {
-        const mediaFp = faturasProcessadas.reduce((a,b)=>a+b.fp,0)/faturasProcessadas.length;
+        const mediaFp = faturasProcessadas.reduce((a, b) => a + b.fp, 0) / faturasProcessadas.length;
         motivo = `✅ Sistema regularizado (FP médio: ${(mediaFp * 100).toFixed(1)}%)`;
       }
 
@@ -529,7 +604,7 @@ export default function DimensionarPage() {
         motivo_recomendacao: motivo,
         concessionaria_identificada: concessionarias[0] || "NÃO IDENTIFICADA",
         quantidade_faturas_analisadas: faturasProcessadas.length,
-        pior_mes: piorMes ? { ...piorMes, fp_calculado: piorMes.fp, multa_calculada: piorMes.multa } : null,
+        pior_mes: piorMes ? { ...piorMes, fp_calculado: piorMes.fp } : null,
         media_fp_por_mes: mediaFpPorMes,
         alertas: alertas,
         distribuicao_por_trafo: distribuicaoPorTrafo,
@@ -553,10 +628,17 @@ export default function DimensionarPage() {
         icon: precisaCapacitor ? "success" : "info",
         timer: 6000,
       });
-    } catch (error) { console.error(error); Swal.fire({ title: "Erro", text: "Falha ao processar dimensionamento", icon: "error" }); }
-    finally { setCalculando(false); }
+    } catch (error) {
+      console.error(error);
+      Swal.fire("Erro", "Falha ao processar dimensionamento", "error");
+    } finally {
+      setCalculando(false);
+    }
   };
 
+  // ============================================
+  // EXPORTAR PDF
+  // ============================================
   const exportMemorial = async () => {
     if (!reportRef.current) return;
     try {
@@ -568,7 +650,7 @@ export default function DimensionarPage() {
       const pdfHeight = pdf.internal.pageSize.getHeight() - 20;
       const img = new Image();
       img.src = dataUrl;
-      await new Promise((resolve) => { img.onload = resolve; });
+      await new Promise(resolve => { img.onload = resolve; });
       const imgWidth = pdfWidth;
       const imgHeight = (img.height * imgWidth) / img.width;
       let position = 0;
@@ -632,12 +714,12 @@ export default function DimensionarPage() {
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-primary flex gap-2"><History size={20} /> Faturas ({faturas.length})</h2><button onClick={() => { setCurrentFatura({}); setEditandoFaturaId(null); setShowFaturaModal(true); }} className="text-xs bg-primary text-white px-3 py-1 rounded-lg"><Plus size={12} /> Adicionar</button></div>
             <div className="max-h-80 overflow-y-auto space-y-2">
-              {faturas.length === 0 ? <div className="text-center py-8"><p>Nenhuma fatura</p><button onClick={carregarFaturaExemploReal} className="text-primary text-sm">Carregar dados reais da WG ARMAZENS GERAIS →</button></div> :
+              {faturas.length === 0 ? <div className="text-center py-8"><p>Nenhuma fatura</p><button onClick={() => carregarDados(tenantId!)} className="text-primary text-sm">Recarregar</button></div> :
                 faturas.map(fat => {
                   const ativo = fat.consumo_ponta_kwh + fat.consumo_fora_ponta_kwh;
                   const reativo = fat.reativo_ponta_kvarh + fat.reativo_fora_ponta_kvarh;
                   const fp = calcularFatorPotencia(ativo, reativo);
-                  const multa = fat.multa_informada ?? fat.multa_calculada ?? 0;
+                  const multa = calcularMultaDaFatura(fat);
                   return (
                     <div key={fat.id} className="p-3 rounded-lg bg-slate-50">
                       <div className="flex justify-between"><span className="font-bold">{fat.mes_referencia}</span><div><button onClick={() => { setCurrentFatura(fat); setEditandoFaturaId(fat.id); setShowFaturaModal(true); }} className="text-blue-500"><Edit3 size={14} /></button><button onClick={() => removerFatura(fat.id)} className="text-red-500"><Trash2 size={14} /></button></div></div>
@@ -662,6 +744,7 @@ export default function DimensionarPage() {
           </div>
         </div>
 
+        {/* Lado direito - resultados */}
         <div className="lg:col-span-7">
           {result ? (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -670,18 +753,12 @@ export default function DimensionarPage() {
                 <div className="p-6 space-y-6">
                   {result.precisa_capacitor ? (
                     <>
-                      <div className="text-center border-b pb-4">
-                        <p className="text-sm text-slate-500">Solução Proposta</p>
-                        <p className="text-3xl font-bold text-primary">{formatNumber(result.banco_automatico_kvar, 1)} kVAr</p>
-                        <p className="text-xs text-slate-400">Banco automático com {result.estagios_automaticos.length} estágios</p>
-                        <p className="text-xs text-slate-400">Grupo {result.grupo_tarifario} • {result.quantidade_faturas_analisadas} faturas • Método: {result.metodo_calculo_utilizado}</p>
-                        <p className="text-xs text-slate-400">Fator de carga: {result.fator_carga_utilizado.toFixed(2)}</p>
-                      </div>
+                      <div className="text-center border-b pb-4"><p className="text-sm text-slate-500">Solução Proposta</p><p className="text-3xl font-bold text-primary">{formatNumber(result.banco_automatico_kvar, 1)} kVAr</p><p className="text-xs text-slate-400">Banco automático com {result.estagios_automaticos.length} estágios</p><p className="text-xs text-slate-400">Grupo {result.grupo_tarifario} • {result.quantidade_faturas_analisadas} faturas • Método: {result.metodo_calculo_utilizado}</p><p className="text-xs text-slate-400">Fator de carga: {result.fator_carga_utilizado.toFixed(2)}</p></div>
                       {result.alertas.length > 0 && result.alertas.map((a, i) => <div key={i} className="bg-amber-50 p-3 rounded-xl text-xs text-amber-700 flex gap-2"><AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />{a}</div>)}
                       <div className="bg-blue-50 p-4 rounded-xl"><p className="text-sm font-bold text-blue-700">📌 {result.motivo_recomendacao}</p><p className="text-xs mt-2">FP atual: {result.fp_atual_percent.toFixed(1)}% → Meta: {result.fp_projetado_percent.toFixed(0)}%</p><div className="mt-3"><BarraFP fp={result.fp_atual_percent} /><div className="flex justify-between text-[10px] mt-1"><span>Atual: {result.fp_atual_percent.toFixed(1)}%</span><span>Meta ANEEL: 92%</span></div></div></div>
                       <div className="grid grid-cols-2 gap-4"><div className="bg-red-50 p-4 text-center rounded-xl"><TrendingUp className="mx-auto text-red-600 mb-2" size={24} /><p className="text-xs font-medium">Multa Mensal Média</p><p className="text-2xl font-bold">{formatMoney(result.multa_atual_mensal_real)}</p><p className="text-xs text-red-500 mt-1">Calculada a partir do reativo excedente</p></div><div className="bg-green-50 p-4 text-center rounded-xl"><TrendingUp className="mx-auto text-green-600 mb-2" size={24} /><p className="text-xs font-medium">Economia Projetada</p><p className="text-2xl font-bold text-green-600">{formatMoney(result.economia_mensal_estimada)}/mês</p><p className="text-xs text-green-600 mt-1">Após correção do FP</p></div></div>
                       <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs font-bold flex gap-2"><Activity size={14} /> Evolução do FP e Multa por Mês</p><div className="space-y-2 max-h-48 overflow-y-auto">{result.media_fp_por_mes.map((item, idx) => (<div key={idx} className="flex items-center gap-2 text-xs"><span className="w-14 font-medium">{item.mes}</span><div className="flex-1"><div className="w-full bg-slate-200 rounded-full h-1.5"><div className={`${item.fp >= 92 ? "bg-green-500" : item.fp >= 80 ? "bg-amber-500" : "bg-red-500"} h-1.5 rounded-full`} style={{ width: `${Math.min(100, item.fp)}%` }} /></div></div><span className="w-10 text-right font-bold">{item.fp.toFixed(1)}%</span><span className="w-20 text-right text-red-500 text-[10px]">{formatMoney(item.multa)}</span></div>))}</div></div>
-                      {result.pior_mes && <div className="bg-amber-50 p-4 rounded-xl"><p className="text-xs font-bold">Pior Mês: {result.pior_mes.mes_referencia}</p><p className="text-sm mt-1">FP: {((result.pior_mes.fp_calculado || 0) * 100).toFixed(1)}% • Multa: {formatMoney(result.pior_mes.multa_calculada || 0)}</p></div>}
+                      {result.pior_mes && <div className="bg-amber-50 p-4 rounded-xl"><p className="text-xs font-bold">Pior Mês: {result.pior_mes.mes_referencia}</p><p className="text-sm mt-1">FP: {((result.pior_mes.fp_calculado || 0) * 100).toFixed(1)}% • Multa: {formatMoney(calcularMultaDaFatura(result.pior_mes as Fatura))}</p></div>}
                       <div className="bg-indigo-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><Factory size={14} /> Distribuição do Banco entre Transformadores</p>{result.distribuicao_por_trafo.map((dist, idx) => (<div key={idx} className="bg-white rounded-lg p-3 mt-2 border"><div className="flex justify-between"><span className="font-bold text-sm">Transformador {formatNumber(dist.trafo_kva, 0)} kVA</span><span className="text-xs text-slate-500">{dist.percentual.toFixed(1)}% da carga</span></div><div className="grid grid-cols-2 gap-1 text-sm mt-2"><div>Recomendado: {formatNumber(dist.kvar_recomendado, 1)} kVAr</div><div>Comercial: {formatNumber(dist.kvar_comercial, 0)} kVAr</div><div className="col-span-2 text-xs text-slate-600">Configuração de estágios: {dist.configuracao_estagios}</div><div className="col-span-2 font-medium">Investimento: {formatMoney(dist.preco_estimado)}</div></div></div>))}</div>
                       <div><h3 className="font-bold mb-2 flex gap-2"><Layers size={18} /> Estágios do Banco ({result.estagios_automaticos.length} estágios)</h3><div className="flex flex-wrap gap-2">{result.estagios_automaticos.map((s, i) => (<div key={i} className="bg-slate-100 rounded-lg px-3 py-1 border flex items-center gap-1"><span className="font-bold text-sm">{s.toFixed(1)}</span><span className="text-xs text-slate-500">kVAr</span></div>))}</div></div>
                       <div className="bg-emerald-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><DollarSign size={14} /> Análise Financeira Real</p><div className="grid grid-cols-2 gap-2 text-center mt-2"><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Investimento Total</p><p className="font-bold text-lg">{formatMoney(result.investimento_estimado_total)}</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Custo por kVAr</p><p className="font-bold">{formatMoney(result.preco_por_kvar)}/kVAr</p></div></div><div className="grid grid-cols-3 gap-2 text-center mt-2"><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Payback</p><p className="font-bold text-green-600">{result.payback_meses} meses</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Economia/ano</p><p className="font-bold">{formatMoney(result.economia_anual)}</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Retorno 5 anos</p><p className={`font-bold ${result.retorno_5_anos > 0 ? "text-green-700" : "text-red-700"}`}>{formatMoney(result.retorno_5_anos)}</p></div></div></div>
@@ -700,11 +777,12 @@ export default function DimensionarPage() {
               <button onClick={exportMemorial} className="w-full bg-white border py-3 rounded-xl font-medium flex justify-center gap-2 hover:bg-slate-50 transition"><Printer size={18} /> Exportar Memorial em PDF</button>
             </motion.div>
           ) : (
-            <div className="h-[500px] flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-2xl border-2 border-dashed"><Calculator size={64} className="text-slate-300 mb-4" /><h3 className="text-xl font-bold">Aguardando Dados</h3><p className="text-sm text-slate-400 mt-2">Configure transformadores e adicione faturas da Equatorial Pará ou Roraima</p><button onClick={carregarFaturaExemploReal} className="mt-4 text-primary text-sm font-medium hover:underline">Carregar dados reais da WG ARMAZENS GERAIS →</button></div>
+            <div className="h-[500px] flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-2xl border-2 border-dashed"><Calculator size={64} className="text-slate-300 mb-4" /><h3 className="text-xl font-bold">Aguardando Dados</h3><p className="text-sm text-slate-400 mt-2">Configure transformadores e adicione faturas para iniciar</p></div>
           )}
         </div>
       </div>
 
+      {/* Modal de fatura */}
       <AnimatePresence>
         {showFaturaModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">

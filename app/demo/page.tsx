@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
 import { 
   Play, Info, CheckCircle2, AlertTriangle, XCircle, 
@@ -20,11 +21,11 @@ const DEFAULT_CAPACITOR = {
 };
 
 export default function DemoPage() {
+  const router = useRouter();
   const [tipoTeste, setTipoTeste] = useState<'corrente' | 'capacitancia'>('corrente');
   const [valorMedido, setValorMedido] = useState('');
   const [tensaoMedida, setTensaoMedida] = useState('480');
   
-  // ✅ Estado para os parâmetros editáveis do capacitor
   const [capacitorParams, setCapacitorParams] = useState({
     potencia_kvar: DEFAULT_CAPACITOR.potencia_kvar,
     tensao_nominal_v: DEFAULT_CAPACITOR.tensao_nominal_v,
@@ -42,16 +43,13 @@ export default function DemoPage() {
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   
-  // ✅ Contador de testes realizados (usando sessionStorage)
   const [testesRealizados, setTestesRealizados] = useState(0);
   const [bloqueado, setBloqueado] = useState(false);
 
-  // Carregar contador ao iniciar
   useEffect(() => {
     const stored = sessionStorage.getItem('demo_testes');
     const count = stored ? parseInt(stored) : 0;
     setTestesRealizados(count);
-    // ✅ Bloqueia quando atingir 2 ou mais (3ª tentativa)
     setBloqueado(count >= 2);
   }, []);
 
@@ -59,7 +57,6 @@ export default function DemoPage() {
     const novoContador = testesRealizados + 1;
     setTestesRealizados(novoContador);
     sessionStorage.setItem('demo_testes', novoContador.toString());
-    // ✅ Bloqueia ao completar 2 testes (3ª tentativa)
     if (novoContador >= 2) {
       setBloqueado(true);
     }
@@ -71,7 +68,6 @@ export default function DemoPage() {
       return;
     }
 
-    // ✅ Verificar se já atingiu o limite (2 testes já feitos)
     if (testesRealizados >= 2) {
       setBloqueado(true);
       Swal.fire({
@@ -80,24 +76,24 @@ export default function DemoPage() {
           <div class="text-center">
             <p>Você já realizou os <strong>2 testes gratuitos</strong> disponíveis.</p>
             <div class="mt-4 p-3 bg-primary/10 rounded-lg">
-              <p class="font-bold text-primary">🎯 Desbloqueie o acesso completo!</p>
-              <p class="text-sm text-slate-500 mt-1">Com a versão completa você pode:</p>
+              <p class="font-bold text-primary">🎯 Escolha uma opção:</p>
               <ul class="text-left text-xs mt-2 space-y-1">
-                <li>✓ Fazer quantos testes quiser</li>
-                <li>✓ Cadastrar seus próprios capacitores</li>
-                <li>✓ Gerar relatórios profissionais</li>
-                <li>✓ Acompanhar histórico de medições</li>
+                <li>🔓 <strong>Assinar plano</strong> – Acesso completo imediato</li>
+                <li>📞 <strong>Solicitar demonstração</strong> – Entraremos em contato</li>
               </ul>
             </div>
           </div>
         `,
         icon: 'info',
-        confirmButtonText: 'Solicitar Acesso Completo',
+        confirmButtonText: 'Assinar Plano',
         confirmButtonColor: '#0a2b3c',
-        showCancelButton: true,
-        cancelButtonText: 'Fechar'
+        showDenyButton: true,
+        denyButtonText: 'Solicitar Demonstração',
+        denyButtonColor: '#6c757d'
       }).then((result) => {
         if (result.isConfirmed) {
+          router.push('/signup');
+        } else if (result.isDenied) {
           handleSolicitarDemo();
         }
       });
@@ -105,7 +101,6 @@ export default function DemoPage() {
     }
 
     setLoading(true);
-    
     setTimeout(() => {
       let valorTeorico = 0;
       let desvio = 0;
@@ -118,11 +113,9 @@ export default function DemoPage() {
           setLoading(false);
           return;
         }
-        // ✅ Usa os parâmetros editáveis do capacitor
         valorTeorico = (capacitorParams.potencia_kvar * 1000) / (Math.sqrt(3) * tensao);
         desvio = ((valorNumerico - valorTeorico) / valorTeorico) * 100;
       } else {
-        // ✅ Usa os parâmetros editáveis do capacitor
         valorTeorico = capacitorParams.capacitancia_nominal_uf * 1.5;
         desvio = ((valorNumerico - valorTeorico) / valorTeorico) * 100;
       }
@@ -150,7 +143,6 @@ export default function DemoPage() {
         tipo: tipoTeste
       });
       
-      // ✅ Incrementar contador APÓS o teste
       incrementarContador();
       setLoading(false);
     }, 500);
@@ -162,13 +154,18 @@ export default function DemoPage() {
         title: 'Limite de Testes Atingido',
         html: `
           <p>Você já utilizou seus <strong>2 testes gratuitos</strong>.</p>
-          <p class="mt-2">Solicite o acesso completo para continuar testando!</p>
+          <p class="mt-2">Escolha uma opção para continuar:</p>
         `,
         icon: 'info',
-        confirmButtonText: 'Solicitar Acesso',
-        confirmButtonColor: '#0a2b3c'
+        confirmButtonText: 'Assinar Plano',
+        confirmButtonColor: '#0a2b3c',
+        showDenyButton: true,
+        denyButtonText: 'Solicitar Demonstração',
+        denyButtonColor: '#6c757d'
       }).then((result) => {
         if (result.isConfirmed) {
+          router.push('/signup');
+        } else if (result.isDenied) {
           handleSolicitarDemo();
         }
       });
@@ -190,9 +187,6 @@ export default function DemoPage() {
     Swal.fire('Parâmetros resetados!', 'Valores padrão restaurados.', 'success');
   }
 
-  // ============================================
-  // FUNÇÃO PARA SOLICITAR DEMONSTRAÇÃO
-  // ============================================
   async function handleSolicitarDemo() {
     const result = await Swal.fire({
       title: 'Solicitar Demonstração Completa',
@@ -247,7 +241,6 @@ export default function DemoPage() {
         }
 
         setSending(true);
-
         try {
           const response = await fetch('/api/lead', {
             method: 'POST',
@@ -262,13 +255,8 @@ export default function DemoPage() {
               origem: 'Demo Page'
             })
           });
-
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Erro ao enviar solicitação');
-          }
-
-          return { nome, email, empresa, telefone };
+          if (!response.ok) throw new Error('Erro ao enviar');
+          return { nome, email };
         } catch (error: any) {
           Swal.showValidationMessage(`Erro: ${error.message}`);
           return false;
@@ -288,7 +276,6 @@ export default function DemoPage() {
     }
   }
 
-  // Testes restantes
   const testesRestantes = 2 - testesRealizados;
 
   return (
@@ -315,7 +302,7 @@ export default function DemoPage() {
             {!bloqueado ? (
               <strong className="text-secondary"> {testesRestantes} teste(s) restante(s)</strong>
             ) : (
-              <strong className="text-secondary"> Testes concluídos! Solicite acesso completo.</strong>
+              <strong className="text-secondary"> Testes concluídos! Assine o plano para continuar.</strong>
             )}
           </p>
         </div>
@@ -337,7 +324,7 @@ export default function DemoPage() {
               </div>
             </div>
             
-            {/* ✅ Dados do capacitor EDITÁVEIS */}
+            {/* Dados do capacitor EDITÁVEIS */}
             <div className="bg-slate-50 p-4 rounded-xl mb-6">
               <div className="flex justify-between items-center mb-3">
                 <p className="text-sm font-medium text-slate-700">📋 Dados do Capacitor para Teste:</p>
@@ -405,124 +392,129 @@ export default function DemoPage() {
             </div>
 
             {!bloqueado ? (
-              <>
-                {/* Formulário de teste - ativo */}
-                <div className="space-y-4">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Tipo de Teste</label>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => {
-                          setTipoTeste('corrente');
-                          setResultado(null);
-                          setValorMedido('');
-                        }}
-                        className={cn(
-                          "flex-1 py-2 rounded-lg border transition-colors",
-                          tipoTeste === 'corrente' 
-                            ? "bg-primary text-white border-primary" 
-                            : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                        )}
-                      >
-                        ⚡ Teste por Corrente (Campo)
-                      </button>
-                      <button
-                        onClick={() => {
-                          setTipoTeste('capacitancia');
-                          setResultado(null);
-                          setValorMedido('');
-                        }}
-                        className={cn(
-                          "flex-1 py-2 rounded-lg border transition-colors",
-                          tipoTeste === 'capacitancia' 
-                            ? "bg-primary text-white border-primary" 
-                            : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                        )}
-                      >
-                        🔋 Teste por Capacitância (Bancada)
-                      </button>
-                    </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Tipo de Teste</label>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setTipoTeste('corrente');
+                        setResultado(null);
+                        setValorMedido('');
+                      }}
+                      className={cn(
+                        "flex-1 py-2 rounded-lg border transition-colors",
+                        tipoTeste === 'corrente' 
+                          ? "bg-primary text-white border-primary" 
+                          : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                      )}
+                    >
+                      ⚡ Teste por Corrente (Campo)
+                    </button>
+                    <button
+                      onClick={() => {
+                        setTipoTeste('capacitancia');
+                        setResultado(null);
+                        setValorMedido('');
+                      }}
+                      className={cn(
+                        "flex-1 py-2 rounded-lg border transition-colors",
+                        tipoTeste === 'capacitancia' 
+                          ? "bg-primary text-white border-primary" 
+                          : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                      )}
+                    >
+                      🔋 Teste por Capacitância (Bancada)
+                    </button>
                   </div>
+                </div>
 
-                  {tipoTeste === 'corrente' ? (
-                    <>
-                      <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Tensão Medida (V)</label>
-                        <input 
-                          type="number" 
-                          step="0.1"
-                          placeholder="Ex: 480"
-                          className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
-                          value={tensaoMedida}
-                          onChange={(e) => setTensaoMedida(e.target.value)}
-                        />
-                        <p className="text-xs text-slate-400 mt-1">💡 Tensão real no momento da medição</p>
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Corrente Medida (A)</label>
-                        <input 
-                          type="number" 
-                          step="0.01"
-                          placeholder="Ex: 38.5"
-                          className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
-                          value={valorMedido}
-                          onChange={(e) => setValorMedido(e.target.value)}
-                        />
-                      </div>
-                    </>
-                  ) : (
+                {tipoTeste === 'corrente' ? (
+                  <>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-slate-700">Capacitância Medida entre Fases (µF)</label>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Tensão Medida (V)</label>
+                      <input 
+                        type="number" 
+                        step="0.1"
+                        placeholder="Ex: 480"
+                        className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
+                        value={tensaoMedida}
+                        onChange={(e) => setTensaoMedida(e.target.value)}
+                      />
+                      <p className="text-xs text-slate-400 mt-1">💡 Tensão real no momento da medição</p>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Corrente Medida (A)</label>
                       <input 
                         type="number" 
                         step="0.01"
-                        placeholder="Ex: 145.2"
+                        placeholder="Ex: 38.5"
                         className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                         value={valorMedido}
                         onChange={(e) => setValorMedido(e.target.value)}
                       />
-                      <p className="mt-1 text-xs text-slate-400">
-                        ⚠️ Para ligação delta, o valor teórico é Cfase × 1.5 = {(capacitorParams.capacitancia_nominal_uf * 1.5).toFixed(2)} µF
-                      </p>
                     </div>
-                  )}
+                  </>
+                ) : (
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Capacitância Medida entre Fases (µF)</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      placeholder="Ex: 145.2"
+                      className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
+                      value={valorMedido}
+                      onChange={(e) => setValorMedido(e.target.value)}
+                    />
+                    <p className="mt-1 text-xs text-slate-400">
+                      ⚠️ Para ligação delta, o valor teórico é Cfase × 1.5 = {(capacitorParams.capacitancia_nominal_uf * 1.5).toFixed(2)} µF
+                    </p>
+                  </div>
+                )}
 
-                  <button 
-                    onClick={calcularDemonstracao}
-                    disabled={loading}
-                    className="w-full bg-primary text-white py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {loading ? (
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <Zap size={18} />
-                    )}
-                    Validar Capacitor
-                  </button>
-                </div>
-              </>
+                <button 
+                  onClick={calcularDemonstracao}
+                  disabled={loading}
+                  className="w-full bg-primary text-white py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {loading ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Zap size={18} />
+                  )}
+                  Validar Capacitor
+                </button>
+              </div>
             ) : (
-              // ✅ Bloqueado - mostrar apenas botão de solicitação
               <div className="text-center py-8">
                 <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Lock size={40} className="text-amber-600" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 mb-2">Testes Gratuitos Concluídos!</h3>
                 <p className="text-slate-500 mb-6">
-                  Você já realizou seus 2 testes. Solicite o acesso completo para continuar.
+                  Você já realizou seus 2 testes. Escolha uma opção abaixo para continuar.
                 </p>
-                <button 
-                  onClick={handleSolicitarDemo}
-                  disabled={sending}
-                  className="bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors inline-flex items-center gap-2 disabled:opacity-50"
-                >
-                  {sending ? (
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
+                <div className="flex flex-col gap-3 max-w-xs mx-auto">
+                  <button 
+                    onClick={() => router.push('/signup')}
+                    className="bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors inline-flex items-center justify-center gap-2"
+                  >
                     <Star size={18} />
-                  )}
-                  Solicitar Acesso Completo
-                </button>
+                    Assinar Plano
+                  </button>
+                  <button 
+                    onClick={handleSolicitarDemo}
+                    disabled={sending}
+                    className="border border-primary text-primary bg-white px-6 py-3 rounded-lg font-medium hover:bg-primary/5 transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {sending ? (
+                      <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <ArrowRight size={18} />
+                    )}
+                    Solicitar Demonstração
+                  </button>
+                </div>
               </div>
             )}
 
@@ -584,27 +576,32 @@ export default function DemoPage() {
             )}
           </div>
 
-          {/* Call to Action */}
+          {/* Call to Action - dois botões */}
           <div className="bg-gradient-to-r from-primary/5 to-secondary/5 p-6 rounded-2xl text-center">
             <p className="text-slate-600 mb-3">
-              {bloqueado ? 'Já sabe como funciona?' : 'Gostou do que viu?'}
+              {bloqueado ? 'Pronto para desbloquear todas as funcionalidades?' : 'Gostou do que viu?'}
             </p>
-            <button 
-              onClick={handleSolicitarDemo}
-              disabled={sending}
-              className="bg-primary text-white px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors inline-flex items-center gap-2 disabled:opacity-50"
-            >
-              {sending ? (
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <ArrowRight size={18} />
-              )}
-              {bloqueado ? 'Solicitar Acesso Completo' : 'Solicitar Demonstração Completa'}
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <button 
+                onClick={() => router.push('/signup')}
+                className="bg-primary text-white px-6 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors inline-flex items-center justify-center gap-2"
+              >
+                <Star size={18} />
+                Assinar Plano
+              </button>
+              <button 
+                onClick={handleSolicitarDemo}
+                disabled={sending}
+                className="border border-primary text-primary bg-white px-6 py-2 rounded-lg font-medium hover:bg-primary/5 transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {sending ? <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Mail size={18} />}
+                Solicitar Demonstração
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Painel de informações */}
+        {/* Painel de informações (mantém igual) */}
         <div className="space-y-6">
           <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
             <h3 className="font-bold text-primary mb-4 flex items-center gap-2">
@@ -664,4 +661,3 @@ export default function DemoPage() {
     </div>
   );
 }
-
