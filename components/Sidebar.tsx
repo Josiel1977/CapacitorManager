@@ -13,8 +13,10 @@ import { useAuth } from '@/lib/AuthContext';
 
 // Itens públicos (sempre visíveis)
 const publicMenuItems = [
-  { name: 'Demonstração', href: '/demo', icon: Play, badge: 'Novo' },
-  { name: 'Como Usar', href: '/como-usar', icon: BookOpen, badge: 'Guia' },
+  { name: 'Demonstração', href: '/demo', icon: Play },
+  { name: 'Como Usar', href: '/como-usar', icon: BookOpen },
+  { name: 'Central de Ajuda', href: '/ajuda', icon: HelpCircle },
+  { name: 'Solicitar Demo', href: '/signup', icon: Star },
 ];
 
 // Itens privados (só aparecem quando logado)
@@ -34,10 +36,7 @@ const privateMenuItems = [
 ];
 
 // Itens de suporte (públicos)
-const supportItems = [
-  { name: 'Central de Ajuda', href: '/ajuda', icon: HelpCircle },
-  { name: 'Solicitar Demo', href: '/contato', icon: Star },
-];
+
 
 export default function Sidebar() {
   const router = useRouter();
