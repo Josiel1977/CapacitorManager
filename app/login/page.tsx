@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'motion/react';
 import { Zap, Lock, Mail, ArrowRight, Eye, EyeOff, Sparkles } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { useAuth } from '@/lib/AuthContext';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirectTo') || '/dimensionar';
@@ -53,5 +53,13 @@ export default function LoginPage() {
         </form>
       </motion.div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Carregando...</div>}>
+      <LoginForm />
+    </Suspense>
   );
 }

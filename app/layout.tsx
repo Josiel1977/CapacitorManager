@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import Sidebar from '@/components/Sidebar';
@@ -11,6 +11,13 @@ const inter = Inter({
   variable: '--font-sans',
   display: 'swap',
 });
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: '#0a2b3c',
+};
 
 export const metadata: Metadata = {
   title: {
@@ -48,12 +55,6 @@ export const metadata: Metadata = {
     description: 'Sistema profissional para gestão de bancos de capacitores.',
     images: ['/og-image.png'],
   },
-  viewport: {
-    width: 'device-width',
-    initialScale: 1,
-    maximumScale: 5,
-  },
-  themeColor: '#0a2b3c',
   alternates: {
     canonical: 'https://capacitor-manage.vercel.app',
   },
@@ -74,7 +75,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {children}
           </main>
           <BackToTopButton />
-          {/* Chat Assistant - aparece em todas as páginas */}
           <ChatAssistant />
         </AuthProvider>
       </body>
