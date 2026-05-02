@@ -1,23 +1,30 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 import { Plus, Search, Edit2, Trash2, X, Save } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
+import { useAuth } from '@/lib/AuthContext';
+
+interface Cliente {
+  id: string;
+  nome: string;
+  cnpj_cpf: string;
+  contato_responsavel: string;
+  telefone: string;
+  email: string;
+  ativo: boolean;
+}
 
 export default function ClientesPage() {
   const router = useRouter();
-  const supabase = createClient();
-
-  const [clientes, setClientes] = useState<any[]>([]);
+  const { isAuthenticated, isLoading } = useAuth();
+  const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingCliente, setEditingCliente] = useState<any>(null);
-  const [tenantId, setTenantId] = useState<string | null>(null);
-  const [limites, setLimites] = useState({ limite_clientes: 0, plan: '' });
+  const [editingCliente, setEditingCliente] = useState<Cliente | null>(null);
   const [formData, setFormData] = useState({
     nome: '',
     cnpj_cpf: '',
@@ -26,68 +33,65 @@ export default function ClientesPage() {
     email: '',
   });
 
+  // Redirecionar se não autenticado
   useEffect(() => {
-    const getUserAndTenant = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push('/login');
-        return;
-      }
+    if (!isLoading && !isAuthenticated) {
+      router.push('/login');
+    }
+  }, [isAuthenticated, isLoading, router]);
 
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('tenant_id')
-        .eq('id', user.id)
-        .single();
-
-      if (profileError || !profile?.tenant_id) {
-        Swal.fire('Erro', 'Perfil sem tenant. Contate o administrador.', 'error');
-        router.push('/login');
-        return;
-      }
-
-      setTenantId(profile.tenant_id);
-
-      const { data: tenant, error: tenantError } = await supabase
-        .from('tenants')
-        .select('plan, limite_clientes')
-        .eq('id', profile.tenant_id)
-        .single();
-
-      if (!tenantError && tenant) {
-        setLimites({ limite_clientes: tenant.limite_clientes, plan: tenant.plan });
-      }
-
-      await fetchClientes(profile.tenant_id);
-    };
-
-    getUserAndTenant();
-  }, [router, supabase]);
-
-  async function fetchClientes(tenantId: string) {
+  // Carregar clientes do localStorage
+  const fetchClientes = () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('clientes')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('ativo', true)
-        .order('nome');
-      if (error) throw error;
-      setClientes(data || []);
+      const stored = localStorage.getItem('capacitor_clientes');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setClientes(parsed.filter((c: Cliente) => c.ativo !== false));
+      } else {
+        setClientes([]);
+      }
     } catch (error) {
-      console.error('Error fetching clientes:', error);
+      console.error('Erro ao carregar clientes:', error);
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  const filteredClientes = clientes.filter(c => 
+  // Salvar clientes no localStorage
+  const saveClientes = (novosClientes: Cliente[]) => {
+    localStorage.setItem('capacitor_clientes', JSON.stringify(novosClientes));
+    setClientes(novosClientes.filter(c => c.ativo !== false));
+  };
+
+  // Inicializar dados de exemplo (se vazio)
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      const stored = localStorage.getItem('capacitor_clientes');
+      if (!stored) {
+        const exemplo: Cliente[] = [
+          {
+            id: crypto.randomUUID(),
+            nome: 'Empresa Exemplo Ltda',
+            cnpj_cpf: '12.345.678/0001-90',
+            contato_responsavel: 'João Silva',
+            telefone: '(11) 99999-9999',
+            email: 'contato@exemplo.com',
+            ativo: true,
+          },
+        ];
+        localStorage.setItem('capacitor_clientes', JSON.stringify(exemplo));
+      }
+      fetchClientes();
+    }
+  }, [isLoading, isAuthenticated]);
+
+  const filteredClientes = clientes.filter(c =>
     c.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.cnpj_cpf?.includes(searchTerm)
   );
 
-  function handleOpenModal(cliente: any = null) {
+  function handleOpenModal(cliente: Cliente | null = null) {
     if (cliente) {
       setEditingCliente(cliente);
       setFormData({
@@ -110,56 +114,40 @@ export default function ClientesPage() {
     setIsModalOpen(true);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!tenantId) return;
 
-    try {
-      if (!editingCliente && limites.limite_clientes > 0) {
-        const currentCount = clientes.length;
-        if (currentCount >= limites.limite_clientes) {
-          Swal.fire({
-            title: 'Limite do plano atingido',
-            html: `Seu plano <strong>${limites.plan}</strong> permite no máximo ${limites.limite_clientes} clientes ativos.<br/><br/>Faça upgrade para adicionar mais clientes.`,
-            icon: 'warning',
-            confirmButtonText: 'Ver planos',
-            showCancelButton: true,
-            cancelButtonText: 'Cancelar'
-          }).then((result) => {
-            if (result.isConfirmed) router.push('/planos');
-          });
-          return;
-        }
-      }
+    const stored = localStorage.getItem('capacitor_clientes');
+    let clientesAtuais: Cliente[] = stored ? JSON.parse(stored) : [];
 
-      const dataToSave = {
-        ...formData,
-        tenant_id: tenantId,
-      };
-
-      if (editingCliente) {
-        const { error } = await supabase
-          .from('clientes')
-          .update(dataToSave)
-          .eq('id', editingCliente.id);
-        if (error) throw error;
+    if (editingCliente) {
+      // Atualizar cliente existente
+      const index = clientesAtuais.findIndex(c => c.id === editingCliente.id);
+      if (index !== -1) {
+        clientesAtuais[index] = {
+          ...clientesAtuais[index],
+          ...formData,
+        };
         Swal.fire('Sucesso', 'Cliente atualizado com sucesso!', 'success');
-      } else {
-        const { error } = await supabase
-          .from('clientes')
-          .insert([dataToSave]);
-        if (error) throw error;
-        Swal.fire('Sucesso', 'Cliente cadastrado com sucesso!', 'success');
       }
-      setIsModalOpen(false);
-      await fetchClientes(tenantId);
-    } catch (error: any) {
-      Swal.fire('Erro', error.message, 'error');
+    } else {
+      // Criar novo cliente
+      const novoCliente: Cliente = {
+        id: crypto.randomUUID(),
+        ...formData,
+        ativo: true,
+      };
+      clientesAtuais.push(novoCliente);
+      Swal.fire('Sucesso', 'Cliente cadastrado com sucesso!', 'success');
     }
+
+    saveClientes(clientesAtuais);
+    setIsModalOpen(false);
+    fetchClientes();
   }
 
-  async function handleDelete(id: string) {
-    const result = await Swal.fire({
+  function handleDelete(id: string) {
+    Swal.fire({
       title: 'Tem certeza?',
       text: "O cliente será desativado do sistema.",
       icon: 'warning',
@@ -168,24 +156,23 @@ export default function ClientesPage() {
       cancelButtonColor: '#e74c3c',
       confirmButtonText: 'Sim, excluir!',
       cancelButtonText: 'Cancelar'
-    });
-
-    if (result.isConfirmed) {
-      try {
-        const { error } = await supabase
-          .from('clientes')
-          .update({ ativo: false })
-          .eq('id', id);
-        if (error) throw error;
-        Swal.fire('Excluído!', 'Cliente removido com sucesso.', 'success');
-        await fetchClientes(tenantId!);
-      } catch (error: any) {
-        Swal.fire('Erro', error.message, 'error');
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        const stored = localStorage.getItem('capacitor_clientes');
+        if (stored) {
+          let clientesAtuais: Cliente[] = JSON.parse(stored);
+          clientesAtuais = clientesAtuais.map(c =>
+            c.id === id ? { ...c, ativo: false } : c
+          );
+          saveClientes(clientesAtuais);
+          Swal.fire('Excluído!', 'Cliente removido com sucesso.', 'success');
+          fetchClientes();
+        }
       }
-    }
+    });
   }
 
-  if (loading) {
+  if (isLoading || (isAuthenticated && loading)) {
     return (
       <div className="space-y-6">
         <div className="h-32 animate-pulse rounded-xl bg-slate-100" />
@@ -195,19 +182,16 @@ export default function ClientesPage() {
     );
   }
 
+  if (!isAuthenticated) return null;
+
   return (
     <div className="space-y-6">
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-3xl font-bold text-primary">Clientes</h1>
           <p className="text-slate-500">Gerencie o cadastro de seus clientes</p>
-          {limites.limite_clientes > 0 && (
-            <p className="text-xs text-slate-400 mt-1">
-              Plano {limites.plan}: {clientes.length} / {limites.limite_clientes} clientes
-            </p>
-          )}
         </div>
-        <button 
+        <button
           onClick={() => handleOpenModal()}
           className="flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-white transition-colors hover:bg-primary/90"
         >
@@ -218,9 +202,9 @@ export default function ClientesPage() {
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-        <input 
-          type="text" 
-          placeholder="Buscar por nome, CNPJ/CPF ou e-mail..." 
+        <input
+          type="text"
+          placeholder="Buscar por nome, CNPJ/CPF ou e-mail..."
           className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-10 pr-4 outline-none focus:border-primary focus:ring-1 focus:ring-primary"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
@@ -250,14 +234,22 @@ export default function ClientesPage() {
                   <td className="px-6 py-4 text-slate-600 hidden xl:table-cell">{cliente.email || '-'}</td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
-                      <button onClick={() => handleOpenModal(cliente)} className="rounded p-1.5 text-blue-600 hover:bg-blue-50"><Edit2 size={18} /></button>
-                      <button onClick={() => handleDelete(cliente.id)} className="rounded p-1.5 text-red-600 hover:bg-red-50"><Trash2 size={18} /></button>
+                      <button onClick={() => handleOpenModal(cliente)} className="rounded p-1.5 text-blue-600 hover:bg-blue-50">
+                        <Edit2 size={18} />
+                      </button>
+                      <button onClick={() => handleDelete(cliente.id)} className="rounded p-1.5 text-red-600 hover:bg-red-50">
+                        <Trash2 size={18} />
+                      </button>
                     </div>
                   </td>
                 </tr>
               ))}
               {filteredClientes.length === 0 && (
-                <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-400">Nenhum cliente encontrado</td></tr>
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
+                    Nenhum cliente encontrado
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
@@ -267,14 +259,14 @@ export default function ClientesPage() {
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="absolute inset-0 bg-black/50"
               onClick={() => setIsModalOpen(false)}
             />
-            <motion.div 
+            <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
@@ -284,70 +276,72 @@ export default function ClientesPage() {
                 <h2 className="text-xl font-bold text-primary">
                   {editingCliente ? 'Editar Cliente' : 'Novo Cliente'}
                 </h2>
-                <button onClick={() => setIsModalOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><X size={20} /></button>
+                <button onClick={() => setIsModalOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                  <X size={20} />
+                </button>
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Nome Completo *</label>
-                  <input 
+                  <input
                     required
-                    type="text" 
+                    type="text"
                     className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                     value={formData.nome}
-                    onChange={(e) => setFormData({...formData, nome: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="mb-1 block text-sm font-medium text-slate-700">CNPJ/CPF</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                       value={formData.cnpj_cpf}
-                      onChange={(e) => setFormData({...formData, cnpj_cpf: e.target.value})}
+                      onChange={(e) => setFormData({ ...formData, cnpj_cpf: e.target.value })}
                     />
                   </div>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-slate-700">Responsável</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                       value={formData.contato_responsavel}
-                      onChange={(e) => setFormData({...formData, contato_responsavel: e.target.value})}
+                      onChange={(e) => setFormData({ ...formData, contato_responsavel: e.target.value })}
                     />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="mb-1 block text-sm font-medium text-slate-700">Telefone</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                       value={formData.telefone}
-                      onChange={(e) => setFormData({...formData, telefone: e.target.value})}
+                      onChange={(e) => setFormData({ ...formData, telefone: e.target.value })}
                     />
                   </div>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-slate-700">E-mail</label>
-                    <input 
-                      type="email" 
+                    <input
+                      type="email"
                       className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                       value={formData.email}
-                      onChange={(e) => setFormData({...formData, email: e.target.value})}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     />
                   </div>
                 </div>
 
                 <div className="mt-8 flex justify-end gap-3">
-                  <button 
+                  <button
                     type="button"
                     onClick={() => setIsModalOpen(false)}
                     className="rounded-lg px-6 py-2 text-slate-600 hover:bg-slate-100"
                   >
                     Cancelar
                   </button>
-                  <button 
+                  <button
                     type="submit"
                     className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2 text-white hover:bg-primary/90"
                   >
