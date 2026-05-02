@@ -100,7 +100,8 @@ interface Fatura {
   concessionaria: string;
   multa_reativo_calculada?: number; // calculado localmente, não inserido
   fp_calculado?: number;
-  tenant_id?: string; // será preenchido pelo sistema
+  tenant_id?: string;
+  multa_informada?: number; // será preenchido pelo sistema
 }
 
 interface DistribuicaoTrafo {
