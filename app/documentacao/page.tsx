@@ -191,7 +191,7 @@ const docs = {
     content: (
       <div className="space-y-4">
         <h2 className="text-2xl font-bold text-primary">Manutenção Preditiva</h2>
-        <p className="text-slate-600">Com base no histórico de medições, o sistema projeta a data em que cada capacitor atingirá o limite crítico (desvio > +15% ou < -10%).</p>
+        <p className="text-slate-600">Com base no histórico de medições, o sistema projeta a data em que cada capacitor atingirá o limite crítico (desvio {'>'} +15% ou {'<'} -10%).</p>
         <div className="bg-slate-50 p-4 rounded-lg">
           <h4 className="font-bold mb-2">📈 Como funciona:</h4>
           <ol className="list-decimal pl-5 space-y-2 text-sm">
