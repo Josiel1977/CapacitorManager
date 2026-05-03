@@ -6,7 +6,7 @@ import DashboardReal from './dashboard-real/page';
 import DashboardDemo from './dashboard-demo/page';
 
 export default function HomePage() {
-  const { mode, isLoading } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -19,8 +19,7 @@ export default function HomePage() {
   return (
     <>
       <DemoBanner />
-      {mode === 'authenticated' ? <DashboardReal /> : <DashboardDemo />} //teste
+      {isAuthenticated ? <DashboardReal /> : <DashboardDemo />}
     </>
   );
 }
-
