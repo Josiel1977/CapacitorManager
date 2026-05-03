@@ -127,7 +127,7 @@ const MOCK_CAPACITORES: CapacitorInfo[] = [
 
 export default function ManutencaoPage() {
   const router = useRouter();
-  const { mode, isLoading: authLoading } = useAuth();
+ const { isAuthenticated, isLoading: authLoading } = useAuth(); 
   const [capacitores, setCapacitores] = useState<CapacitorInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'todos' | 'reprovado' | 'atencao' | 'sem_medicao'>('todos');
@@ -224,14 +224,21 @@ export default function ManutencaoPage() {
   }
 
   useEffect(() => {
-    if (mode === 'authenticated') { fetchClientes(); fetchDadosReais(); }
-    else carregarDadosMock();
-  }, [mode]);
+  if (isAuthenticated) { 
+    fetchClientes(); 
+    fetchDadosReais(); 
+  } else {
+    carregarDadosMock();
+  }
+}, [isAuthenticated]);
 
-  useEffect(() => {
-    if (mode === 'authenticated' && clienteFiltro !== 'todos') fetchDadosReais();
-    else if (mode === 'demo') processarResumo(MOCK_CAPACITORES);
-  }, [clienteFiltro]);
+useEffect(() => {
+  if (isAuthenticated && clienteFiltro !== 'todos') {
+    fetchDadosReais();
+  } else if (!isAuthenticated) {
+    processarResumo(MOCK_CAPACITORES);
+  }
+}, [clienteFiltro, isAuthenticated]);
 
   const filteredCapacitores = capacitores.filter(cap => {
     if (clienteFiltro !== 'todos' && cap.cliente_id !== clienteFiltro) return false;
@@ -252,7 +259,7 @@ export default function ManutencaoPage() {
 
   return (
     <div className="space-y-8 pb-12">
-      <DemoBanner />
+      <DemoBanner /useEffect>
       <motion.section initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-primary to-primary/80 p-8 text-white shadow-xl md:p-12">
         <div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-secondary/20 blur-3xl" />
         <div className="relative z-10"><div className="flex items-center gap-3 mb-4"><div className="rounded-xl bg-secondary/20 p-2"><Wrench size={24} className="text-secondary" /></div><span className="text-sm font-medium text-white/80">Manutenção Preditiva</span></div><h1 className="mb-4 text-4xl font-bold leading-tight md:text-5xl">Análise de <span className="text-secondary">Capacitores</span></h1><p className="text-lg text-white/80 md:text-xl max-w-2xl">Acompanhe a saúde dos seus capacitores baseado nas validações técnicas.</p></div>
