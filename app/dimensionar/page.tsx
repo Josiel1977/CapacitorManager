@@ -2,6 +2,10 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+
+// ← NOVO: Import do hook de auth centralizado
+import { useAuth } from "@/lib/AuthContext";
+
 import {
   Calculator,
   Zap,
@@ -29,7 +33,7 @@ import { toPng } from "html-to-image";
 import { supabase } from "@/lib/supabase";
 
 // ============================================
-// CONSTANTES
+// CONSTANTES (MANTIDO IGUAL)
 // ============================================
 const FP_MINIMO_REGULAMENTAR = 0.92;
 
@@ -76,7 +80,7 @@ const CONFIG_CAPACITORES = {
 };
 
 // ============================================
-// INTERFACES (refletindo as colunas reais da tabela faturas)
+// INTERFACES (MANTIDO IGUAL)
 // ============================================
 interface Transformador {
   id: string;
@@ -98,10 +102,10 @@ interface Fatura {
   total_pagar: number;
   dias_ciclo: number;
   concessionaria: string;
-  multa_reativo_calculada?: number; // calculado localmente, não inserido
+  multa_reativo_calculada?: number;
   fp_calculado?: number;
   tenant_id?: string;
-  multa_informada?: number; // será preenchido pelo sistema
+  multa_informada?: number;
 }
 
 interface DistribuicaoTrafo {
@@ -149,7 +153,7 @@ interface ResultadoDimensionamento {
 }
 
 // ============================================
-// UTILITÁRIOS (os mesmos)
+// UTILITÁRIOS (MANTIDO IGUAL)
 // ============================================
 const parseBRLocal = (valor: string | number | undefined): number => {
   if (valor === undefined || valor === null) return 0;
@@ -276,10 +280,14 @@ const distribuirKvarPorTrafo = (
 };
 
 // ============================================
-// COMPONENTE
+// COMPONENTE PRINCIPAL (COM CORREÇÕES DE AUTH)
 // ============================================
 export default function DimensionarPage() {
   const router = useRouter();
+  
+  // ← NOVO: Hook de auth centralizado
+  const { user, isAuthenticated, isLoading } = useAuth();
+  
   const reportRef = useRef<HTMLDivElement>(null);
   const [transformadores, setTransformadores] = useState<Transformador[]>([]);
   const [faturas, setFaturas] = useState<Fatura[]>([]);
@@ -294,129 +302,78 @@ export default function DimensionarPage() {
   const [numeroEstagios, setNumeroEstagios] = useState<number>(6);
   const [tenantId, setTenantId] = useState<string | null>(null);
 
+  // ← NOVO: Redirecionamento seguro com dependências completas
   useEffect(() => {
-    const verificarAutenticacao = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push("/login");
-        return;
+    if (!isLoading && !isAuthenticated) {
+      router.push("/login");
+    }
+  }, [isAuthenticated, isLoading, router]);
+
+  // ← NOVO: Carregar dados apenas quando autenticado
+  useEffect(() => {
+    const carregarPerfilEDados = async () => {
+      if (!user?.id || !isAuthenticated) return;
+
+      try {
+        // Buscar perfil para obter tenant_id (ou null se for admin)
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("tenant_id, role")
+          .eq("id", user.id)
+          .single();
+
+        if (profileError) {
+          console.error("Erro ao buscar perfil:", profileError);
+          return;
+        }
+
+        // Define tenant_id (null para admin, valor para cliente)
+        const userTenantId = profile?.role === "admin" ? null : profile?.tenant_id;
+        setTenantId(userTenantId || null);
+
+        // Carrega dados filtrados por tenant (se não for admin)
+        await carregarDados(userTenantId);
+      } catch (error) {
+        console.error("Erro ao carregar perfil/dados:", error);
+        Swal.fire("Erro", "Não foi possível carregar seus dados.", "error");
+      } finally {
+        setCarregando(false);
       }
-
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", user.id)
-        .single();
-
-      if (profileError || !profile?.tenant_id) {
-        console.error("Perfil sem tenant_id:", profileError);
-        Swal.fire("Erro", "Perfil não configurado. Contate o administrador.", "error");
-        router.push("/login");
-        return;
-      }
-
-      setTenantId(profile.tenant_id);
-      await carregarDados(profile.tenant_id);
-      setCarregando(false);
     };
 
-    verificarAutenticacao();
-  }, [router]);
+    if (isAuthenticated && !isLoading) {
+      carregarPerfilEDados();
+    }
+  }, [user, isAuthenticated, isLoading]);
 
-  const carregarDados = async (tenant: string) => {
+  // ← FUNÇÃO DE CARREGAMENTO (ajustada para multi-tenant)
+  const carregarDados = async (tenantIdFiltro: string | null) => {
     try {
-      // Transformadores
-      const { data: trafosDB, error: trafoError } = await supabase
-        .from("transformadores")
-        .select("*")
-        .eq("tenant_id", tenant)
-        .order("created_at", { ascending: true });
-
+      // Query base para transformadores
+      let queryTrafo = supabase.from("transformadores").select("*");
+      if (tenantIdFiltro) {
+        queryTrafo = queryTrafo.eq("tenant_id", tenantIdFiltro);
+      }
+      const { data: trafosDB, error: trafoError } = await queryTrafo.order("created_at", { ascending: true });
       if (trafoError) throw trafoError;
+      setTransformadores(trafosDB || []);
 
-      if (trafosDB && trafosDB.length > 0) {
-        setTransformadores(trafosDB);
-      } else {
-        const defaultTrafos = [
-          { id: crypto.randomUUID(), potencia_kva: 300, quantidade: 1, tensao_v: 380, horas_trabalho: 220, tenant_id: tenant },
-          { id: crypto.randomUUID(), potencia_kva: 225, quantidade: 1, tensao_v: 380, horas_trabalho: 220, tenant_id: tenant },
-        ];
-        const { error: insertError } = await supabase.from("transformadores").insert(defaultTrafos);
-        if (insertError) throw insertError;
-        setTransformadores(defaultTrafos.map(({ tenant_id, ...rest }) => rest));
+      // Query base para faturas
+      let queryFat = supabase.from("faturas").select("*");
+      if (tenantIdFiltro) {
+        queryFat = queryFat.eq("tenant_id", tenantIdFiltro);
       }
-
-      // Faturas
-      const { data: faturasDB, error: faturaError } = await supabase
-        .from("faturas")
-        .select("*")
-        .eq("tenant_id", tenant)
-        .order("mes_referencia", { ascending: false });
-
+      const { data: faturasDB, error: faturaError } = await queryFat.order("mes_referencia", { ascending: false });
       if (faturaError) throw faturaError;
-
-      if (faturasDB && faturasDB.length > 0) {
-        setFaturas(faturasDB);
-      } else {
-        // Inserir faturas de exemplo (somente colunas existentes)
-        const faturasRaw = [
-          {
-            id: crypto.randomUUID(),
-            mes_referencia: "11/2025",
-            consumo_ponta_kwh: 457.21,
-            consumo_fora_ponta_kwh: 5179.86,
-            demanda_ponta_kw: 53.42,
-            demanda_fora_ponta_kw: 53.42,
-            reativo_ponta_kvarh: 493.76,
-            reativo_fora_ponta_kvarh: 4696.54,
-            total_pagar: 12617.5,
-            dias_ciclo: 30,
-            concessionaria: "EQUATORIAL_PARA",
-            tenant_id: tenant,
-          },
-          {
-            id: crypto.randomUUID(),
-            mes_referencia: "12/2025",
-            consumo_ponta_kwh: 595.56,
-            consumo_fora_ponta_kwh: 6106.21,
-            demanda_ponta_kw: 40.66,
-            demanda_fora_ponta_kw: 40.66,
-            reativo_ponta_kvarh: 1130.49,
-            reativo_fora_ponta_kvarh: 8932.83,
-            total_pagar: 14486.71,
-            dias_ciclo: 31,
-            concessionaria: "EQUATORIAL_PARA",
-            tenant_id: tenant,
-          },
-          {
-            id: crypto.randomUUID(),
-            mes_referencia: "01/2026",
-            consumo_ponta_kwh: 558.52,
-            consumo_fora_ponta_kwh: 5974.5,
-            demanda_ponta_kw: 37.96,
-            demanda_fora_ponta_kw: 39.98,
-            reativo_ponta_kvarh: 993.0,
-            reativo_fora_ponta_kvarh: 8690.47,
-            total_pagar: 13728.12,
-            dias_ciclo: 31,
-            concessionaria: "EQUATORIAL_PARA",
-            tenant_id: tenant,
-          },
-        ];
-        const { error: insertFatError } = await supabase.from("faturas").insert(faturasRaw);
-        if (insertFatError) throw insertFatError;
-        setFaturas(faturasRaw);
-      }
+      setFaturas(faturasDB || []);
     } catch (error: any) {
       console.error("Erro ao carregar dados:", error);
       Swal.fire("Erro", error.message || "Não foi possível carregar os dados.", "error");
-    } finally {
-      setCarregando(false);
     }
   };
 
   // ============================================
-  // CRUD TRANSFORMADORES
+  // CRUD TRANSFORMADORES (MANTIDO IGUAL)
   // ============================================
   const salvarTransformadores = async () => {
     if (!tenantId) return;
@@ -459,7 +416,7 @@ export default function DimensionarPage() {
   const potenciaTotalTransformadores = transformadores.reduce((acc, t) => acc + t.potencia_kva * t.quantidade, 0);
 
   // ============================================
-  // CRUD FATURAS
+  // CRUD FATURAS (MANTIDO IGUAL)
   // ============================================
   const salvarFatura = async () => {
     if (!currentFatura.mes_referencia) {
@@ -522,7 +479,7 @@ export default function DimensionarPage() {
   };
 
   // ============================================
-  // DIMENSIONAMENTO
+  // DIMENSIONAMENTO (MANTIDO IGUAL)
   // ============================================
   const calcularDimensionamento = () => {
     if (faturas.length < 2) {
@@ -539,7 +496,7 @@ export default function DimensionarPage() {
         const ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
         const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
         const fp = calcularFatorPotencia(ativoTotal, reativoTotal);
-        const multa = calcularMultaDaFatura(f); // calcula sempre em tempo real
+        const multa = calcularMultaDaFatura(f);
         const demandaMaxKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
         return { ...f, ativoTotal, reativoTotal, fp, multa, demandaMaxKw };
       });
@@ -638,7 +595,7 @@ export default function DimensionarPage() {
   };
 
   // ============================================
-  // EXPORTAR PDF
+  // EXPORTAR PDF (MANTIDO IGUAL)
   // ============================================
   const exportMemorial = async () => {
     if (!reportRef.current) return;
@@ -675,7 +632,20 @@ export default function DimensionarPage() {
     }
   };
 
-  if (carregando) return <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin text-primary" size={32} /></div>;
+  // ← NOVO: Renderização condicional com isLoading do AuthContext
+  if (isLoading || carregando) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="animate-spin text-primary" size={32} />
+        <span className="ml-2 text-slate-500">Carregando...</span>
+      </div>
+    );
+  }
+
+  // ← NOVO: Não renderiza nada se não autenticado (evita loop)
+  if (!isAuthenticated) {
+    return null;
+  }
 
   const BarraFP = ({ fp, meta = 92 }: { fp: number; meta?: number }) => {
     const percentual = Math.min(100, Math.max(0, (fp / meta) * 100));
@@ -683,6 +653,7 @@ export default function DimensionarPage() {
     return <div className="w-full bg-slate-200 rounded-full h-2"><div className={`${cor} h-2 rounded-full`} style={{ width: `${percentual}%` }} /></div>;
   };
 
+  // ← RESTO DO JSX (MANTIDO EXATAMENTE IGUAL)
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
       <header className="text-center">
