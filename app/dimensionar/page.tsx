@@ -1319,22 +1319,14 @@ function DimensionarContent() {
                         </div>
                       </div>
                       {result.pior_mes && (
-                        <div className="bg-amber-50 p-4 rounded-xl">
-                          <p className="text-xs font-bold">
-                            Pior Mês: {result.pior_mes.mes_referencia}
-                          </p>
-                          <p className="text-sm mt-1">
-                            FP:{" "}
-                            {(
-                              {(result.pior_mes.fp_calculado ? (result.pior_mes.fp_calculado * 100).toFixed(1) : '0')}%
-                            ).toFixed(1)}
-                            % • Multa:{" "}
-                            {formatMoney(
-                              calcularMultaDaFatura(result.pior_mes as Fatura),
-                            )}
-                          </p>
-                        </div>
-                      )}
+  <div className="bg-amber-50 p-4 rounded-xl">
+    <p className="text-xs font-bold">Pior Mês: {result.pior_mes.mes_referencia}</p>
+    <p className="text-sm mt-1">
+      FP: {(result.pior_mes.fp_calculado ? (result.pior_mes.fp_calculado * 100).toFixed(1) : '0')}% • 
+      Multa: {formatMoney(calcularMultaDaFatura(result.pior_mes as Fatura))}
+    </p>
+  </div>
+)}
                       {/* DISTRIBUIÇÃO POR TRANSFORMADOR (única listagem de estágios) */}
                       <div className="bg-indigo-50 p-4 rounded-xl">
                         <p className="text-xs font-bold flex gap-2">
