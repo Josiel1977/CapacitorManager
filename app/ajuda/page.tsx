@@ -5,42 +5,59 @@ import { motion } from 'motion/react';
 import { 
   HelpCircle, Search, ChevronDown, ChevronUp, Mail, 
   MessageCircle, FileText, Video, BookOpen, Star, 
-  CheckCircle, AlertCircle, Zap, Settings, Users, Database
+  CheckCircle, AlertCircle, Zap, Settings, Users, Database,
+  Play, ExternalLink, Shield, FileSignature
 } from 'lucide-react';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
 
 const faqs = [
   {
     question: "O que é o CapacitorManager?",
-    answer: "É uma plataforma web para gestão, monitoramento e manutenção preditiva de bancos de capacitores. O sistema valida medições automaticamente com base na norma IEC 60831-1/2 e fornece recomendações inteligentes."
+    answer: "É uma plataforma web para gestão, monitoramento e manutenção preditiva de bancos de capacitores. O sistema valida medições automaticamente com base na norma IEC 60831-1/2 e fornece recomendações inteligentes. Ideal para engenheiros eletricistas, eletrotécnicos e empresas de manutenção."
   },
   {
     question: "Preciso instalar algum software?",
-    answer: "Não! O CapacitorManager é 100% web (SaaS). Basta acessar pelo navegador, sem instalação ou manutenção local."
+    answer: "Não! O CapacitorManager é 100% web (SaaS). Basta acessar pelo navegador, sem instalação ou manutenção local. Funciona no computador, tablet e smartphone."
   },
   {
     question: "Como funciona o período de teste?",
-    answer: "Oferecemos 30 dias de teste gratuito com todas as funcionalidades. Ao final, você pode optar por um dos planos pagos ou continuar com a versão Demo limitada."
+    answer: "Oferecemos 30 dias de teste gratuito com todas as funcionalidades. Ao final, você pode optar por um dos planos pagos ou continuar com a versão Demo limitada. Não é necessário cartão de crédito para começar."
   },
   {
     question: "Quais normas técnicas são utilizadas?",
-    answer: "O sistema segue rigorosamente a norma IEC 60831-1/2 para bancos de capacitores, com tolerâncias configuráveis de acordo com sua necessidade."
+    answer: "O sistema segue rigorosamente a norma IEC 60831-1/2 para bancos de capacitores, com tolerâncias configuráveis (padrão: -5% a +10%). Você também pode personalizar os limites de aprovação."
   },
   {
     question: "Posso exportar relatórios?",
-    answer: "Sim! Você pode gerar relatórios em PDF e Excel com todas as medições, análises e recomendações."
+    answer: "Sim! Você pode gerar relatórios em PDF e Excel com todas as medições, análises e recomendações. Os relatórios são profissionais, com logotipo da sua empresa (personalizável nos planos Pro e Master)."
   },
   {
     question: "O sistema tem suporte?",
-    answer: "Sim, oferecemos suporte por e-mail, WhatsApp e chat. Planos Pro e Enterprise têm prioridade e suporte dedicado."
+    answer: "Sim, oferecemos suporte por e-mail, WhatsApp e chat. Planos Pro e Master têm prioridade e suporte dedicado. O tempo de resposta é de até 2 horas úteis."
+  },
+  {
+    question: "É seguro? Meus dados estão protegidos?",
+    answer: "Sim! Utilizamos criptografia SSL/TLS, backups diários e seguimos a LGPD. Seus dados são armazenados em servidores no Brasil. Consulte nossa Política de Privacidade para mais detalhes."
+  },
+  {
+    question: "Como faço para convidar outros usuários da minha empresa?",
+    answer: "Nos planos Pro e Master, você pode adicionar múltiplos usuários com níveis de acesso (administrador, técnico, visualizador). Vá em Configurações > Usuários e convide por e-mail."
   }
 ];
 
 const categorias = [
-  { nome: "Primeiros Passos", icone: BookOpen, cor: "bg-blue-50 text-blue-600" },
-  { nome: "Clientes e Bancos", icone: Users, cor: "bg-green-50 text-green-600" },
-  { nome: "Medições", icone: Zap, cor: "bg-amber-50 text-amber-600" },
-  { nome: "Configurações", icone: Settings, cor: "bg-purple-50 text-purple-600" },
+  { nome: "Primeiros Passos", icone: BookOpen, slug: "primeiros-passos", desc: "Cadastro, planos e primeiras medições." },
+  { nome: "Clientes e Bancos", icone: Users, slug: "clientes-bancos", desc: "Gerenciar clientes e bancos de capacitores." },
+  { nome: "Medições", icone: Zap, slug: "medicoes", desc: "Como registrar e validar medições." },
+  { nome: "Configurações", icone: Settings, slug: "configuracoes", desc: "Ajustes, limites e personalização." },
+];
+
+const tutoriais = [
+  { titulo: "Como cadastrar um cliente", duracao: "3min", icone: Users },
+  { titulo: "Realizando sua primeira medição", duracao: "5min", icone: Zap },
+  { titulo: "Exportando relatórios profissionais", duracao: "2min", icone: FileText },
+  { titulo: "Configurando limites de aprovação", duracao: "4min", icone: Settings },
 ];
 
 export default function AjudaPage() {
@@ -67,7 +84,7 @@ export default function AjudaPage() {
             Central de <span className="text-secondary">Ajuda</span>
           </h1>
           <p className="text-lg text-white/80 md:text-xl max-w-2xl mx-auto">
-            Tire suas dúvidas e aprenda a usar o CapacitorManager como um profissional.
+            Tire suas dúvidas, aprenda com tutoriais e aproveite ao máximo o CapacitorManager.
           </p>
         </div>
       </motion.section>
@@ -84,25 +101,55 @@ export default function AjudaPage() {
         />
       </div>
 
-      {/* Categorias */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Categorias com links (simulando páginas internas) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {categorias.map((cat, idx) => (
-          <motion.div
-            key={cat.nome}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: idx * 0.1 }}
-            className="bg-white rounded-2xl p-4 text-center shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"
-          >
-            <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3", cat.cor)}>
-              <cat.icone size={22} />
-            </div>
-            <h3 className="font-medium text-sm">{cat.nome}</h3>
-          </motion.div>
+          <Link key={cat.nome} href={`/ajuda/${cat.slug}`} className="group">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: idx * 0.1 }}
+              className="bg-white rounded-2xl p-5 text-center shadow-sm border border-slate-100 hover:shadow-md transition-all cursor-pointer h-full"
+            >
+              <div className={cn("w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-3 text-primary")}>
+                <cat.icone size={22} />
+              </div>
+              <h3 className="font-bold text-primary group-hover:underline">{cat.nome}</h3>
+              <p className="text-xs text-slate-500 mt-1">{cat.desc}</p>
+              <span className="text-xs text-primary/60 group-hover:text-primary mt-2 inline-flex items-center gap-1">
+                Ver artigos <ExternalLink size={12} />
+              </span>
+            </motion.div>
+          </Link>
         ))}
       </div>
 
-      {/* FAQs */}
+      {/* Vídeos tutoriais */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+        <h2 className="text-xl font-bold text-primary mb-4 flex items-center gap-2">
+          <Video size={20} />
+          Vídeos Tutoriais
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {tutoriais.map((video, idx) => (
+            <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                <video.icone size={20} />
+              </div>
+              <div className="flex-1">
+                <p className="font-medium text-sm">{video.titulo}</p>
+                <p className="text-xs text-slate-400">{video.duracao}</p>
+              </div>
+              <Play size={16} className="text-primary cursor-pointer" />
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-slate-400 text-center mt-4">
+          Em breve: mais vídeos no nosso canal do YouTube.
+        </p>
+      </div>
+
+      {/* FAQ */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
         <h2 className="text-xl font-bold text-primary mb-6 flex items-center gap-2">
           <HelpCircle size={20} />
@@ -129,8 +176,31 @@ export default function AjudaPage() {
         </div>
       </div>
 
+      {/* Guia rápido */}
+      <div className="bg-gradient-to-r from-primary/5 to-secondary/5 rounded-2xl p-6 border border-primary/20">
+        <h3 className="text-lg font-bold text-primary mb-3 text-center">⚡ Guia Rápido</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+          <div className="p-2">
+            <Users size={24} className="mx-auto text-primary mb-1" />
+            <p className="text-xs">Cadastre clientes</p>
+          </div>
+          <div className="p-2">
+            <Database size={24} className="mx-auto text-primary mb-1" />
+            <p className="text-xs">Crie bancos de capacitores</p>
+          </div>
+          <div className="p-2">
+            <Zap size={24} className="mx-auto text-primary mb-1" />
+            <p className="text-xs">Realize medições</p>
+          </div>
+          <div className="p-2">
+            <FileText size={24} className="mx-auto text-primary mb-1" />
+            <p className="text-xs">Exporte relatórios</p>
+          </div>
+        </div>
+      </div>
+
       {/* Contato Suporte */}
-      <div className="bg-gradient-to-r from-primary/5 to-secondary/5 rounded-2xl p-6 border border-primary/20 text-center">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 text-center">
         <MessageCircle size={32} className="mx-auto text-primary mb-3" />
         <h3 className="text-xl font-bold text-primary mb-2">Ainda com dúvidas?</h3>
         <p className="text-slate-600 mb-4">Nossa equipe está pronta para te ajudar</p>
@@ -152,7 +222,12 @@ export default function AjudaPage() {
           </a>
         </div>
       </div>
+
+      {/* Footer com links legais */}
+      <div className="text-center text-xs text-slate-400 border-t pt-6">
+        <Link href="/termos" className="hover:text-primary mx-2">Termos de Uso</Link> |
+        <Link href="/privacidade" className="hover:text-primary mx-2">Política de Privacidade</Link>
+      </div>
     </div>
   );
 }
-

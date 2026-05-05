@@ -14,11 +14,13 @@ import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
 
 // Itens públicos (sempre visíveis)
+// Itens públicos (sempre visíveis)
 const publicMenuItems = [
   { name: 'Demonstração', href: '/demo', icon: Play },
   { name: 'Como Usar', href: '/como-usar', icon: BookOpen },
   { name: 'Central de Ajuda', href: '/ajuda', icon: HelpCircle },
   { name: 'Solicitar Demo', href: '/signup', icon: Star },
+  { name: 'Privacidade', href: '/privacidade', icon: Shield }, // ← adicionado
 ];
 
 // Itens privados (só aparecem quando logado E com assinatura ativa OU for admin)
