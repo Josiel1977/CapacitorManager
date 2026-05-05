@@ -31,7 +31,7 @@ const privateMenuItems = [
   { name: 'Clientes', href: '/clientes', icon: Users },
   { name: 'Bancos', href: '/bancos', icon: Database },
   { name: 'Capacitores', href: '/capacitores', icon: Zap },
-  { name: 'Analise-fatura', href: '/analise-fatura', icon: Activity },
+   { name: 'analise-massa', href: '/analise-massa', icon: Activity },
   { name: 'Dimensionar', href: '/dimensionar', icon: Calculator },
   { name: 'Realizar Teste', href: '/testes', icon: ClipboardCheck },
   { name: 'Gráficos', href: '/graficos', icon: BarChart3 },
