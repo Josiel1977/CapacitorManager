@@ -8,7 +8,7 @@ export default function TermosBasicoPage() {
         <ul>
           <li>1 cliente ativo;</li>
           <li>1 banco de capacitores;</li>
-          <li>50 capacitores cadastrados.</li>
+          <li>6 capacitores cadastrados.</li>
         </ul>
         <h2>2. Valor e cobrança</h2>
         <p>O valor mensal é de R$ 149,00 (cento e quarenta e nove reais), cobrado automaticamente via Mercado Pago por meio de assinatura recorrente.</p>
