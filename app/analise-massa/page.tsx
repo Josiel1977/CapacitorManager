@@ -1,4 +1,5 @@
 'use client';
+
 import React, { useState, useMemo, useCallback } from 'react';
 import Papa from 'papaparse';
 import jsPDF from 'jspdf';
@@ -16,6 +17,7 @@ import {
 } from 'recharts';
 import { cn } from '@/lib/utils';
 import Swal from 'sweetalert2';
+
 // ============================================================================
 // TIPOS E INTERFACES
 // ============================================================================
@@ -36,7 +38,8 @@ interface MassMemoryData {
 
 interface AnalysisStats {
   totalExcedenteKvarh: number;
-  multaEstimada: number;
+  multaEstimada: number;           // multa no período do arquivo
+  multaMensalEstimada: number;     // projetada para 30 dias
   multaIndutiva: number;
   multaCapacitiva: number;
   picoDemanda: number;
@@ -93,7 +96,7 @@ interface AnaliseDiaSemana {
 }
 
 // ============================================================================
-// FUNÇÕES UTILITÁRIAS
+// FUNÇÕES UTILITÁRIAS MELHORADAS
 // ============================================================================
 
 const diasSemana = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
@@ -254,6 +257,37 @@ const estimarOrcamento = (kvar: number, tipo: 'fixo' | 'automatico' | 'hibrido')
     };
   }
 };
+
+// ------------------- NOVA FUNÇÃO DE ESTÁGIOS PROFISSIONAL -------------------
+const distribuirEstagios = (totalKvar: number, numEstagios: number): number[] => {
+  if (totalKvar <= 0) return [];
+  const n = Math.min(12, Math.max(6, numEstagios));
+  const baseSeq = [1, 2.5, 5, 10, 20, 40, 80, 160, 320];
+  const stages: number[] = [];
+  let soma = 0;
+  for (let i = 0; i < baseSeq.length && stages.length < n; i++) {
+    if (soma + baseSeq[i] <= totalKvar) {
+      stages.push(baseSeq[i]);
+      soma += baseSeq[i];
+    } else break;
+  }
+  let restante = totalKvar - soma;
+  let restantes = n - stages.length;
+  if (restantes > 0 && restante > 0) {
+    let unit = Math.ceil(restante / restantes / 2.5) * 2.5;
+    if (unit < 2.5) unit = 2.5;
+    for (let i = 0; i < restantes; i++) {
+      let add = (i === restantes - 1) ? restante - (unit * (restantes - 1)) : unit;
+      if (add < 2.5) add = 2.5;
+      stages.push(add);
+      soma += add;
+      restante = totalKvar - soma;
+    }
+  }
+  return stages.filter(s => s > 0).sort((a, b) => a - b);
+};
+
+// ---------------------------------------------------------------------------
 
 const analisarHorariosCriticos = (data: MassMemoryData[]): { hora: string; mediaKvar: number; ocorrencias: number }[] => {
   const horariosMap = new Map<string, { somaKvar: number; count: number }>();
@@ -424,32 +458,6 @@ const analisarDimensionamento = (
   };
 };
 
-const gerarEstagios = (totalKvar: number): number[] => {
-  if (totalKvar <= 0) return [];
-  const estagios: number[] = [];
-  let restante = totalKvar;
-  
-  const tamanhoEstagio = totalKvar <= 30 ? 5 : 
-                         totalKvar <= 90 ? 10 : 
-                         totalKvar <= 200 ? 20 : 30;
-  
-  while (restante > 0) {
-    const estagio = Math.min(tamanhoEstagio, restante);
-    estagios.push(estagio);
-    restante -= estagio;
-  }
-  
-  if (estagios.length > 3 && estagios[estagios.length - 1] === estagios[0]) {
-    const lastIndex = estagios.length - 1;
-    if (estagios[lastIndex] > 10) {
-      estagios[lastIndex] = Math.floor(estagios[lastIndex] / 2);
-      if (estagios[lastIndex] < 5) estagios[lastIndex] = 5;
-    }
-  }
-  
-  return estagios.sort((a, b) => a - b);
-};
-
 // ============================================================================
 // COMPONENTES DE ALERTA
 // ============================================================================
@@ -465,7 +473,7 @@ const AlertaMultaCapacitiva = ({ multaCapacitiva }: { multaCapacitiva: number })
           <p className="text-sm font-bold text-blue-800">⚠️ ATENÇÃO: Multa por Reativo Capacitivo Detectada!</p>
           <p className="text-sm text-blue-700 mt-1">
             Sua instalação está com <strong>SOBRECORREÇÃO</strong> (excesso de capacitores ligados). 
-            O reativo capacitivo está gerando multa de <strong>R$ {multaCapacitiva.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>.
+            O reativo capacitivo está gerando multa de <strong>R$ {multaCapacitiva.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> no período analisado.
           </p>
           <p className="text-xs text-blue-600 mt-2">
             💡 <strong>Solução:</strong> Desligue ou reduza o banco de capacitores existente. NÃO adicione mais capacitores.
@@ -486,7 +494,7 @@ const AlertaMultaIndutiva = ({ multaIndutiva }: { multaIndutiva: number }) => {
         <div>
           <p className="text-sm font-bold text-red-800">⚠️ Multa por Reativo Indutivo Detectada!</p>
           <p className="text-sm text-red-700 mt-1">
-            O reativo indutivo está gerando multa de <strong>R$ {multaIndutiva.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>.
+            O reativo indutivo está gerando multa de <strong>R$ {multaIndutiva.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> no período analisado.
           </p>
           <p className="text-xs text-red-600 mt-2">
             💡 <strong>Solução:</strong> Instale um banco de capacitores para corrigir o fator de potência.
@@ -510,7 +518,7 @@ const LoadingOverlay = () => (
 // ============================================================================
 // COMPONENTE PRINCIPAL
 // ============================================================================
-export default function AnaliseFaturaPage() {
+export default function AnaliseMassaPage() {
   const [data, setData] = useState<MassMemoryData[]>([]);
   const [loading, setLoading] = useState(false);
   const [targetFP, setTargetFP] = useState(0.92);
@@ -559,34 +567,23 @@ export default function AnaliseFaturaPage() {
     reader.onload = (event) => {
       const content = event.target?.result as string;
       
+      // Heurística para encontrar linha de cabeçalho (melhorada)
       const lines = content.split('\n');
-      let headerIndex = lines.findIndex(line => {
-        const lower = line.toLowerCase();
+      let headerIndex = -1;
+      for (let i = 0; i < Math.min(lines.length, 30); i++) {
+        const lower = lines[i].toLowerCase();
         const hasData = lower.includes('data') || lower.includes('date');
         const hasTime = lower.includes('hora') || lower.includes('time') || lower.includes('horário');
         const hasEnergy = lower.includes('kw') || lower.includes('kvar') || lower.includes('ativa') || lower.includes('reativa');
-        return hasData && (hasTime || hasEnergy) && (line.includes(';') || line.includes(','));
-      });
-      
-      if (headerIndex === -1) {
-        headerIndex = lines.findIndex(line => {
-          const lower = line.toLowerCase();
-          const parts = line.split(/[,;]/);
-          return lower.includes('data') && parts.length >= 3;
-        });
-      }
-      
-      if (headerIndex === -1) {
-        headerIndex = lines.findIndex(line => 
-          (line.includes(';') || line.includes(',')) && 
-          !line.toLowerCase().includes('leitora') && 
-          !line.toLowerCase().includes('modelo')
-        );
+        if (hasData && (hasTime || hasEnergy) && (lines[i].includes(';') || lines[i].includes(','))) {
+          headerIndex = i;
+          break;
+        }
       }
       
       if (headerIndex === -1) {
         setLoading(false);
-        Swal.fire('Erro', 'Não foi possível encontrar o cabeçalho com "Data" e "Hora" (ou kW/kVAr) no arquivo.', 'error');
+        Swal.fire('Erro', 'Não foi possível encontrar o cabeçalho com "Data", "Hora", "kW" e "kVAr".', 'error');
         return;
       }
 
@@ -812,13 +809,19 @@ export default function AnaliseFaturaPage() {
     }).filter(d => d.count > 0);
   }, [data, targetFP, tariff, samplingInterval]);
 
+  // ESTATÍSTICAS com projeção mensal
   const stats: AnalysisStats | null = useMemo(() => {
     if (data.length === 0) return null;
 
     const samplesPerHour = 60 / samplingInterval;
     const multaDetalhada = calcularMultaANEELDetalhada(data, tariff, targetFP, samplesPerHour);
-    const registrosIndutivos = data.filter(d => d.tipoReativo === 'indutivo');
     
+    // Projetar multa para 30 dias
+    const diasNoArquivo = new Set(data.map(d => d.data)).size;
+    const fatorProjecao = Math.max(1, 30 / diasNoArquivo);
+    const multaMensal = multaDetalhada.total * fatorProjecao;
+    
+    const registrosIndutivos = data.filter(d => d.tipoReativo === 'indutivo');
     const totalExcedenteKvarh = registrosIndutivos
       .filter(d => d.fp < targetFP)
       .reduce((acc, curr) => acc + Math.abs(curr.kvar), 0) / samplesPerHour;
@@ -852,6 +855,7 @@ export default function AnaliseFaturaPage() {
     return {
       totalExcedenteKvarh,
       multaEstimada: multaDetalhada.total,
+      multaMensalEstimada: multaMensal,
       multaIndutiva: multaDetalhada.indutiva,
       multaCapacitiva: multaDetalhada.capacitiva,
       picoDemanda,
@@ -869,8 +873,9 @@ export default function AnaliseFaturaPage() {
 
   const dimensionamento: DimensionamentoStats | null = useMemo(() => {
     if (data.length === 0) return null;
-    return analisarDimensionamento(data, targetFP, potenciaInstalada, stats?.multaEstimada || 0);
-  }, [data, targetFP, potenciaInstalada, stats?.multaEstimada, recalcKey]);
+    const multaMensal = stats?.multaMensalEstimada || 0;
+    return analisarDimensionamento(data, targetFP, potenciaInstalada, multaMensal);
+  }, [data, targetFP, potenciaInstalada, stats?.multaMensalEstimada, recalcKey]);
 
   const chartData = useMemo(() => {
     if (data.length === 0) return [];
@@ -908,10 +913,10 @@ export default function AnaliseFaturaPage() {
             Análise Avançada • ANEEL 414/2010
           </div>
           <h1 className="text-4xl md:text-5xl font-black tracking-tight leading-tight">
-            Capacitor Manager
+            Memória de Massa
           </h1>
           <p className="text-lg text-white/70 leading-relaxed">
-            Transforme dados brutos em economia real. Detectamos reativo excedente, calculamos multas conforme ANEEL e sugerimos a correção exata.
+            Importe o arquivo de demanda da concessionária, detecte reativo excedente e receba o dimensionamento exato do banco de capacitores.
           </p>
           
           <div className="flex flex-wrap gap-4 pt-4">
@@ -953,7 +958,16 @@ export default function AnaliseFaturaPage() {
           {fileName && (
             <p className="text-xs text-white/50 flex items-center gap-2">
               <FileText size={12} />
-              {fileName} • {data.length} registros • Amostragem: {samplingInterval}min
+              {fileName} • {data.length} registros • Amostragem detectada: {samplingInterval}min
+              <button
+                onClick={() => {
+                  const novo = window.prompt('Intervalo de amostragem (minutos):', String(samplingInterval));
+                  if (novo) setSamplingInterval(Number(novo));
+                }}
+                className="text-secondary underline ml-2"
+              >
+                (ajustar)
+              </button>
             </p>
           )}
         </div>
@@ -968,9 +982,9 @@ export default function AnaliseFaturaPage() {
           <div className="bg-slate-50 p-6 rounded-full mb-6">
             <FileText size={48} className="text-slate-300" />
           </div>
-          <h2 className="text-xl font-semibold text-slate-700 mb-2">Aguardando dados...</h2>
+          <h2 className="text-xl font-semibold text-slate-700 mb-2">Aguardando arquivo...</h2>
           <p className="text-slate-500 max-w-md text-center mb-4">
-            Faça upload do CSV da concessionária (Copel, Enel, Cemig, etc.) com colunas de kW e kVAr.
+            Faça upload do CSV da concessionária (Copel, Enel, Cemig, EDP etc.) contendo colunas de kW e kVAr.
           </p>
           <details className="text-sm text-slate-400 max-w-lg">
             <summary className="cursor-pointer hover:text-slate-600 flex items-center gap-2">
@@ -981,7 +995,7 @@ export default function AnaliseFaturaPage() {
               <li>Colunas: <code className="bg-slate-100 px-1 rounded">Data</code>, <code className="bg-slate-100 px-1 rounded">Hora</code>, <code className="bg-slate-100 px-1 rounded">kW</code>, <code className="bg-slate-100 px-1 rounded">kVAr</code></li>
               <li>Separador: vírgula ou ponto-e-vírgula</li>
               <li>Números: formato brasileiro (1.234,56)</li>
-              <li>Intervalo: 15 ou 30 minutos (detectado automaticamente)</li>
+              <li>Intervalo típico: 15 ou 30 minutos (detectado automaticamente)</li>
             </ul>
           </details>
         </motion.div>
@@ -1180,11 +1194,12 @@ export default function AnaliseFaturaPage() {
                 <div className="p-2 bg-red-50 rounded-lg text-red-600">
                   <DollarSign size={20} />
                 </div>
-                <span className="text-sm font-medium text-slate-500">Multa Estimada</span>
+                <span className="text-sm font-medium text-slate-500">Multa no período</span>
               </div>
               <p className="text-3xl font-bold text-slate-900">
                 R$ {stats?.multaEstimada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </p>
+              <p className="text-xs text-slate-400 mt-1">Multa projetada para 30 dias: <strong>R$ {stats?.multaMensalEstimada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></p>
             </div>
 
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
@@ -1232,10 +1247,23 @@ export default function AnaliseFaturaPage() {
                   <Cpu size={24} />
                   Dimensionamento do Banco
                 </h3>
-                <button onClick={handleRecalcular} className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg">
-                  <RefreshCw size={16} />
-                  Recalcular
-                </button>
+                <div className="flex gap-3">
+                  <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-lg shadow-sm">
+                    <span className="text-xs font-bold text-slate-400">Amostragem:</span>
+                    <input 
+                      type="number" 
+                      step="1" 
+                      value={samplingInterval} 
+                      onChange={(e) => setSamplingInterval(Number(e.target.value))}
+                      className="w-16 text-center border rounded px-1 py-0.5 text-sm"
+                    />
+                    <span className="text-xs">min</span>
+                  </div>
+                  <button onClick={handleRecalcular} className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg">
+                    <RefreshCw size={16} />
+                    Recalcular
+                  </button>
+                </div>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -1309,7 +1337,7 @@ export default function AnaliseFaturaPage() {
                 <div className="mt-6 bg-white p-6 rounded-2xl">
                   <h4 className="text-sm font-bold text-slate-400 uppercase mb-4">Estágios Recomendados</h4>
                   <div className="flex flex-wrap gap-3">
-                    {gerarEstagios(dimensionamento.bancoSugeridoAutomatico).map((estagio, idx) => (
+                    {distribuirEstagios(dimensionamento.bancoSugeridoAutomatico, 8).map((estagio, idx) => (
                       <div key={idx} className="bg-blue-50 px-4 py-2 rounded-lg">
                         <span className="text-xs">Estágio {idx + 1}:</span>
                         <span className="font-bold text-blue-700 ml-2">{estagio} kVAr</span>
@@ -1376,32 +1404,33 @@ export default function AnaliseFaturaPage() {
               </div>
             </div>
           </div>
-          {/* CARD DE OBSERVAÇÃO TÉCNICA - ADICIONE ESTE BLOCO */}
-{dimensionamento && (
-  <motion.div 
-    initial={{ opacity: 0, scale: 0.95 }}
-    animate={{ opacity: 1, scale: 1 }}
-    className="bg-amber-50 border-2 border-amber-200 p-6 rounded-3xl mt-6 shadow-sm"
-  >
-    <div className="flex items-start gap-4">
-      <div className="bg-amber-100 p-3 rounded-full text-amber-600">
-        <AlertTriangle size={24} />
-      </div>
-      <div className="space-y-2">
-        <h4 className="text-amber-900 font-bold text-lg flex items-center gap-2">
-          Observação de Instalação do Banco
-        </h4>
-        <p className="text-amber-800 leading-relaxed">
-          O sistema solicita <strong>{dimensionamento.tipoRecomendado === 'fixo' ? dimensionamento.bancoSugeridoFixo : dimensionamento.bancoSugeridoAutomatico} kVAr</strong> para corrigir o fator de potência, mas verifique as configurações de instalação do seu banco existente se houver, para ver a real necessidade.
-        </p>
-        <div className="pt-2 flex items-center gap-2 text-xs text-amber-700 font-medium italic">
-          <Info size={14} />
-          <span>Nota técnica: Se houver capacitores fixos instalados após o ponto de medição (TC), a necessidade real pode ser diferente do valor calculado.</span>
-        </div>
-      </div>
-    </div>
-  </motion.div>
-)}
+
+          {/* CARD DE OBSERVAÇÃO TÉCNICA */}
+          {dimensionamento && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-amber-50 border-2 border-amber-200 p-6 rounded-3xl mt-6 shadow-sm"
+            >
+              <div className="flex items-start gap-4">
+                <div className="bg-amber-100 p-3 rounded-full text-amber-600">
+                  <AlertTriangle size={24} />
+                </div>
+                <div className="space-y-2">
+                  <h4 className="text-amber-900 font-bold text-lg flex items-center gap-2">
+                    Observação de Instalação do Banco
+                  </h4>
+                  <p className="text-amber-800 leading-relaxed">
+                    O sistema solicita <strong>{dimensionamento.tipoRecomendado === 'fixo' ? dimensionamento.bancoSugeridoFixo : dimensionamento.bancoSugeridoAutomatico} kVAr</strong> para corrigir o fator de potência, mas verifique as configurações de instalação do seu banco existente se houver, para ver a real necessidade.
+                  </p>
+                  <div className="pt-2 flex items-center gap-2 text-xs text-amber-700 font-medium italic">
+                    <Info size={14} />
+                    <span>Nota técnica: Se houver capacitores fixos instalados após o ponto de medição (TC), a necessidade real pode ser diferente do valor calculado.</span>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           {/* CONFIGURAÇÃO E RESUMO */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1451,8 +1480,8 @@ export default function AnaliseFaturaPage() {
               </h3>
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div>
-                  <p className="text-white/60 text-xs">Multa Mensal</p>
-                  <p className="text-xl font-bold">R$ {stats?.multaEstimada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                  <p className="text-white/60 text-xs">Multa Mensal Estimada</p>
+                  <p className="text-xl font-bold">R$ {stats?.multaMensalEstimada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                 </div>
                 <div>
                   <p className="text-white/60 text-xs">Banco Recomendado</p>
@@ -1489,7 +1518,7 @@ export default function AnaliseFaturaPage() {
                     <th className="pb-4">kVAr</th>
                     <th className="pb-4">FP</th>
                     <th className="pb-4">Correção</th>
-                  </tr>
+                  </td>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {data
@@ -1504,7 +1533,7 @@ export default function AnaliseFaturaPage() {
                         <td className="py-3 font-bold text-red-600">{row.kvar.toFixed(1)}</td>
                         <td className="py-3 font-bold text-red-500">{row.fp.toFixed(3)}</td>
                         <td className="py-3 text-slate-600">{row.kvarNecessario > 0 ? `${row.kvarNecessario.toFixed(0)} kVAr` : '-'}</td>
-                      </tr>
+                      </table>
                     ))}
                 </tbody>
               </table>
