@@ -5,8 +5,9 @@ export async function POST(request: Request) {
   const body = await request.json();
   const { type, data } = body;
 
-  console.log('[Webhook] Evento recebido:', type);
+  console.log('[MP Webhook] Tipo recebido:', type);
 
+  // Assinatura recorrente – primeiro pagamento autorizado
   if (type === 'subscription_authorized_payment') {
     const preapprovalId = data.id;
     const accessToken = process.env.MP_ACCESS_TOKEN || process.env.MERCADO_PAGO_ACCESS_TOKEN;
@@ -19,7 +20,6 @@ export async function POST(request: Request) {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     const subscription = await res.json();
-
     const tenantId = subscription.external_reference;
     const planId = subscription.plan_id;
 
@@ -30,19 +30,13 @@ export async function POST(request: Request) {
       [process.env.MP_PLAN_MASTER!]: 'master',
     };
     const plano = planMap[planId];
-
     if (tenantId && plano) {
-      await supabase
-        .from('tenants')
-        .update({ plano, payment_status: 'active', updated_at: new Date().toISOString() })
-        .eq('id', tenantId);
-      await supabase
-        .from('profiles')
-        .update({ plan: plano })
-        .eq('tenant_id', tenantId);
+      await supabase.from('tenants').update({ plano, payment_status: 'active', updated_at: new Date().toISOString() }).eq('id', tenantId);
+      await supabase.from('profiles').update({ plan: plano }).eq('tenant_id', tenantId);
     }
   }
 
+  // Para pagamentos únicos (se ainda existir)
   if (type === 'payment') {
     const paymentId = data.id;
     const accessToken = process.env.MP_ACCESS_TOKEN || process.env.MERCADO_PAGO_ACCESS_TOKEN;
@@ -60,10 +54,7 @@ export async function POST(request: Request) {
         [process.env.MP_PLAN_MASTER!]: 'master',
       };
       const plano = planMap[planId];
-      await supabase
-        .from('tenants')
-        .update({ plano, payment_status: 'active', updated_at: new Date().toISOString() })
-        .eq('mp_subscription_id', subscriptionId);
+      await supabase.from('tenants').update({ plano, payment_status: 'active', updated_at: new Date().toISOString() }).eq('mp_subscription_id', subscriptionId);
     }
   }
 
