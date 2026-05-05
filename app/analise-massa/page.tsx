@@ -1522,7 +1522,11 @@ export default function AnaliseMassaPage() {
               <td className="py-3 text-slate-600">{row.kvarNecessario > 0 ? `${row.kvarNecessario.toFixed(0)} kVAr` : '-'}</td>
             </tr>
           ))}
-      </tbody>
-    </table>
-  </div>
-</div>
+                    </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+  );
+}
