@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { CreditCard } from 'lucide-react';
@@ -11,23 +11,23 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/AuthContext';
+import { supabase } from '@/lib/supabaseClient';
 
-// Itens públicos (sempre visíveis) – agora todos juntos
+// Itens públicos (sempre visíveis)
 const publicMenuItems = [
   { name: 'Demonstração', href: '/demo', icon: Play },
   { name: 'Como Usar', href: '/como-usar', icon: BookOpen },
   { name: 'Central de Ajuda', href: '/ajuda', icon: HelpCircle },
   { name: 'Solicitar Demo', href: '/signup', icon: Star },
-  
 ];
 
-// Itens privados (só aparecem quando logado)
+// Itens privados (só aparecem quando logado E com assinatura ativa)
 const privateMenuItems = [
   { name: 'Dashboard', href: '/dimensionar', icon: LayoutDashboard },
   { name: 'Clientes', href: '/clientes', icon: Users },
   { name: 'Bancos', href: '/bancos', icon: Database },
   { name: 'Capacitores', href: '/capacitores', icon: Zap },
-  { name:'Analise-fatura', href: '/analise-fatura', icon: Activity },
+  { name: 'Analise-fatura', href: '/analise-fatura', icon: Activity },
   { name: 'Dimensionar', href: '/dimensionar', icon: Calculator },
   { name: 'Realizar Teste', href: '/testes', icon: ClipboardCheck },
   { name: 'Gráficos', href: '/graficos', icon: BarChart3 },
@@ -37,16 +37,35 @@ const privateMenuItems = [
   { name: 'Configurações', href: '/configuracoes', icon: Settings },
   { name: 'Documentação', href: '/documentacao', icon: BookOpen },
   { name: 'Planos', href: '/planos', icon: CreditCard },
-  
 ];
 
 export default function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, isLoading, logout } = useAuth();
+  const { user, isAuthenticated, isLoading, logout } = useAuth();
   const [isOpen, setIsOpen] = React.useState(false);
+  const [subscriptionActive, setSubscriptionActive] = useState(false);
+  const [checking, setChecking] = useState(true);
 
-  if (isLoading) {
+  useEffect(() => {
+    const checkSubscription = async () => {
+      if (!isAuthenticated || !user) {
+        setSubscriptionActive(false);
+        setChecking(false);
+        return;
+      }
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('subscription_status')
+        .eq('id', user.id)
+        .single();
+      setSubscriptionActive(profile?.subscription_status === 'active');
+      setChecking(false);
+    };
+    checkSubscription();
+  }, [isAuthenticated, user]);
+
+  if (isLoading || checking) {
     return <div className="fixed inset-y-0 left-0 z-40 w-64 bg-primary text-white p-4">Carregando...</div>;
   }
 
@@ -104,10 +123,11 @@ export default function Sidebar() {
               );
             })}
 
-            {/* Menu Privado (somente se autenticado) */}
-            {isAuthenticated && (
+            {/* Menu Privado (somente se autenticado E com assinatura ativa) */}
+            {isAuthenticated && subscriptionActive && (
               <div className="mt-4 space-y-1">
                 <div className="my-2 h-px bg-white/10" />
+                <p className="text-xs text-white/40 px-3">SUA EMPRESA</p>
                 {privateMenuItems.map((item) => {
                   const isActive = pathname === item.href;
                   return (
@@ -137,6 +157,29 @@ export default function Sidebar() {
                 </button>
               </div>
             )}
+
+            {/* Se autenticado mas sem assinatura ativa, mostra botão para assinar */}
+            {isAuthenticated && !subscriptionActive && (
+              <div className="mt-4 space-y-1">
+                <div className="my-2 h-px bg-white/10" />
+                <p className="text-xs text-white/40 px-3">ACESSO RESTRITO</p>
+                <Link
+                  href="/planos"
+                  onClick={() => setIsOpen(false)}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-white/70 hover:bg-white/10 hover:text-white"
+                >
+                  <CreditCard size={18} />
+                  <span className="text-sm">Assinar Plano</span>
+                </Link>
+                <button
+                  onClick={handleLogout}
+                  className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                >
+                  <LogOut size={16} />
+                  Sair
+                </button>
+              </div>
+            )}
           </nav>
 
           {/* Botão Login (aparece apenas se NÃO estiver logado) */}
@@ -152,7 +195,7 @@ export default function Sidebar() {
             </div>
           )}
 
-          {/* Footer (opcional) */}
+          {/* Footer */}
           <div className="border-t border-white/10 p-4 text-center text-[9px] text-white/20">
             © 2026 CapacitorManager v2.0
           </div>

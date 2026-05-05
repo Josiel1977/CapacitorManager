@@ -7,6 +7,9 @@ import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
+import { useSubscriptionGuard } from '@/lib/useSubscriptionGuard';
+export default function ClientesPage() {
+  useSubscriptionGuard();
 
 interface Cliente {
   id: string;
