@@ -1,15 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/AuthContext';
+import { useSubscriptionGuard } from '@/lib/useSubscriptionGuard';
 import { Plus, Search, Edit2, Trash2, X, Save } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
-import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
-import { useSubscriptionGuard } from '@/lib/useSubscriptionGuard';
-export default function ClientesPage() {
-  useSubscriptionGuard();
 
 interface Cliente {
   id: string;
@@ -22,6 +20,8 @@ interface Cliente {
 }
 
 export default function ClientesPage() {
+  useSubscriptionGuard(); // Proteção de assinatura ativa
+
   const router = useRouter();
   const { user, isAuthenticated, isLoading } = useAuth();
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -39,7 +39,7 @@ export default function ClientesPage() {
     email: '',
   });
 
-  // Redireciona se não autenticado
+  // Redireciona se não autenticado (fallback, mas o hook já faz)
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.push('/login');
@@ -66,7 +66,7 @@ export default function ClientesPage() {
     if (isAuthenticated) fetchProfile();
   }, [user, isAuthenticated]);
 
-  // Carrega clientes (se admin, busca todos; se não, filtra por tenant_id)
+  // Carrega clientes
   const fetchClientes = async () => {
     try {
       setLoading(true);
@@ -127,7 +127,7 @@ export default function ClientesPage() {
     }
     const dataToSave = {
       ...formData,
-      tenant_id: isAdmin ? null : tenantId, // admin pode não precisar de tenant_id, mas se quiser associar a algum tenant, ajuste
+      tenant_id: isAdmin ? null : tenantId,
       ativo: true,
     };
     try {
@@ -153,7 +153,7 @@ export default function ClientesPage() {
   async function handleDelete(id: string) {
     const result = await Swal.fire({
       title: 'Tem certeza?',
-      text: "O cliente será desativado.",
+      text: 'O cliente será desativado.',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#0a2b3c',
@@ -177,13 +177,7 @@ export default function ClientesPage() {
   }
 
   if (isLoading || loading) {
-    return (
-      <div className="space-y-6">
-        <div className="h-32 animate-pulse rounded-xl bg-slate-100" />
-        <div className="h-12 animate-pulse rounded-lg bg-slate-100" />
-        <div className="h-96 animate-pulse rounded-xl bg-slate-100" />
-      </div>
-    );
+    return <div className="flex justify-center items-center h-64">Carregando...</div>;
   }
 
   if (!isAuthenticated) return null;
@@ -235,6 +229,7 @@ export default function ClientesPage() {
         </table>
       </div>
 
+      {/* Modal */}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
