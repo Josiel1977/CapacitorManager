@@ -27,7 +27,7 @@ export async function updateSession(request: NextRequest) {
     '/clientes', '/bancos', '/capacitores', '/dimensionar',
     '/testes', '/graficos', '/historico', '/relatorios',
     '/manutencao', '/configuracoes', '/documentacao',
-    '/dashboard-real', '/analise-fatura'
+    '/dashboard-real', '/analise-mas
   ];
   const isProtectedRoute = protectedRoutes.some(route => request.nextUrl.pathname.startsWith(route));
   const authRoutes = ['/login', '/signup'];

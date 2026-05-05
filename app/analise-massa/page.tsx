@@ -38,8 +38,8 @@ interface MassMemoryData {
 
 interface AnalysisStats {
   totalExcedenteKvarh: number;
-  multaEstimada: number;           // multa no período do arquivo
-  multaMensalEstimada: number;     // projetada para 30 dias
+  multaEstimada: number;
+  multaMensalEstimada: number;
   multaIndutiva: number;
   multaCapacitiva: number;
   picoDemanda: number;
@@ -96,7 +96,7 @@ interface AnaliseDiaSemana {
 }
 
 // ============================================================================
-// FUNÇÕES UTILITÁRIAS MELHORADAS
+// FUNÇÕES UTILITÁRIAS
 // ============================================================================
 
 const diasSemana = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
@@ -258,7 +258,6 @@ const estimarOrcamento = (kvar: number, tipo: 'fixo' | 'automatico' | 'hibrido')
   }
 };
 
-// ------------------- NOVA FUNÇÃO DE ESTÁGIOS PROFISSIONAL -------------------
 const distribuirEstagios = (totalKvar: number, numEstagios: number): number[] => {
   if (totalKvar <= 0) return [];
   const n = Math.min(12, Math.max(6, numEstagios));
@@ -286,8 +285,6 @@ const distribuirEstagios = (totalKvar: number, numEstagios: number): number[] =>
   }
   return stages.filter(s => s > 0).sort((a, b) => a - b);
 };
-
-// ---------------------------------------------------------------------------
 
 const analisarHorariosCriticos = (data: MassMemoryData[]): { hora: string; mediaKvar: number; ocorrencias: number }[] => {
   const horariosMap = new Map<string, { somaKvar: number; count: number }>();
@@ -556,6 +553,9 @@ export default function AnaliseMassaPage() {
     });
   }, []);
 
+  // ==========================================================================
+  // FUNÇÃO DE UPLOAD ADAPTADA PARA O FORMATO MEMORIA DE MASSA.CSV
+  // ==========================================================================
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -566,16 +566,13 @@ export default function AnaliseMassaPage() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
-      
-      // Heurística para encontrar linha de cabeçalho (melhorada)
       const lines = content.split('\n');
+      
+      // 1. Encontrar a linha de cabeçalho real (começa com "Data;Dia;Postos")
       let headerIndex = -1;
-      for (let i = 0; i < Math.min(lines.length, 30); i++) {
-        const lower = lines[i].toLowerCase();
-        const hasData = lower.includes('data') || lower.includes('date');
-        const hasTime = lower.includes('hora') || lower.includes('time') || lower.includes('horário');
-        const hasEnergy = lower.includes('kw') || lower.includes('kvar') || lower.includes('ativa') || lower.includes('reativa');
-        if (hasData && (hasTime || hasEnergy) && (lines[i].includes(';') || lines[i].includes(','))) {
+      for (let i = 0; i < Math.min(lines.length, 50); i++) {
+        const line = lines[i].toLowerCase();
+        if (line.startsWith('data;dia;postos')) {
           headerIndex = i;
           break;
         }
@@ -583,65 +580,70 @@ export default function AnaliseMassaPage() {
       
       if (headerIndex === -1) {
         setLoading(false);
-        Swal.fire('Erro', 'Não foi possível encontrar o cabeçalho com "Data", "Hora", "kW" e "kVAr".', 'error');
+        Swal.fire('Erro', 'Não foi possível encontrar o cabeçalho "Data;Dia;Postos...".', 'error');
         return;
       }
-
-      const cleanContent = lines.slice(headerIndex).join('\n');
-
-      Papa.parse(cleanContent, {
+      
+      // 2. Obter as linhas de dados (até o início do rodapé)
+      const dataLines = [];
+      for (let i = headerIndex + 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        // Para quando encontrar linhas de rodapé (ex: 'Disponibilidades', 'Total de perïodos')
+        if (line === '' || line.startsWith('Disponibilidades') || line.startsWith('Total de per') || line.startsWith('Sumariza')) {
+          break;
+        }
+        dataLines.push(line);
+      }
+      
+      const csvContent = [lines[headerIndex], ...dataLines].join('\n');
+      
+      Papa.parse(csvContent, {
         header: true,
         skipEmptyLines: true,
-        delimiter: '',
+        delimiter: ';',
         complete: (results) => {
           try {
             const processed = results.data.map((row: any) => {
-              const normalizedRow: any = {};
-              Object.keys(row).forEach(key => {
-                normalizedRow[key.trim().toLowerCase()] = row[key];
-              });
-
-              const getVal = (possibleKeys: string[]) => {
-                for (const key of possibleKeys) {
-                  if (normalizedRow[key] !== undefined) return normalizedRow[key];
-                }
-                const foundKey = Object.keys(normalizedRow).find(k => 
-                  possibleKeys.some(pk => k.includes(pk.toLowerCase()))
-                );
-                return foundKey ? normalizedRow[foundKey] : '0';
-              };
-
-              const kw = parseBrazilianNumber(getVal(['kw fornecido', 'ativa(kw)', 'kw', 'ativa', 'demanda ativa', 'consumo ativo', 'potencia ativa', 'canal 1', 'ch1', 'ch 1']));
-              let kvar = parseBrazilianNumber(getVal(['kvar indutivo', 'kvar capacitivo', 'reativa(kvar)', 'kvar', 'reativa', 'consumo reativo', 'potencia reativa', 'canal 2', 'ch2', 'ch 2']));
+              // Data e hora vêm juntas na coluna "Data" (ex: "01/09/2025 00:15")
+              const dataHora = row['Data'] || '';
+              let dataStr = '', horaStr = '';
+              if (dataHora && dataHora.includes(' ')) {
+                const parts = dataHora.split(' ');
+                dataStr = parts[0];
+                horaStr = parts[1]?.substring(0, 5) || '';
+              } else {
+                dataStr = dataHora;
+                horaStr = '00:00';
+              }
               
-              const tipoReativo: 'indutivo' | 'capacitivo' | 'neutro' = 
-                kvar > 0.01 ? 'indutivo' : kvar < -0.01 ? 'capacitivo' : 'neutro';
+              const kw = parseBrazilianNumber(row['kW fornecido']);
+              const kvarInd = parseBrazilianNumber(row['kVAr indutivo']);
+              const kvarCap = parseBrazilianNumber(row['kVAr capacitivo']);
               
-              const kvarAbs = Math.abs(kvar);
-              const fp = calcularFP(kw, kvarAbs);
+              let kvar = 0;
+              let tipoReativo: 'indutivo' | 'capacitivo' | 'neutro' = 'neutro';
+              if (kvarInd > 0.01) {
+                kvar = kvarInd;
+                tipoReativo = 'indutivo';
+              } else if (kvarCap > 0.01) {
+                kvar = kvarCap;
+                tipoReativo = 'capacitivo';
+              }
+              
+              const timestamp = `${dataStr}T${horaStr}`;
+              const fp = calcularFP(kw, kvar);
               const kvarNecessario = (tipoReativo === 'indutivo' && fp < targetFP) 
                 ? calcularCorrecaoNecessaria(kw, fp, targetFP) 
                 : 0;
-
-              let fullDate = getVal(['data', 'date']) || '';
-              let hora = getVal(['hora', 'time', 'horario']) || '';
+              const diaSemana = getDiaSemana(dataStr);
+              const isHorarioCritico = tipoReativo === 'indutivo' && kvar > 5 && fp < targetFP;
               
-              if (fullDate.includes(' ') && !hora) {
-                const parts = fullDate.split(' ');
-                fullDate = parts[0];
-                hora = parts[1];
-              }
-
-              const timestamp = `${fullDate}T${hora.padStart(5, '0')}`;
-              const diaSemana = getDiaSemana(fullDate);
-              const isHorarioCritico = tipoReativo === 'indutivo' && kvarAbs > 5 && fp < targetFP;
-
               return {
-                data: fullDate,
-                hora: hora,
+                data: dataStr,
+                hora: horaStr,
                 timestamp,
                 kw,
-                kvar: kvarAbs,
+                kvar,
                 fp: Math.round(fp * 100) / 100,
                 kvarNecessario,
                 tipoReativo,
@@ -649,41 +651,38 @@ export default function AnaliseMassaPage() {
                 diaSemana
               };
             });
-
+            
             const validData = processed.filter(d => d.kw > 0 || d.kvar !== 0);
-
             if (validData.length === 0) {
-              const columns = results.meta.fields ? results.meta.fields.join(', ') : 'Nenhuma';
-              throw new Error(`Nenhum dado de consumo (kW) válido encontrado. Colunas detectadas: ${columns}`);
+              throw new Error('Nenhum dado de consumo ativo ou reativo encontrado.');
             }
-
+            
             validData.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-
             const detectedInterval = detectSamplingInterval(validData);
             setSamplingInterval(detectedInterval);
-
             setData(validData);
+            
             Swal.fire('Sucesso', `${validData.length} registros processados! Amostragem: ${detectedInterval}min`, 'success');
           } catch (error: any) {
             console.error(error);
-            Swal.fire('Erro', error.message || 'Falha ao processar o arquivo CSV.', 'error');
+            Swal.fire('Erro', error.message || 'Falha ao processar o CSV.', 'error');
           } finally {
             setLoading(false);
           }
         },
         error: (error: any) => {
-          console.error('Erro no Papa.parse:', error);
-          Swal.fire('Erro', 'Falha ao analisar o CSV. Verifique o formato do arquivo.', 'error');
+          console.error('PapaParse error:', error);
+          Swal.fire('Erro', 'Falha ao analisar o arquivo. Verifique o formato.', 'error');
           setLoading(false);
         }
       });
     };
-
+    
     reader.onerror = () => {
       setLoading(false);
       Swal.fire('Erro', 'Falha ao ler o arquivo.', 'error');
     };
-
+    
     reader.readAsText(file, 'ISO-8859-1');
   }, [targetFP]);
 
@@ -809,14 +808,12 @@ export default function AnaliseMassaPage() {
     }).filter(d => d.count > 0);
   }, [data, targetFP, tariff, samplingInterval]);
 
-  // ESTATÍSTICAS com projeção mensal
   const stats: AnalysisStats | null = useMemo(() => {
     if (data.length === 0) return null;
 
     const samplesPerHour = 60 / samplingInterval;
     const multaDetalhada = calcularMultaANEELDetalhada(data, tariff, targetFP, samplesPerHour);
     
-    // Projetar multa para 30 dias
     const diasNoArquivo = new Set(data.map(d => d.data)).size;
     const fatorProjecao = Math.max(1, 30 / diasNoArquivo);
     const multaMensal = multaDetalhada.total * fatorProjecao;
@@ -992,21 +989,19 @@ export default function AnaliseMassaPage() {
               Formato esperado
             </summary>
             <ul className="mt-2 space-y-1 list-disc list-inside">
-              <li>Colunas: <code className="bg-slate-100 px-1 rounded">Data</code>, <code className="bg-slate-100 px-1 rounded">Hora</code>, <code className="bg-slate-100 px-1 rounded">kW</code>, <code className="bg-slate-100 px-1 rounded">kVAr</code></li>
-              <li>Separador: vírgula ou ponto-e-vírgula</li>
+              <li>Colunas: <code className="bg-slate-100 px-1 rounded">Data</code>, <code className="bg-slate-100 px-1 rounded">kW fornecido</code>, <code className="bg-slate-100 px-1 rounded">kVAr indutivo</code>, <code className="bg-slate-100 px-1 rounded">kVAr capacitivo</code></li>
+              <li>Separador: ponto-e-vírgula (;)</li>
               <li>Números: formato brasileiro (1.234,56)</li>
-              <li>Intervalo típico: 15 ou 30 minutos (detectado automaticamente)</li>
+              <li>Intervalo típico: 15 minutos (detectado automaticamente)</li>
             </ul>
           </details>
         </motion.div>
       ) : (
         <div id="report-content" className="space-y-8">
           
-          {/* ALERTAS ESPECÍFICOS POR TIPO DE MULTA */}
           <AlertaMultaIndutiva multaIndutiva={stats?.multaIndutiva || 0} />
           <AlertaMultaCapacitiva multaCapacitiva={stats?.multaCapacitiva || 0} />
 
-          {/* HORÁRIOS CRÍTICOS DETALHADOS */}
           {horariosCriticos.length > 0 && (
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
@@ -1060,7 +1055,6 @@ export default function AnaliseMassaPage() {
             </motion.div>
           )}
 
-          {/* ANÁLISE POR DIA DA SEMANA */}
           {analiseDiasSemana.length > 0 && (
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
@@ -1100,7 +1094,6 @@ export default function AnaliseMassaPage() {
             </motion.div>
           )}
 
-          {/* ANÁLISE POR PERÍODO DO DIA */}
           {periodosAnalise.length > 0 && (
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
@@ -1187,7 +1180,6 @@ export default function AnaliseMassaPage() {
             </motion.div>
           )}
 
-          {/* DASHBOARD DE IMPACTO */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
               <div className="flex items-center gap-3 mb-4">
@@ -1239,7 +1231,6 @@ export default function AnaliseMassaPage() {
             </div>
           </div>
 
-          {/* DIMENSIONAMENTO */}
           {dimensionamento && (
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-3xl border border-blue-200">
               <div className="flex items-center justify-between mb-6">
@@ -1371,7 +1362,6 @@ export default function AnaliseMassaPage() {
             </div>
           )}
 
-          {/* GRÁFICOS */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
               <h3 className="text-lg font-bold text-primary mb-6">Curva de Carga (kW)</h3>
@@ -1405,7 +1395,6 @@ export default function AnaliseMassaPage() {
             </div>
           </div>
 
-          {/* CARD DE OBSERVAÇÃO TÉCNICA */}
           {dimensionamento && (
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
@@ -1432,7 +1421,6 @@ export default function AnaliseMassaPage() {
             </motion.div>
           )}
 
-          {/* CONFIGURAÇÃO E RESUMO */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white p-6 rounded-3xl border border-slate-100">
               <h4 className="font-bold text-primary mb-4 flex items-center gap-2">
@@ -1502,7 +1490,6 @@ export default function AnaliseMassaPage() {
             </div>
           </div>
 
-          {/* TABELA DE REGISTROS CRÍTICOS */}
           <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
             <h3 className="text-lg font-bold text-primary mb-6 flex items-center gap-2">
               <AlertTriangle size={18} className="text-red-500" />
@@ -1533,7 +1520,7 @@ export default function AnaliseMassaPage() {
                         <td className="py-3 font-bold text-red-600">{row.kvar.toFixed(1)}</td>
                         <td className="py-3 font-bold text-red-500">{row.fp.toFixed(3)}</td>
                         <td className="py-3 text-slate-600">{row.kvarNecessario > 0 ? `${row.kvarNecessario.toFixed(0)} kVAr` : '-'}</td>
-                      </table>
+                      </tr>
                     ))}
                 </tbody>
               </table>
