@@ -1,15 +1,15 @@
 "use client";
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Swal from "sweetalert2";
 import { motion } from "motion/react";
-import { Zap, Mail, Lock, Building, CreditCard } from "lucide-react";
+import { Zap, Mail, Lock, Building } from "lucide-react";
 
 const PLANOS = [
-  { id: "essencial", nome: "Essencial", preco: "R$ 297/mês", descricao: "Até 5 clientes, 10 bancos, 50 capacitores" },
-  { id: "pro", nome: "Pro", preco: "R$ 597/mês", descricao: "Até 20 clientes, 50 bancos, 200 capacitores" },
-  { id: "enterprise", nome: "Enterprise", preco: "Sob consulta", descricao: "Clientes ilimitados + suporte prioritário" },
+  { id: "basico", nome: "Básico", preco: "R$ 149/mês", descricao: "1 cliente, 1 banco, 6 capacitores" },
+  { id: "essencial", nome: "Essencial", preco: "R$ 297/mês", descricao: "5 clientes, 10 bancos, 50 capacitores" },
+  { id: "pro", nome: "Pro", preco: "R$ 597/mês", descricao: "20 clientes, 50 bancos, 200 capacitores" },
+  { id: "master", nome: "Master", preco: "R$ 797/mês", descricao: "50+ clientes, bancos ilimitados" },
 ];
 
 export default function SignupPage() {
@@ -17,50 +17,28 @@ export default function SignupPage() {
   const [empresa, setEmpresa] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
-  const [plano, setPlano] = useState("essencial");
+  const [plano, setPlano] = useState("basico");
+  const [aceiteTermos, setAceiteTermos] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!aceiteTermos) {
+      Swal.fire("Aceite necessário", "Você precisa aceitar os Termos de Uso e a Política de Privacidade.", "warning");
+      return;
+    }
     setLoading(true);
 
     try {
-      // 1. Criar o tenant
-      const { data: tenant, error: tenantError } = await supabase
-        .from("tenants")
-        .insert({ 
-          name: empresa, 
-          email, 
-          plano, 
-          status: "active",
-          subdomain: empresa.toLowerCase().replace(/[^a-z0-9]/g, "-")
-        })
-        .select()
-        .single();
-
-      if (tenantError) throw tenantError;
-
-      // 2. Criar usuário no Supabase Auth
-      const { data: authUser, error: authError } = await supabase.auth.signUp({
-        email,
-        password: senha,
+      const response = await fetch("/api/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ empresa, email, senha, plano, aceiteTermos }),
       });
 
-      if (authError) throw authError;
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Erro ao criar conta");
 
-      if (!authUser.user) throw new Error("Erro ao criar usuário");
-
-      // 3. Criar perfil do usuário
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: authUser.user.id,
-        email,
-        role: "user",
-        tenant_id: tenant.id,
-      });
-
-      if (profileError) throw profileError;
-
-      // 4. Redirecionar para login com mensagem de sucesso
       await Swal.fire({
         title: "✅ Conta criada com sucesso!",
         text: "Faça login para acessar o sistema.",
@@ -69,8 +47,7 @@ export default function SignupPage() {
       });
       router.push("/login");
     } catch (error: any) {
-      console.error(error);
-      Swal.fire("Erro", error.message || "Não foi possível criar a conta.", "error");
+      Swal.fire("Erro", error.message, "error");
     } finally {
       setLoading(false);
     }
@@ -85,6 +62,7 @@ export default function SignupPage() {
           <p className="text-white/70 text-sm">Comece sua jornada</p>
         </div>
         <form onSubmit={handleSignup} className="p-6 space-y-4">
+          {/* Campos iguais ao original */}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Empresa *</label>
             <div className="relative">
@@ -123,7 +101,14 @@ export default function SignupPage() {
               ))}
             </div>
           </div>
-          <button type="submit" disabled={loading} className="w-full bg-primary text-white py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+          <div className="flex items-start gap-2">
+            <input type="checkbox" id="termos" checked={aceiteTermos} onChange={(e) => setAceiteTermos(e.target.checked)} className="mt-1 text-primary focus:ring-primary" />
+            <label htmlFor="termos" className="text-xs text-slate-600">
+              Li e aceito os <a href="/termos" target="_blank" className="text-primary hover:underline">Termos de Uso</a> e a{" "}
+              <a href="/privacidade" target="_blank" className="text-primary hover:underline">Política de Privacidade</a>.
+            </label>
+          </div>
+          <button type="submit" disabled={loading || !aceiteTermos} className="w-full bg-primary text-white py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
             {loading ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : "Criar conta"}
           </button>
           <p className="text-center text-xs text-slate-400">Já tem conta? <a href="/login" className="text-primary hover:underline">Faça login</a></p>

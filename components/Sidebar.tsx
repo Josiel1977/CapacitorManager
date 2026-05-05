@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { CreditCard } from 'lucide-react';
 import { 
   LayoutDashboard, Users, Database, Zap, ClipboardCheck, BarChart3, 
   History, FileText, Menu, X, Calculator, Activity, Play, BookOpen, 
@@ -17,6 +18,7 @@ const publicMenuItems = [
   { name: 'Como Usar', href: '/como-usar', icon: BookOpen },
   { name: 'Central de Ajuda', href: '/ajuda', icon: HelpCircle },
   { name: 'Solicitar Demo', href: '/signup', icon: Star },
+  
 ];
 
 // Itens privados (só aparecem quando logado)
@@ -25,6 +27,7 @@ const privateMenuItems = [
   { name: 'Clientes', href: '/clientes', icon: Users },
   { name: 'Bancos', href: '/bancos', icon: Database },
   { name: 'Capacitores', href: '/capacitores', icon: Zap },
+  { name:'Analise-fatura', href: '/analise-fatura', icon: Activity },
   { name: 'Dimensionar', href: '/dimensionar', icon: Calculator },
   { name: 'Realizar Teste', href: '/testes', icon: ClipboardCheck },
   { name: 'Gráficos', href: '/graficos', icon: BarChart3 },
@@ -33,6 +36,8 @@ const privateMenuItems = [
   { name: 'Manutenção Preditiva', href: '/manutencao', icon: Wrench },
   { name: 'Configurações', href: '/configuracoes', icon: Settings },
   { name: 'Documentação', href: '/documentacao', icon: BookOpen },
+  { name: 'Planos', href: '/planos', icon: CreditCard },
+  
 ];
 
 export default function Sidebar() {
