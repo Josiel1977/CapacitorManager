@@ -47,7 +47,7 @@ export default function PrivacidadePage() {
           <li>Revogar consentimentos anteriores (quando aplicável).</li>
           <li>Solicitar a portabilidade dos dados.</li>
         </ul>
-        <p>Para exercer seus direitos, entre em contato pelo e-mail <strong>contato@capacitormanager.com.br</strong>.</p>
+        <p>Para exercer seus direitos, entre em contato pelo e-mail <strong>suporte@capacitormanager.com.br</strong>.</p>
 
         <h2>7. Cookies</h2>
         <p>Utilizamos cookies de sessão para autenticação e preferências. Você pode desabilitar os cookies nas configurações do navegador, mas algumas funcionalidades podem ser afetadas.</p>
@@ -64,7 +64,7 @@ export default function PrivacidadePage() {
         <h2>11. Contato</h2>
         <p>Em caso de dúvidas sobre esta Política de Privacidade, entre em contato:</p>
         <p><strong>CapacitorManager</strong><br />
-        E-mail: contato@capacitormanager.com.br<br />
+        E-mail: suporte@capacitormanager.com.br<br />
         WhatsApp: (91) 98485-5557</p>
 
         <p className="mt-8 text-xs text-slate-400">Ao utilizar o CapacitorManager, você concorda com os termos desta Política de Privacidade.</p>
