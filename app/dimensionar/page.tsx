@@ -174,6 +174,7 @@ interface Fatura {
   dias_ciclo: number;
   concessionaria: string;
   tenant_id?: string;
+  fp_calculado?: number;
 }
 interface DistribuicaoTrafo {
   trafo_kva: number;
@@ -283,7 +284,10 @@ const calcularKvarNecessario = (
   kvar = Math.max(0, Math.ceil(kvar / 2.5) * 2.5);
   return kvar;
 };
-const distribuirEstagios = (totalKvar: number, numEstagios: number): number[] => {
+const distribuirEstagios = (
+  totalKvar: number,
+  numEstagios: number,
+): number[] => {
   // limita estágios entre 4 e 16 (mas para seu caso, 12 é bom)
   const n = Math.min(16, Math.max(4, numEstagios));
   // sequência padrão: 1, 2.5, 5, 10, 20, 40, 80, 160, 320, ...
@@ -320,15 +324,16 @@ const distribuirEstagios = (totalKvar: number, numEstagios: number): number[] =>
   }
 
   // 3. Correção final: garante que a soma seja exata (por causa de arredondamentos)
-  let somaFinal = stages.reduce((a,b)=>a+b,0);
+  let somaFinal = stages.reduce((a, b) => a + b, 0);
   if (Math.abs(somaFinal - totalKvar) > 0.01) {
     const diff = totalKvar - somaFinal;
-    stages[stages.length-1] += diff;
-    stages[stages.length-1] = Math.ceil(stages[stages.length-1] / 2.5) * 2.5;
+    stages[stages.length - 1] += diff;
+    stages[stages.length - 1] =
+      Math.ceil(stages[stages.length - 1] / 2.5) * 2.5;
   }
 
   // Remove valores negativos e zeros (segurança)
-  stages = stages.filter(s => s > 0);
+  stages = stages.filter((s) => s > 0);
   // Ordena crescente
   return stages.sort((a, b) => a - b);
 };
@@ -802,7 +807,7 @@ function DimensionarContent() {
         motivo_recomendacao: motivo,
         concessionaria_identificada: concessionarias[0] || "NÃO IDENTIFICADA",
         quantidade_faturas_analisadas: faturasProcessadas.length,
-        pior_mes: piorMes ? { ...piorMes, fp_calculado: piorMes.fp } : null,
+        pior_mes: piorMes || null,
         media_fp_por_mes: mediaFpPorMes,
         alertas: alertas,
         distribuicao_por_trafo: distribuicaoPorTrafo,
