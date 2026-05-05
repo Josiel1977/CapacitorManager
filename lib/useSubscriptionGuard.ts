@@ -17,9 +17,10 @@ export function useSubscriptionGuard(redirectTo: string = '/planos') {
     }
 
     const checkAccess = async () => {
+      // Busca perfil completo (role e subscription_status)
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('subscription_status')
+        .select('role, subscription_status')
         .eq('id', user.id)
         .single();
 
@@ -28,6 +29,12 @@ export function useSubscriptionGuard(redirectTo: string = '/planos') {
         return;
       }
 
+      // ADMIN: acesso total, sem verificar assinatura
+      if (profile.role === 'admin') {
+        return; // permite acesso
+      }
+
+      // Para não‑admin, verifica se assinatura está ativa
       if (profile.subscription_status !== 'active') {
         await Swal.fire({
           title: 'Acesso bloqueado',

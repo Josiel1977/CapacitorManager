@@ -21,7 +21,7 @@ const publicMenuItems = [
   { name: 'Solicitar Demo', href: '/signup', icon: Star },
 ];
 
-// Itens privados (só aparecem quando logado E com assinatura ativa)
+// Itens privados (só aparecem quando logado E com assinatura ativa OU for admin)
 const privateMenuItems = [
   { name: 'Dashboard', href: '/dimensionar', icon: LayoutDashboard },
   { name: 'Clientes', href: '/clientes', icon: Users },
@@ -48,7 +48,7 @@ export default function Sidebar() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const checkSubscription = async () => {
+    const checkAccess = async () => {
       if (!isAuthenticated || !user) {
         setSubscriptionActive(false);
         setChecking(false);
@@ -56,13 +56,19 @@ export default function Sidebar() {
       }
       const { data: profile } = await supabase
         .from('profiles')
-        .select('subscription_status')
+        .select('role, subscription_status')
         .eq('id', user.id)
         .single();
-      setSubscriptionActive(profile?.subscription_status === 'active');
+
+      if (profile?.role === 'admin') {
+        // Admin tem acesso total, independente de assinatura
+        setSubscriptionActive(true);
+      } else {
+        setSubscriptionActive(profile?.subscription_status === 'active');
+      }
       setChecking(false);
     };
-    checkSubscription();
+    checkAccess();
   }, [isAuthenticated, user]);
 
   if (isLoading || checking) {
@@ -123,7 +129,7 @@ export default function Sidebar() {
               );
             })}
 
-            {/* Menu Privado (somente se autenticado E com assinatura ativa) */}
+            {/* Menu Privado (somente se autenticado E com acesso liberado) */}
             {isAuthenticated && subscriptionActive && (
               <div className="mt-4 space-y-1">
                 <div className="my-2 h-px bg-white/10" />
@@ -158,7 +164,7 @@ export default function Sidebar() {
               </div>
             )}
 
-            {/* Se autenticado mas sem assinatura ativa, mostra botão para assinar */}
+            {/* Se autenticado mas sem acesso (não admin e assinatura inativa) */}
             {isAuthenticated && !subscriptionActive && (
               <div className="mt-4 space-y-1">
                 <div className="my-2 h-px bg-white/10" />
