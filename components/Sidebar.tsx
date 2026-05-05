@@ -1,3 +1,4 @@
+// components/Sidebar.tsx (trecho corrigido - início do arquivo)
 'use client';
 
 import React, { useEffect, useState } from 'react';
@@ -7,21 +8,22 @@ import { CreditCard } from 'lucide-react';
 import { 
   LayoutDashboard, Users, Database, Zap, ClipboardCheck, BarChart3, 
   History, FileText, Menu, X, Calculator, Activity, Play, BookOpen, 
-  Settings, Wrench, LogOut, HelpCircle, Star, LogIn
+  Settings, Wrench, LogOut, HelpCircle, Star, LogIn, Shield  // ← Adicione Shield aqui
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
 
 // Itens públicos (sempre visíveis)
-// Itens públicos (sempre visíveis)
 const publicMenuItems = [
   { name: 'Demonstração', href: '/demo', icon: Play },
   { name: 'Como Usar', href: '/como-usar', icon: BookOpen },
   { name: 'Central de Ajuda', href: '/ajuda', icon: HelpCircle },
   { name: 'Solicitar Demo', href: '/signup', icon: Star },
-  { name: 'Privacidade', href: '/privacidade', icon: Shield }, // ← adicionado
+  { name: 'Privacidade', href: '/privacidade', icon: Shield }, // ← Agora Shield está importado
 ];
+
+// ... o resto do código permanece igual
 
 // Itens privados (só aparecem quando logado E com assinatura ativa OU for admin)
 const privateMenuItems = [
