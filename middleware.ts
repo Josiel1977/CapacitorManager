@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-export async function updateSession(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -28,6 +28,7 @@ export async function updateSession(request: NextRequest) {
     '/manutencao', '/configuracoes', '/documentacao',
     '/dashboard-real', '/analise-massa', '/subscription/success'
   ];
+  
   const isProtectedRoute = protectedRoutes.some(route => request.nextUrl.pathname.startsWith(route));
   const authRoutes = ['/login', '/signup'];
   const isAuthRoute = authRoutes.includes(request.nextUrl.pathname);
