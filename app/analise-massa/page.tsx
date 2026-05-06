@@ -512,7 +512,6 @@ const processarArquivo = async (
               dataStr = parts[0];
               horaStr = parts[1] || "00:00";
             }
-            // Corrigindo erro de tipagem nos map com parâmetros explícitos
             const dataFormatada = dataStr.split("/").slice(0, 2).map((p: string) => p.padStart(2, "0")).join("/");
             const horaFormatada = horaStr.includes(":")
               ? horaStr.split(":").slice(0, 2).map((p: string) => p.padStart(2, "0")).join(":")
@@ -921,8 +920,8 @@ export default function AnaliseMassaPage() {
             id="report-content"
             className="space-y-8"
           >
-            {/* Alertas de multa */}
-            {stats?.multaIndutiva > 0 && (
+            {/* Alertas de multa - corrigidos com checagem explícita */}
+            {stats && stats.multaIndutiva > 0 && (
               <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-xl mb-6">
                 <div className="flex items-start gap-3">
                   <Zap size={20} className="text-red-600 mt-0.5 flex-shrink-0" />
@@ -939,7 +938,7 @@ export default function AnaliseMassaPage() {
                 </div>
               </div>
             )}
-            {stats?.multaCapacitiva > 0 && (
+            {stats && stats.multaCapacitiva > 0 && (
               <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-xl mb-6">
                 <div className="flex items-start gap-3">
                   <Battery size={20} className="text-blue-600 mt-0.5 flex-shrink-0" />
@@ -1208,7 +1207,7 @@ export default function AnaliseMassaPage() {
                       .slice(0, 10)
                       .map((row, idx) => (
                         <tr key={idx} className="text-sm hover:bg-slate-50 transition-colors">
-                          <td className="py-3 font-medium text-slate-700">{row.data} {row.hora}</td>
+                          <td className="py-3 font-medium text-slate-700">{row.data} {row.hora}</tr>
                           <td className="py-3 text-slate-600">{row.diaSemana || "-"}</td>
                           <td className="py-3 text-slate-600">{row.kw.toFixed(1)}</td>
                           <td className="py-3 font-bold text-red-600">{row.kvar.toFixed(1)}</td>
@@ -1217,7 +1216,7 @@ export default function AnaliseMassaPage() {
                         </tr>
                       ))}
                   </tbody>
-                </table>
+                <table>
               </div>
             </div>
           </motion.div>
