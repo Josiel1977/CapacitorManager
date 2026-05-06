@@ -1490,10 +1490,10 @@ export default function AnaliseMassaPage() {
             </div>
           </div>
 
-                    <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
+          <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
             <h3 className="text-lg font-bold text-primary mb-6 flex items-center gap-2">
               <AlertTriangle size={18} className="text-red-500" />
-              Top 10 Registros com Maior Criticidade
+              Top 10 Registros com Maior Críticidade
             </h3>
             <div className="overflow-x-auto">
               <table className="w-full text-left">
@@ -1527,7 +1527,7 @@ export default function AnaliseMassaPage() {
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
