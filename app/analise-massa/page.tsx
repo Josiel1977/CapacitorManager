@@ -749,7 +749,7 @@ export default function AnaliseMassaPage() {
                     "ch1",
                     "ch 1",
                   ]),
-                )/ 1000;
+                )/ 100;
                 let kvar = parseBrazilianNumber(
                   getVal([
                     "kvar indutivo",
@@ -763,7 +763,7 @@ export default function AnaliseMassaPage() {
                     "ch2",
                     "ch 2",
                   ]),
-                )/ 1000;
+                )/ 100;
 
                 const tipoReativo: "indutivo" | "capacitivo" | "neutro" =
                   kvar > 0.01
