@@ -532,48 +532,25 @@ const gerarEstagiosCapacitores = (totalKvar: number): number[] => {
 };
 
 // ============================================================================
-// PARSING DE ARQUIVOS - VERSÃO UNIFICADA E ROBUSTA
+// PARSING DE ARQUIVOS
 // ============================================================================
 
-/**
- * Detecta o formato do arquivo baseado nas primeiras linhas
- */
 const detectarFormato = (content: string): "landis" | "equatorial" | "padrao" => {
   const firstLines = content.split("\n").slice(0, 50).join(" ").toLowerCase();
   
-  // Landis+Gyr: contém "reg.;data;hora;kw" ou "landis+gyr"
   if (firstLines.includes("landis+gyr") || 
       firstLines.includes("reg.;data;hora;kw") ||
       (firstLines.includes("reg.") && firstLines.includes("kvarind"))) {
     return "landis";
   }
   
-  // Equatorial: contém "kw fornecido" e "kvar indutivo" e "data" no cabeçalho
   if (firstLines.includes("kw fornecido") && firstLines.includes("kvar indutivo")) {
     return "equatorial";
   }
   
-  // Padrão: tenta tratar como CSV genérico
   return "padrao";
 };
 
-/**
- * Encontra a linha de cabeçalho real ignorando linhas de comentário e vazias
- */
-const encontrarLinhaCabecalho = (lines: string[], palavrasChave: string[]): number => {
-  for (let i = 0; i < Math.min(lines.length, 100); i++) {
-    const line = lines[i].toLowerCase();
-    if (line.startsWith("'") || line.trim() === "") continue;
-    if (palavrasChave.some(keyword => line.includes(keyword))) {
-      return i;
-    }
-  }
-  return -1;
-};
-
-/**
- * Processa qualquer arquivo usando PapaParse com detecção dinâmica de colunas
- */
 const processarArquivoUniversal = async (
   content: string,
   targetFP: number,
@@ -588,7 +565,12 @@ const processarArquivoUniversal = async (
         const rows = parseResult.data as any[];
         const results: MassMemoryData[] = [];
         
-        // Identificar colunas disponíveis (normalizando nomes)
+        if (rows.length === 0) {
+          resolve({ dados: [], intervaloAmostragem: 15, totalRegistros: 0 });
+          return;
+        }
+        
+        // Normalizar chaves
         const colunas = Object.keys(rows[0] || {}).map(k => k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
         
         const mapearColuna = (possibilidades: string[]): string | null => {
@@ -709,123 +691,6 @@ const processarArquivoUniversal = async (
   });
 };
 
-/**
- * Processamento específico para arquivos Landis+Gyr (fallback se o universal falhar)
- */
-const processarArquivoLandis = (
-  content: string,
-  targetFP: number,
-): ProcessamentoResultado => {
-  const results: MassMemoryData[] = [];
-  const lines = content.split("\n");
-  
-  let headerLineIndex = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].toLowerCase();
-    if (line.includes("reg.;data;hora;kw") || 
-        (line.includes("reg.") && line.includes("kvarind"))) {
-      headerLineIndex = i;
-      break;
-    }
-  }
-  
-  if (headerLineIndex === -1) {
-    return { dados: [], intervaloAmostragem: 15, totalRegistros: 0 };
-  }
-  
-  for (let i = headerLineIndex + 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line || line.startsWith("'") || line.startsWith("Disponibilidades") || 
-        line.startsWith("Total") || line.startsWith("Sumariza")) {
-      continue;
-    }
-    
-    const parts = line.split(";");
-    if (parts.length < 5) continue;
-    
-    try {
-      let idxData = 1, idxHora = 2, idxKW = 3;
-      let idxKvarInd = 5, idxKvarCap = 7, idxFP = 11;
-      
-      if (parts.length <= idxKvarInd) {
-        idxData = 1; idxHora = 2; idxKW = 3; idxKvarInd = 4; idxKvarCap = 5; idxFP = 6;
-      }
-      
-      const dataRaw = idxData < parts.length ? parts[idxData] : "";
-      const horaRaw = idxHora < parts.length ? parts[idxHora] : "00:00";
-      const kw = parseNumeroBrasileiro(parts[idxKW]);
-      const kvarInd = parseNumeroBrasileiro(parts[idxKvarInd]);
-      const kvarCap = parseNumeroBrasileiro(idxKvarCap < parts.length ? parts[idxKvarCap] : "0");
-      
-      if (kw === 0 && kvarInd === 0 && kvarCap === 0) continue;
-      
-      let kvar = kvarInd - kvarCap;
-      
-      const tipoReativo: MassMemoryData["tipoReativo"] =
-        kvar > 0.01 ? "indutivo" : kvar < -0.01 ? "capacitivo" : "neutro";
-      
-      const kvarAbs = Math.abs(kvar);
-      const fpCalculado = calcularFP(kw, kvarAbs);
-      
-      let fpFinal = fpCalculado;
-      if (idxFP < parts.length && parts[idxFP]) {
-        let fpValor = parseNumeroBrasileiro(parts[idxFP]);
-        if (fpValor > 1 && fpValor <= 100) fpValor = fpValor / 100;
-        if (fpValor > 0 && fpValor <= 1) fpFinal = fpValor;
-      }
-      
-      let dataFormatada = dataRaw;
-      if (dataRaw && dataRaw.includes("/")) {
-        const partes = dataRaw.split("/");
-        if (partes.length >= 2) {
-          dataFormatada = `${partes[0].padStart(2, "0")}/${partes[1].padStart(2, "0")}`;
-        }
-      }
-      
-      let horaFormatada = horaRaw;
-      if (horaRaw && !horaRaw.includes(":")) {
-        horaFormatada = `${horaRaw.padStart(2, "0")}:00`;
-      } else if (horaRaw && horaRaw.split(":").length === 2) {
-        const [h, m] = horaRaw.split(":");
-        horaFormatada = `${h.padStart(2, "0")}:${m.padStart(2, "0")}`;
-      }
-      
-      const timestamp = `${dataFormatada}T${horaFormatada}`;
-      const diaSemana = getDiaSemana(dataFormatada);
-      const kvarNecessario = tipoReativo === "indutivo" && fpFinal < targetFP
-        ? calcularCorrecaoNecessaria(kw, fpFinal, targetFP)
-        : 0;
-      const isHorarioCritico = tipoReativo === "indutivo" && kvarAbs > 5 && fpFinal < targetFP;
-      
-      results.push({
-        data: dataFormatada,
-        hora: horaFormatada,
-        timestamp,
-        kw,
-        kvar: kvarAbs,
-        fp: Math.round(fpFinal * 100) / 100,
-        kvarNecessario,
-        tipoReativo,
-        isHorarioCritico,
-        diaSemana,
-      });
-    } catch (error) {
-      console.warn(`Erro ao processar linha ${i}:`, error);
-      continue;
-    }
-  }
-  
-  const intervalo = detectarIntervaloAmostragem(results);
-  return {
-    dados: results,
-    intervaloAmostragem: intervalo,
-    totalRegistros: results.length,
-  };
-};
-
-/**
- * Processamento específico para Equatorial (fallback)
- */
 const processarArquivoEquatorial = (
   content: string,
   targetFP: number,
@@ -920,9 +785,6 @@ const processarArquivoEquatorial = (
   };
 };
 
-/**
- * Função principal de processamento - tenta universal primeiro, fallback para específicos
- */
 const processarArquivo = async (
   content: string,
   targetFP: number,
@@ -930,15 +792,11 @@ const processarArquivo = async (
   const formato = detectarFormato(content);
   console.log("Formato detectado:", formato);
   
-  // Tentar primeiro o parser universal (mais robusto)
   let resultado = await processarArquivoUniversal(content, targetFP);
   
-  // Se falhar ou retornar poucos dados, tentar parser específico
   if (resultado.dados.length === 0) {
     console.log("Parser universal falhou, tentando parser específico...");
-    if (formato === "landis") {
-      resultado = processarArquivoLandis(content, targetFP);
-    } else if (formato === "equatorial") {
+    if (formato === "equatorial") {
       resultado = processarArquivoEquatorial(content, targetFP);
     }
   }
@@ -2100,7 +1958,7 @@ export default function AnaliseMassaPage() {
                           <td className="py-3 text-slate-600">
                             {row.kvarNecessario > 0 ? `${row.kvarNecessario.toFixed(0)} kVAr` : "-"}
                           </td>
-                        <tr>
+                        </tr>
                       ))}
                   </tbody>
                 </table>
