@@ -11,6 +11,7 @@ import {
   TrendingUp,
   Zap,
   DollarSign,
+  Info,
   CheckCircle2,
   Download,
   Cpu,
