@@ -403,24 +403,61 @@ const processarArquivo = async (content: string, targetFP: number): Promise<Mass
           resolve(results);
           return;
         }
-        const colunas = Object.keys(rows[0] || {}).map((k) => k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
-        const mapearColuna = (possibilidades: string[]): string | null => {
-          for (const poss of possibilidades) {
-            const normalized = poss.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            const encontrada = colunas.find((c) => c.includes(normalized));
-            if (encontrada) return encontrada;
-          }
-          return null;
-        };
-        const colData = mapearColuna(["data", "date", "medicao data"]);
-        const colHora = mapearColuna(["hora", "time", "horario", "hora medicao"]);
-        const colKW = mapearColuna(["kw fornecido", "ativa(kw)", "kw", "ativa", "demanda ativa", "potencia ativa"]);
-        const colKvarInd = mapearColuna(["kvar indutivo", "kvarind", "kvar ind"]);
-        const colKvarCap = mapearColuna(["kvar capacitivo", "kvarcap", "kvar cap"]);
+
+        // Obter as chaves (nomes das colunas) originais
+        const colunasOriginais = Object.keys(rows[0] || {});
+        console.log("Colunas encontradas:", colunasOriginais);
+
+        // Função para normalizar (minusculas, sem acentos)
+        const normalizar = (str: string) =>
+          str
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .trim();
+
+        const colunasNormalizadas = colunasOriginais.map(normalizar);
+
+        // Mapear coluna de kW: busca por "kw", "ativa", "demanda ativa", "potencia ativa"
+        let colKW = colunasOriginais.find((_, idx) => {
+          const norm = colunasNormalizadas[idx];
+          return (
+            (norm.includes("kw") || norm.includes("ativa") || norm.includes("demanda ativa") || norm.includes("potencia ativa")) &&
+            !norm.includes("recebido")
+          );
+        });
+
+        // Se não achar, tenta a primeira que contenha "kw"
         if (!colKW) {
-          reject(new Error("Coluna de kW não encontrada"));
+          colKW = colunasOriginais.find((_, idx) => colunasNormalizadas[idx].includes("kw"));
+        }
+
+        if (!colKW) {
+          reject(new Error("Coluna de kW não encontrada. Colunas disponíveis: " + colunasOriginais.join(", ")));
           return;
         }
+
+        // Mapear coluna de data/hora
+        let colData = colunasOriginais.find((_, idx) => colunasNormalizadas[idx].includes("data"));
+        let colHora = colunasOriginais.find((_, idx) => colunasNormalizadas[idx].includes("hora"));
+
+        // Se não houver coluna de hora separada, pode estar junto com a data
+        if (!colHora && colData) {
+          // Verificar se a coluna de data já contém hora (ex: "01/08/2023 00:15")
+          const primeiraData = rows[0]?.[colData] || "";
+          if (primeiraData.includes(" ")) {
+            // Usaremos a mesma coluna para data e hora
+            colHora = colData;
+          }
+        }
+
+        // Mapear colunas de reativo
+        let colKvarInd = colunasOriginais.find((_, idx) => colunasNormalizadas[idx].includes("kvar indutivo"));
+        let colKvarCap = colunasOriginais.find((_, idx) => colunasNormalizadas[idx].includes("kvar capacitivo"));
+        let colKvar = colunasOriginais.find((_, idx) => colunasNormalizadas[idx].includes("kvar") && !colunasNormalizadas[idx].includes("indutivo") && !colunasNormalizadas[idx].includes("capacitivo"));
+
+        console.log("Colunas identificadas:", { colKW, colData, colHora, colKvarInd, colKvarCap, colKvar });
+
         for (const row of rows) {
           try {
             const kw = parseNumeroBrasileiro(row[colKW]);
@@ -429,18 +466,21 @@ const processarArquivo = async (content: string, targetFP: number): Promise<Mass
               const kvarInd = parseNumeroBrasileiro(row[colKvarInd]);
               const kvarCap = parseNumeroBrasileiro(row[colKvarCap]);
               kvar = kvarInd - kvarCap;
-            } else {
-              const colKvar = mapearColuna(["kvar", "reativa(kvar)", "reativa", "potencia reativa"]);
-              if (colKvar) kvar = parseNumeroBrasileiro(row[colKvar]);
+            } else if (colKvar) {
+              kvar = parseNumeroBrasileiro(row[colKvar]);
             }
             if (kw === 0 && Math.abs(kvar) < 0.01) continue;
+
             let dataStr = colData ? row[colData] : "";
             let horaStr = colHora ? row[colHora] : "00:00";
-            if (dataStr && dataStr.includes(" ") && !horaStr) {
-              const parts = dataStr.split(" ");
-              dataStr = parts[0];
-              horaStr = parts[1] || "00:00";
+
+            // Se data e hora estão na mesma coluna
+            if (colHora === colData && dataStr.includes(" ")) {
+              const [d, h] = dataStr.split(" ");
+              dataStr = d;
+              horaStr = h;
             }
+
             const dataFormatada = dataStr.split("/").slice(0, 2).map((p: string) => p.padStart(2, "0")).join("/");
             const horaFormatada = horaStr.includes(":")
               ? horaStr.split(":").slice(0, 2).map((p: string) => p.padStart(2, "0")).join(":")
@@ -449,9 +489,11 @@ const processarArquivo = async (content: string, targetFP: number): Promise<Mass
             const tipoReativo: MassMemoryData["tipoReativo"] = kvar > 0.01 ? "indutivo" : kvar < -0.01 ? "capacitivo" : "neutro";
             const kvarAbs = Math.abs(kvar);
             const fp = calcularFP(kw, kvarAbs);
-            const kvarNecessario = tipoReativo === "indutivo" && fp < targetFP ? calcularCorrecaoNecessaria(kw, fp, targetFP) : 0;
+            const kvarNecessario =
+              tipoReativo === "indutivo" && fp < targetFP ? calcularCorrecaoNecessaria(kw, fp, targetFP) : 0;
             const isHorarioCritico = tipoReativo === "indutivo" && kvarAbs > 5 && fp < targetFP;
             const diaSemana = getDiaSemana(dataFormatada);
+
             results.push({
               data: dataFormatada,
               hora: horaFormatada,
