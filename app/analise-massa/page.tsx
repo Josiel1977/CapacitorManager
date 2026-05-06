@@ -113,7 +113,7 @@ interface PeriodoAnalise {
   percentualCritico: number;
   fpMedio: number;
   kvarMedio: number;
-  nivelCriticidade: "NORMAL" | "ATENÇÃO" | "CRÍTICO";
+  nivelCriticidade: "NORMAL" | "ATENCAO" | "CRITICO";
 }
 
 interface AnaliseDiaSemana {
@@ -134,26 +134,26 @@ interface ProcessamentoResultado {
 // ============================================================================
 const DIAS_SEMANA = [
   "Segunda",
-  "Terça",
+  "Terca",
   "Quarta",
   "Quinta",
   "Sexta",
-  "Sábado",
+  "Sabado",
   "Domingo",
 ];
 
 const PERIODOS_DIA = [
   { nome: "Madrugada (00:00 - 06:00)", inicio: 0, fim: 6, cor: "bg-slate-100" },
-  { nome: "Início da Manhã (06:00 - 09:00)", inicio: 6, fim: 9, cor: "bg-blue-50" },
-  { nome: "Meio da Manhã (09:00 - 12:00)", inicio: 9, fim: 12, cor: "bg-red-50" },
-  { nome: "Início da Tarde (12:00 - 15:00)", inicio: 12, fim: 15, cor: "bg-orange-50" },
+  { nome: "Inicio da Manha (06:00 - 09:00)", inicio: 6, fim: 9, cor: "bg-blue-50" },
+  { nome: "Meio da Manha (09:00 - 12:00)", inicio: 9, fim: 12, cor: "bg-red-50" },
+  { nome: "Inicio da Tarde (12:00 - 15:00)", inicio: 12, fim: 15, cor: "bg-orange-50" },
   { nome: "Final da Tarde (15:00 - 18:00)", inicio: 15, fim: 18, cor: "bg-amber-50" },
   { nome: "Noite (18:00 - 22:00)", inicio: 18, fim: 22, cor: "bg-purple-50" },
   { nome: "Final da Noite (22:00 - 00:00)", inicio: 22, fim: 24, cor: "bg-slate-100" },
 ];
 
 // ============================================================================
-// FUNÇÕES UTILITÁRIAS
+// FUNCOES UTILITARIAS
 // ============================================================================
 
 const getDiaSemana = (dataStr: string): string => {
@@ -192,11 +192,9 @@ const parseNumeroBrasileiro = (valor: any): number => {
   const str = String(valor).trim();
   if (!str || str === "-" || str === "#VALOR!" || str === "#DIV/0!") return 0;
   
-  // Remove pontos de milhar e troca vírgula decimal por ponto
   let numeroStr = str.replace(/\./g, "");
   numeroStr = numeroStr.replace(",", ".");
   
-  // Extrai apenas números, ponto e sinal negativo
   const match = numeroStr.match(/-?\d+(?:\.\d+)?/);
   if (!match) return 0;
   
@@ -399,8 +397,8 @@ const analisarPeriodosCriticos = (
       const percentualCritico = (registrosCriticos.length / registrosPeriodo.length) * 100;
 
       let nivelCriticidade: PeriodoAnalise["nivelCriticidade"] = "NORMAL";
-      if (percentualCritico > 50) nivelCriticidade = "CRÍTICO";
-      else if (percentualCritico > 25) nivelCriticidade = "ATENÇÃO";
+      if (percentualCritico > 50) nivelCriticidade = "CRITICO";
+      else if (percentualCritico > 25) nivelCriticidade = "ATENCAO";
 
       return {
         ...periodo,
@@ -448,16 +446,16 @@ const analisarDimensionamento = (
 
   if (periodosCriticos.length === 0) {
     tipoRecomendado = "fixo";
-    justificativa = "✅ Sistema já está conforme. Nenhum banco adicional necessário.";
+    justificativa = "Sistema ja esta conforme. Nenhum banco adicional necessario.";
   } else if (percentualTempoCritico > 70 && coeficienteVariacao < 0.3) {
     tipoRecomendado = "fixo";
-    justificativa = `📊 Carga estável (CV=${coeficienteVariacao.toFixed(2)}) com FP baixo constante (${percentualTempoCritico.toFixed(1)}% do tempo). Banco fixo é mais econômico.`;
+    justificativa = `Carga estavel (CV=${coeficienteVariacao.toFixed(2)}) com FP baixo constante (${percentualTempoCritico.toFixed(1)}% do tempo). Banco fixo e mais economico.`;
   } else if (coeficienteVariacao > 0.6 || percentualTempoCritico < 40) {
     tipoRecomendado = "automatico";
-    justificativa = `🔄 Alta variabilidade (CV=${coeficienteVariacao.toFixed(2)}) ou ocorrência intermitente. Banco automático com múltiplos estágios evita sobrecorreção.`;
+    justificativa = `Alta variabilidade (CV=${coeficienteVariacao.toFixed(2)}) ou ocorrencia intermitente. Banco automatico com multiplos estagios evita sobrecorrecao.`;
   } else {
     tipoRecomendado = "hibrido";
-    justificativa = `⚖️ Variabilidade moderada (CV=${coeficienteVariacao.toFixed(2)}). Banco híbrido (fixo + automático) oferece melhor relação custo-benefício.`;
+    justificativa = `Variabilidade moderada (CV=${coeficienteVariacao.toFixed(2)}). Banco hibrido (fixo + automatico) oferece melhor relacao custo-beneficio.`;
   }
 
   let bancoSugeridoFixo = Math.ceil(Math.max(mediaKvarCritico, percentil90KvarCritico * 0.6) / 5) * 5;
@@ -469,7 +467,7 @@ const analisarDimensionamento = (
   if (alertaTransformador) {
     bancoSugeridoAutomatico = Math.floor(limiteInstalado / 5) * 5;
     bancoSugeridoFixo = Math.min(bancoSugeridoFixo, bancoSugeridoAutomatico);
-    justificativa += ` ⚠️ ATENÇÃO: O dimensionamento excedia 40% da potência instalada (${potenciaInstalada} kVA). Valor limitado por segurança.`;
+    justificativa += ` ATENCAO: O dimensionamento excedia 40% da potencia instalada (${potenciaInstalada} kVA). Valor limitado por seguranca.`;
   }
 
   const orcamentoEstimado = estimarOrcamento(
@@ -534,21 +532,18 @@ const gerarEstagiosCapacitores = (totalKvar: number): number[] => {
 };
 
 // ============================================================================
-// PARSING DE ARQUIVOS - VERSÃO CORRIGIDA PARA LER TODOS OS FORMATOS
+// PARSING DE ARQUIVOS
 // ============================================================================
 
-// Detectar formato do arquivo baseado no cabeçalho
 const detectarFormato = (content: string): "landis" | "equatorial" | "padrao" => {
   const firstLines = content.split("\n").slice(0, 20).join(" ").toLowerCase();
   
-  // Formato Landis+Gyr (memória de massa)
   if (firstLines.includes("landis+gyr") || 
       firstLines.includes("reg.;data;hora;kw") ||
       (firstLines.includes("reg.") && firstLines.includes("kvarind"))) {
     return "landis";
   }
   
-  // Formato Equatorial (contém "kw fornecido;kvar indutivo")
   if (firstLines.includes("kw fornecido") && firstLines.includes("kvar indutivo")) {
     return "equatorial";
   }
@@ -556,7 +551,6 @@ const detectarFormato = (content: string): "landis" | "equatorial" | "padrao" =>
   return "padrao";
 };
 
-// Processar formato Landis+Gyr (memória de massa)
 const processarArquivoLandis = (
   content: string,
   targetFP: number,
@@ -564,7 +558,6 @@ const processarArquivoLandis = (
   const results: MassMemoryData[] = [];
   const lines = content.split("\n");
   
-  // Encontrar linha de cabeçalho
   let headerLineIndex = -1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].toLowerCase();
@@ -576,7 +569,6 @@ const processarArquivoLandis = (
   }
   
   if (headerLineIndex === -1) {
-    // Tentar encontrar cabeçalho alternativo
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].toLowerCase();
       if (line.includes("data") && line.includes("hora") && line.includes("kw")) {
@@ -590,7 +582,6 @@ const processarArquivoLandis = (
     return { dados: [], intervaloAmostragem: 15, totalRegistros: 0 };
   }
   
-  // Processar linhas de dados
   for (let i = headerLineIndex + 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line || line.startsWith("'") || line.startsWith("Disponibilidades") || 
@@ -598,19 +589,14 @@ const processarArquivoLandis = (
       continue;
     }
     
-    // Dividir por ponto e vírgula
     const parts = line.split(";");
     if (parts.length < 5) continue;
     
     try {
-      // Extrair dados baseado nas posições do formato Landis
-      // Padrão esperado: Reg.;Data;Hora;kW;C1;kvarIND;C2;kvarCAP;C3;SH;SR;FPot.;DCR;UFER
-      let idxReg = 0, idxData = 1, idxHora = 2, idxKW = 3;
+      let idxData = 1, idxHora = 2, idxKW = 3;
       let idxKvarInd = 5, idxKvarCap = 7, idxFP = 11;
       
-      // Se o cabeçalho tem menos colunas, ajustar
       if (parts.length <= idxKvarInd) {
-        // Tentar detectar posições alternativas
         idxData = 1; idxHora = 2; idxKW = 3; idxKvarInd = 4; idxKvarCap = 5; idxFP = 6;
       }
       
@@ -635,11 +621,9 @@ const processarArquivoLandis = (
       const kvarAbs = Math.abs(kvar);
       const fpCalculado = calcularFP(kw, kvarAbs);
       
-      // Tentar extrair FP da coluna específica
       let fpFinal = fpCalculado;
       if (fpRaw) {
         let fpValor = parseNumeroBrasileiro(fpRaw);
-        // Se veio como "83 L" ou "83 C", extrair número
         if (typeof fpRaw === "string") {
           const match = fpRaw.match(/(\d+)/);
           if (match) fpValor = parseInt(match[1]);
@@ -648,7 +632,6 @@ const processarArquivoLandis = (
         if (fpValor > 0 && fpValor <= 1) fpFinal = fpValor;
       }
       
-      // Formatar data
       let dataFormatada = dataRaw;
       if (dataRaw && dataRaw.includes("/")) {
         const partes = dataRaw.split("/");
@@ -657,7 +640,6 @@ const processarArquivoLandis = (
         }
       }
       
-      // Formatar hora (pode vir como "07:30" ou "7:30")
       let horaFormatada = horaRaw;
       if (horaRaw && !horaRaw.includes(":")) {
         horaFormatada = `${horaRaw.padStart(2, "0")}:00`;
@@ -700,7 +682,6 @@ const processarArquivoLandis = (
   };
 };
 
-// Processar formato Equatorial (Demanda - PREMAZON...)
 const processarArquivoEquatorial = (
   content: string,
   targetFP: number,
@@ -708,7 +689,6 @@ const processarArquivoEquatorial = (
   const results: MassMemoryData[] = [];
   const lines = content.split("\n");
   
-  // Encontrar cabeçalho
   let headerLineIndex = -1;
   for (let i = 0; i < Math.min(lines.length, 50); i++) {
     const line = lines[i].toLowerCase();
@@ -722,7 +702,6 @@ const processarArquivoEquatorial = (
     return { dados: [], intervaloAmostragem: 15, totalRegistros: 0 };
   }
   
-  // Processar linhas de dados
   for (let i = headerLineIndex + 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line || line.startsWith("'") || line.startsWith("Disponibilidades") || 
@@ -798,7 +777,6 @@ const processarArquivoEquatorial = (
   };
 };
 
-// Processar formato padrão genérico
 const processarArquivoPadrao = (
   content: string,
   targetFP: number,
@@ -922,13 +900,11 @@ const processarArquivoPadrao = (
   });
 };
 
-// Função principal de processamento
 const processarArquivo = async (
   content: string,
   targetFP: number,
 ): Promise<ProcessamentoResultado> => {
   const formato = detectarFormato(content);
-  
   console.log("Formato detectado:", formato);
   
   if (formato === "landis") {
@@ -957,21 +933,20 @@ const AlertaMultaCapacitiva = ({ multaCapacitiva }: { multaCapacitiva: number })
         <Battery size={20} className="text-blue-600 mt-0.5 flex-shrink-0" />
         <div>
           <p className="text-sm font-bold text-blue-800">
-            ⚠️ ATENÇÃO: Multa por Reativo Capacitivo Detectada!
+            ATENCAO: Multa por Reativo Capacitivo Detectada!
           </p>
           <p className="text-sm text-blue-700 mt-1">
-            Sua instalação está com <strong>SOBRECORREÇÃO</strong>. O reativo
-            capacitivo está gerando multa de{" "}
+            Sua instalacao esta com <strong>SOBRECORRECAO</strong>. O reativo
+            capacitivo esta gerando multa de{" "}
             <strong>
               R$ {multaCapacitiva.toLocaleString("pt-BR", {
                 minimumFractionDigits: 2,
               })}
             </strong>{" "}
-            no período analisado.
+            no periodo analisado.
           </p>
           <p className="text-xs text-blue-600 mt-2">
-            💡 <strong>Solução:</strong> Desligue ou reduza o banco de
-            capacitores existente. NÃO adicione mais capacitores.
+            Solucao: Desligue ou reduza o banco de capacitores existente. NAO adicione mais capacitores.
           </p>
         </div>
       </div>
@@ -992,20 +967,19 @@ const AlertaMultaIndutiva = ({ multaIndutiva }: { multaIndutiva: number }) => {
         <Zap size={20} className="text-red-600 mt-0.5 flex-shrink-0" />
         <div>
           <p className="text-sm font-bold text-red-800">
-            ⚠️ Multa por Reativo Indutivo Detectada!
+            ATENCAO: Multa por Reativo Indutivo Detectada!
           </p>
           <p className="text-sm text-red-700 mt-1">
-            O reativo indutivo está gerando multa de{" "}
+            O reativo indutivo esta gerando multa de{" "}
             <strong>
               R$ {multaIndutiva.toLocaleString("pt-BR", {
                 minimumFractionDigits: 2,
               })}
             </strong>{" "}
-            no período analisado.
+            no periodo analisado.
           </p>
           <p className="text-xs text-red-600 mt-2">
-            💡 <strong>Solução:</strong> Instale um banco de capacitores para
-            corrigir o fator de potência.
+            Solucao: Instale um banco de capacitores para corrigir o fator de potencia.
           </p>
         </div>
       </div>
@@ -1044,8 +1018,8 @@ export default function AnaliseMassaPage() {
   const handleRecalcular = useCallback(() => {
     setRecalcKey((prev) => prev + 1);
     Swal.fire({
-      title: "✅ Análise Recalculada!",
-      text: `Dimensionamento atualizado com potência instalada de ${potenciaInstalada} kVA`,
+      title: "Analise Recalculada!",
+      text: `Dimensionamento atualizado com potencia instalada de ${potenciaInstalada} kVA`,
       icon: "success",
       timer: 2000,
       showConfirmButton: false,
@@ -1055,7 +1029,7 @@ export default function AnaliseMassaPage() {
   const handleClearData = useCallback(() => {
     Swal.fire({
       title: "Limpar dados?",
-      text: "Todos os dados serão removidos do sistema.",
+      text: "Todos os dados serao removidos do sistema.",
       icon: "warning",
       showCancelButton: true,
       confirmButtonText: "Sim, limpar",
@@ -1066,7 +1040,7 @@ export default function AnaliseMassaPage() {
         setData([]);
         setFileName("");
         if (fileInputRef.current) fileInputRef.current.value = "";
-        Swal.fire("✅ Dados limpos!", "Faça upload de um novo arquivo.", "success");
+        Swal.fire("Dados limpos!", "Faça upload de um novo arquivo.", "success");
       }
     });
   }, []);
@@ -1095,7 +1069,7 @@ export default function AnaliseMassaPage() {
         const resultado = await processarArquivo(content, targetFP);
         
         if (resultado.dados.length === 0) {
-          throw new Error("Nenhum dado válido encontrado. Verifique o formato do arquivo.");
+          throw new Error("Nenhum dado valido encontrado. Verifique o formato do arquivo.");
         }
         
         setSamplingInterval(resultado.intervaloAmostragem);
@@ -1104,8 +1078,8 @@ export default function AnaliseMassaPage() {
         const fpMedio = resultado.dados.reduce((a, b) => a + b.fp, 0) / resultado.dados.length;
         
         Swal.fire({
-          title: "✅ Arquivo processado!",
-          html: `${resultado.totalRegistros.toLocaleString()} registros<br>Intervalo: ${resultado.intervaloAmostragem} min<br>FP médio: ${fpMedio.toFixed(3)}`,
+          title: "Arquivo processado!",
+          html: `${resultado.totalRegistros.toLocaleString()} registros<br>Intervalo: ${resultado.intervaloAmostragem} min<br>FP medio: ${fpMedio.toFixed(3)}`,
           icon: "success",
           timer: 3000,
         });
@@ -1155,7 +1129,7 @@ export default function AnaliseMassaPage() {
       const dataAtual = new Date().toLocaleDateString("pt-BR").replace(/\//g, "-");
       pdf.save(`Relatorio_Capacitor_${dataAtual}.pdf`);
       
-      Swal.fire("Sucesso", "Relatório PDF exportado com sucesso!", "success");
+      Swal.fire("Sucesso", "Relatorio PDF exportado com sucesso!", "success");
     } catch (error) {
       console.error(error);
       Swal.fire("Erro", "Falha ao gerar o PDF. Tente novamente.", "error");
@@ -1175,7 +1149,7 @@ export default function AnaliseMassaPage() {
       kVAr: d.kvar.toFixed(2).replace(".", ","),
       "Tipo Reativo": d.tipoReativo === "indutivo" ? "Indutivo" : d.tipoReativo === "capacitivo" ? "Capacitivo" : "Neutro",
       "FP Medido": d.fp.toFixed(3).replace(".", ","),
-      "Horário Crítico": d.isHorarioCritico ? "SIM" : "NÃO",
+      "Horario Critico": d.isHorarioCritico ? "SIM" : "NAO",
       "Correcao Necessaria (kVAr)": d.kvarNecessario.toFixed(1).replace(".", ","),
     }));
     
@@ -1337,15 +1311,15 @@ export default function AnaliseMassaPage() {
         <div className="relative z-10 max-w-2xl space-y-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-secondary text-xs font-bold tracking-wider uppercase">
             <Cpu size={14} />
-            Análise Avançada • ANEEL 414/2010
+            Analise Avancada • ANEEL 414/2010
           </div>
           <h1 className="text-4xl md:text-5xl font-black tracking-tight leading-tight">
             Capacitor Manager
           </h1>
           <p className="text-lg text-white/70 leading-relaxed">
             Transforme dados brutos em economia real. Detectamos reativo
-            excedente, calculamos multas conforme ANEEL e sugerimos a correção
-            exata para sua instalação.
+            excedente, calculamos multas conforme ANEEL e sugerimos a correcao
+            exata para sua instalacao.
           </p>
           <div className="flex flex-wrap gap-4 pt-4">
             <label className="flex items-center gap-2 bg-secondary text-primary px-6 py-3 rounded-xl font-bold shadow-lg shadow-secondary/20 cursor-pointer hover:scale-105 transition-transform">
@@ -1408,16 +1382,16 @@ export default function AnaliseMassaPage() {
               Aguardando dados...
             </h2>
             <p className="text-slate-500 max-w-md text-center mb-6">
-              Faça upload do CSV da sua concessionária com colunas de kW e kVAr.
+              Faça upload do CSV da sua concessionaria com colunas de kW e kVAr.
             </p>
             <div className="bg-slate-50 p-4 rounded-xl max-w-lg text-sm text-slate-500">
-              <p className="font-semibold mb-2">📋 Formatos suportados:</p>
+              <p className="font-semibold mb-2">Formatos suportados:</p>
               <ul className="space-y-1 list-disc list-inside">
-                <li>Landis+Gyr (Memória de Massa)</li>
+                <li>Landis+Gyr (Memoria de Massa)</li>
                 <li>Equatorial (Demanda)</li>
-                <li>CSV padrão com colunas: Data, Hora, kW, kVAr</li>
-                <li>Separadores: ponto e vírgula (;) ou vírgula (,)</li>
-                <li>Números no formato brasileiro (1.234,56)</li>
+                <li>CSV padrao com colunas: Data, Hora, kW, kVAr</li>
+                <li>Separadores: ponto e virgula (;) ou virgula (,)</li>
+                <li>Numeros no formato brasileiro (1.234,56)</li>
               </ul>
             </div>
           </motion.div>
@@ -1441,10 +1415,10 @@ export default function AnaliseMassaPage() {
               >
                 <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
                   <h3 className="text-2xl font-bold text-red-800 flex items-center gap-2">
-                    <AlertCircle size={24} /> Horários de Baixo Fator de Potência
+                    <AlertCircle size={24} /> Horarios de Baixo Fator de Potencia
                   </h3>
                   <span className="text-xs bg-red-200 text-red-700 px-3 py-1 rounded-full font-bold">
-                    Multa aplicável pela ANEEL
+                    Multa aplicavel pela ANEEL
                   </span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1461,12 +1435,12 @@ export default function AnaliseMassaPage() {
                           </span>
                         </div>
                         <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
-                          {horario.ocorrencias} ocorrências
+                          {horario.ocorrencias} ocorrencias
                         </span>
                       </div>
                       <div className="space-y-1">
                         <div className="flex justify-between text-sm">
-                          <span className="text-slate-500">Média de Reativo:</span>
+                          <span className="text-slate-500">Media de Reativo:</span>
                           <span className="font-bold text-red-600">
                             {horario.mediaKvar.toFixed(1)} kVAr
                           </span>
@@ -1479,7 +1453,7 @@ export default function AnaliseMassaPage() {
                         </div>
                       </div>
                       <p className="text-xs text-slate-400 mt-2">
-                        💡 Recomendação: Instalar banco de capacitores automático
+                        Recomendacao: Instalar banco de capacitores automatico
                       </p>
                     </div>
                   ))}
@@ -1494,7 +1468,7 @@ export default function AnaliseMassaPage() {
                 className="bg-gradient-to-br from-green-50 to-teal-50 p-8 rounded-3xl border border-green-200"
               >
                 <h3 className="text-2xl font-bold text-primary mb-6 flex items-center gap-2">
-                  <Calendar size={24} /> Análise por Dia da Semana
+                  <Calendar size={24} /> Analise por Dia da Semana
                 </h3>
                 <div className="space-y-3">
                   {analiseDiasSemana.map((dia, idx) => (
@@ -1503,7 +1477,7 @@ export default function AnaliseMassaPage() {
                         <span className="font-bold text-slate-700 w-24">{dia.dia}</span>
                         <div className="flex-1">
                           <div className="flex justify-between text-xs mb-1">
-                            <span className="text-slate-500">kVAr Médio</span>
+                            <span className="text-slate-500">kVAr Medio</span>
                             <span className="text-red-600 font-bold">
                               {dia.kvarMedio.toFixed(1)} kVAr
                             </span>
@@ -1535,7 +1509,7 @@ export default function AnaliseMassaPage() {
                 className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-3xl border border-blue-200"
               >
                 <h3 className="text-2xl font-bold text-primary mb-6 flex items-center gap-2">
-                  <Clock size={24} /> Análise por Período do Dia
+                  <Clock size={24} /> Analise por Periodo do Dia
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {periodosAnalise.map((periodo, idx) => (
@@ -1543,9 +1517,9 @@ export default function AnaliseMassaPage() {
                       key={idx}
                       className={cn(
                         "rounded-xl p-4 border-2 transition-all",
-                        periodo.nivelCriticidade === "CRÍTICO"
+                        periodo.nivelCriticidade === "CRITICO"
                           ? "border-red-400 bg-red-50"
-                          : periodo.nivelCriticidade === "ATENÇÃO"
+                          : periodo.nivelCriticidade === "ATENCAO"
                           ? "border-amber-400 bg-amber-50"
                           : "border-green-400 bg-green-50",
                       )}
@@ -1557,9 +1531,9 @@ export default function AnaliseMassaPage() {
                         <span
                           className={cn(
                             "text-xs font-bold px-2 py-1 rounded-full",
-                            periodo.nivelCriticidade === "CRÍTICO"
+                            periodo.nivelCriticidade === "CRITICO"
                               ? "bg-red-500 text-white"
-                              : periodo.nivelCriticidade === "ATENÇÃO"
+                              : periodo.nivelCriticidade === "ATENCAO"
                               ? "bg-amber-500 text-white"
                               : "bg-green-500 text-white",
                           )}
@@ -1569,7 +1543,7 @@ export default function AnaliseMassaPage() {
                       </div>
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
-                          <span className="text-slate-500">FP Médio:</span>
+                          <span className="text-slate-500">FP Medio:</span>
                           <span
                             className={cn(
                               "font-bold",
@@ -1580,13 +1554,13 @@ export default function AnaliseMassaPage() {
                           </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-500">kVAr Médio:</span>
+                          <span className="text-slate-500">kVAr Medio:</span>
                           <span className="font-bold text-primary">
                             {periodo.kvarMedio.toFixed(1)} kVAr
                           </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-500">Registros Críticos:</span>
+                          <span className="text-slate-500">Registros Criticos:</span>
                           <span className="font-bold text-red-600">
                             {periodo.registrosCriticos} / {periodo.totalRegistros}
                           </span>
@@ -1598,18 +1572,18 @@ export default function AnaliseMassaPage() {
                 {piorPeriodo && (
                   <div className="mt-6 p-4 bg-white rounded-xl border border-blue-200">
                     <h4 className="font-bold text-primary mb-2 flex items-center gap-2">
-                      <Zap size={18} className="text-secondary" /> Recomendação
+                      <Zap size={18} className="text-secondary" /> Recomendacao
                     </h4>
-                    {piorPeriodo.nivelCriticidade === "CRÍTICO" ? (
+                    {piorPeriodo.nivelCriticidade === "CRITICO" ? (
                       <p className="text-sm text-slate-700">
-                        ⚠️ O período mais crítico é <strong>{piorPeriodo.nome}</strong> com{" "}
+                        O periodo mais critico e <strong>{piorPeriodo.nome}</strong> com{" "}
                         <strong className="text-red-600">{piorPeriodo.percentualCritico.toFixed(1)}%</strong>{" "}
                         do tempo com FP abaixo de {targetFP * 100}%.<br />
-                        💡 Recomenda-se instalar banco de capacitores <strong>automático</strong>.
+                        Recomenda-se instalar banco de capacitores <strong>automatico</strong>.
                       </p>
                     ) : (
                       <p className="text-sm text-slate-700">
-                        ✅ Todos os períodos estão dentro da conformidade.
+                        Todos os periodos estao dentro da conformidade.
                       </p>
                     )}
                   </div>
@@ -1630,7 +1604,7 @@ export default function AnaliseMassaPage() {
                     <DollarSign size={20} />
                   </div>
                   <span className="text-sm font-medium text-slate-500">
-                    Multa no período
+                    Multa no periodo
                   </span>
                 </div>
                 <p className="text-3xl font-bold text-slate-900">
@@ -1674,7 +1648,7 @@ export default function AnaliseMassaPage() {
                     <TrendingUp size={20} />
                   </div>
                   <span className="text-sm font-medium text-slate-500">
-                    FP Médio
+                    FP Medio
                   </span>
                 </div>
                 <p className="text-3xl font-bold text-slate-900">
@@ -1733,23 +1707,23 @@ export default function AnaliseMassaPage() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                   <div className="bg-white p-6 rounded-2xl">
                     <h4 className="text-sm font-bold text-slate-400 uppercase mb-4">
-                      Médias Gerais
+                      Medias Gerais
                     </h4>
                     <div className="space-y-3">
                       <div className="flex justify-between">
-                        <span className="text-slate-600">kW Médio:</span>
+                        <span className="text-slate-600">kW Medio:</span>
                         <span className="font-bold text-primary">
                           {dimensionamento.mediaKW.toFixed(1)} kW
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-600">kVAr Médio:</span>
+                        <span className="text-slate-600">kVAr Medio:</span>
                         <span className="font-bold text-primary">
                           {dimensionamento.mediaKvar.toFixed(1)} kVAr
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-600">FP Médio:</span>
+                        <span className="text-slate-600">FP Medio:</span>
                         <span
                           className={cn(
                             "font-bold",
@@ -1763,11 +1737,11 @@ export default function AnaliseMassaPage() {
                   </div>
                   <div className="bg-white p-6 rounded-2xl">
                     <h4 className="text-sm font-bold text-slate-400 uppercase mb-4">
-                      Períodos Críticos
+                      Periodos Criticos
                     </h4>
                     <div className="space-y-3">
                       <div className="flex justify-between">
-                        <span className="text-slate-600">Ocorrências:</span>
+                        <span className="text-slate-600">Ocorrencias:</span>
                         <span className="font-bold text-red-600">
                           {dimensionamento.periodosCriticos}
                         </span>
@@ -1788,14 +1762,14 @@ export default function AnaliseMassaPage() {
                   </div>
                   <div className="bg-white p-6 rounded-2xl border-2 border-secondary">
                     <h4 className="text-sm font-bold text-secondary uppercase mb-4">
-                      Recomendação
+                      Recomendacao
                     </h4>
                     <div className="space-y-3">
                       <div className="flex justify-between items-center">
                         <span className="text-slate-600">Tipo:</span>
                         <span className="px-2 py-1 rounded text-xs font-bold uppercase bg-blue-100 text-blue-700">
                           {dimensionamento.tipoRecomendado === "fixo" ? "Fixo" : 
-                           dimensionamento.tipoRecomendado === "automatico" ? "Automático" : "Híbrido"}
+                           dimensionamento.tipoRecomendado === "automatico" ? "Automatico" : "Hibrido"}
                         </span>
                       </div>
                       <div className="flex justify-between">
@@ -1823,12 +1797,12 @@ export default function AnaliseMassaPage() {
                 {dimensionamento.tipoRecomendado !== "fixo" && dimensionamento.bancoSugeridoAutomatico > 0 && (
                   <div className="mt-6 bg-white p-6 rounded-2xl">
                     <h4 className="text-sm font-bold text-slate-400 uppercase mb-4">
-                      Estágios Recomendados
+                      Estagios Recomendados
                     </h4>
                     <div className="flex flex-wrap gap-3">
                       {gerarEstagiosCapacitores(dimensionamento.bancoSugeridoAutomatico).map((estagio, idx) => (
                         <div key={idx} className="bg-blue-50 px-4 py-2 rounded-lg">
-                          <span className="text-xs">Estágio {idx + 1}:</span>
+                          <span className="text-xs">Estagio {idx + 1}:</span>
                           <span className="font-bold text-blue-700 ml-2">{estagio} kVAr</span>
                         </div>
                       ))}
@@ -1837,7 +1811,7 @@ export default function AnaliseMassaPage() {
                 )}
                 <div className="mt-6 bg-white p-6 rounded-2xl border-2 border-green-500">
                   <h4 className="text-sm font-bold text-green-600 uppercase mb-4">
-                    Orçamento Estimado
+                    Orcamento Estimado
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
@@ -1861,7 +1835,7 @@ export default function AnaliseMassaPage() {
               </motion.div>
             )}
 
-            {/* GRÁFICOS */}
+            {/* GRAFICOS */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               <motion.div 
                 initial={{ opacity: 0, x: -20 }}
@@ -1905,7 +1879,7 @@ export default function AnaliseMassaPage() {
                 className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100"
               >
                 <h3 className="text-lg font-bold text-primary mb-6">
-                  Fator de Potência
+                  Fator de Potencia
                 </h3>
                 <div className="h-[300px]">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1940,7 +1914,7 @@ export default function AnaliseMassaPage() {
               </motion.div>
             </div>
 
-            {/* OBSERVAÇÃO */}
+            {/* OBSERVACAO */}
             {dimensionamento && (
               <motion.div 
                 initial={{ opacity: 0 }}
@@ -1954,7 +1928,7 @@ export default function AnaliseMassaPage() {
                   </div>
                   <div className="space-y-2">
                     <h4 className="text-amber-900 font-bold text-lg flex items-center gap-2">
-                      Observação Importante
+                      Observacao Importante
                     </h4>
                     <p className="text-amber-800 leading-relaxed">
                       O sistema recomenda{" "}
@@ -1963,12 +1937,12 @@ export default function AnaliseMassaPage() {
                           ? dimensionamento.bancoSugeridoFixo
                           : dimensionamento.bancoSugeridoAutomatico}{" "} kVAr
                       </strong>{" "}
-                      para corrigir o fator de potência. Verifique a configuração do banco existente antes de instalar novos capacitores.
+                      para corrigir o fator de potencia. Verifique a configuracao do banco existente antes de instalar novos capacitores.
                     </p>
                     <div className="pt-2 flex items-center gap-2 text-xs text-amber-700 font-medium italic">
                       <Info size={14} />
                       <span>
-                        Nota: Se houver capacitores fixos instalados após o ponto de medição, a necessidade real pode diferir do valor calculado.
+                        Nota: Se houver capacitores fixos instalados apos o ponto de medicao, a necessidade real pode diferir do valor calculado.
                       </span>
                     </div>
                   </div>
@@ -1976,16 +1950,16 @@ export default function AnaliseMassaPage() {
               </motion.div>
             )}
 
-            {/* CONFIGURAÇÃO E RESUMO */}
+            {/* CONFIGURACAO E RESUMO */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-white p-6 rounded-3xl border border-slate-100">
                 <h4 className="font-bold text-primary mb-4 flex items-center gap-2">
-                  <Settings size={16} /> Configuração
+                  <Settings size={16} /> Configuracao
                 </h4>
                 <div className="space-y-4">
                   <div>
                     <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
-                      Potência Instalada (kVA)
+                      Potencia Instalada (kVA)
                     </label>
                     <input
                       type="number"
@@ -1997,7 +1971,7 @@ export default function AnaliseMassaPage() {
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
-                      Meta Fator de Potência
+                      Meta Fator de Potencia
                     </label>
                     <input
                       type="number"
@@ -2052,7 +2026,7 @@ export default function AnaliseMassaPage() {
                   onClick={exportToPDF}
                   className="w-full bg-secondary text-primary font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-secondary/90 transition-colors"
                 >
-                  <Download size={18} /> Exportar Relatório PDF
+                  <Download size={18} /> Exportar Relatorio PDF
                 </button>
               </div>
             </div>
@@ -2076,8 +2050,8 @@ export default function AnaliseMassaPage() {
                       <th className="pb-4">kW</th>
                       <th className="pb-4">kVAr</th>
                       <th className="pb-4">FP</th>
-                      <th className="pb-4">Correção</th>
-                    </table>
+                      <th className="pb-4">Correcao</th>
+                    </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {data
