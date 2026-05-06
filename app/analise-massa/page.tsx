@@ -1490,40 +1490,41 @@ export default function AnaliseMassaPage() {
             </div>
           </div>
 
-          <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
-  <h3 className="text-lg font-bold text-primary mb-6 flex items-center gap-2">
-    <AlertTriangle size={18} className="text-red-500" />
-    Top 10 Registros com Maior Criticidade
-  </h3>
-  <div className="overflow-x-auto">
-    <table className="w-full text-left">
-      <thead>
-        <tr className="text-xs font-bold text-slate-400 uppercase border-b border-slate-100">
-          <th className="pb-4">Data/Hora</th>
-          <th className="pb-4">Dia</th>
-          <th className="pb-4">kW</th>
-          <th className="pb-4">kVAr</th>
-          <th className="pb-4">FP</th>
-          <th className="pb-4">Correção</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-slate-50">
-        {data
-          .filter(d => d.fp < targetFP && d.tipoReativo === 'indutivo')
-          .sort((a, b) => b.kvar - a.kvar)
-          .slice(0, 10)
-          .map((row, idx) => (
-            <tr key={idx} className="text-sm hover:bg-slate-50">
-              <td className="py-3 font-medium text-slate-700">{row.data} {row.hora}</td>
-              <td className="py-3 text-slate-600">{row.diaSemana || '-'}</td>
-              <td className="py-3 text-slate-600">{row.kw.toFixed(1)}</td>
-              <td className="py-3 font-bold text-red-600">{row.kvar.toFixed(1)}</td>
-              <td className="py-3 font-bold text-red-500">{row.fp.toFixed(3)}</td>
-              <td className="py-3 text-slate-600">{row.kvarNecessario > 0 ? `${row.kvarNecessario.toFixed(0)} kVAr` : '-'}</td>
-            </tr>
-          ))}
-                    </tbody>
-            </table>
+           <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
+            <h3 className="text-lg font-bold text-primary mb-6 flex items-center gap-2">
+              <AlertTriangle size={18} className="text-red-500" />
+              Top 10 Registros com Maior Criticidade
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="text-xs font-bold text-slate-400 uppercase border-b border-slate-100">
+                    <th className="pb-4">Data/Hora</th>
+                    <th className="pb-4">Dia</th>
+                    <th className="pb-4">kW</th>
+                    <th className="pb-4">kVAr</th>
+                    <th className="pb-4">FP</th>
+                    <th className="pb-4">Correção</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {data
+                    .filter(d => d.fp < targetFP && d.tipoReativo === 'indutivo')
+                    .sort((a, b) => b.kvar - a.kvar)
+                    .slice(0, 10)
+                    .map((row, idx) => (
+                      <tr key={idx} className="text-sm hover:bg-slate-50">
+                        <td className="py-3 font-medium text-slate-700">{row.data} {row.hora}</td>
+                        <td className="py-3 text-slate-600">{row.diaSemana || '-'}</td>
+                        <td className="py-3 text-slate-600">{row.kw.toFixed(1)}</td>
+                        <td className="py-3 font-bold text-red-600">{row.kvar.toFixed(1)}</td>
+                        <td className="py-3 font-bold text-red-500">{row.fp.toFixed(3)}</td>
+                        <td className="py-3 text-slate-600">{row.kvarNecessario > 0 ? `${row.kvarNecessario.toFixed(0)} kVAr` : '-'}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       );
