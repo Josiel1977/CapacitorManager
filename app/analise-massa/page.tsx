@@ -1,3 +1,4 @@
+"use client";
 // CapacitorManagerModule.tsx
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import Papa from 'papaparse';
