@@ -9,15 +9,11 @@ import {
   FileText,
   AlertTriangle,
   TrendingUp,
-  TrendingDown,
   Zap,
   DollarSign,
-  Info,
   CheckCircle2,
   Download,
-  Activity,
   Cpu,
-  ArrowUpRight,
   FileDown,
   Settings,
   Calendar,
@@ -104,9 +100,9 @@ interface DimensionamentoStats {
 }
 
 // ============================================================================
-// CONSTANTES (sem export)
+// CONSTANTES
 // ============================================================================
-const DIAS_SEMANA = [
+const DIAS_SEMANA: string[] = [
   "Segunda",
   "Terça",
   "Quarta",
@@ -127,15 +123,15 @@ const PERIODOS_DIA = [
 ];
 
 // ============================================================================
-// FUNÇÕES UTILITÁRIAS (sem export)
+// FUNÇÕES UTILITÁRIAS
 // ============================================================================
 const getDiaSemana = (dataStr: string): string => {
   if (!dataStr) return "Desconhecido";
   try {
     const match = dataStr.match(/(\d{1,2})\/(\d{1,2})/);
     if (match) {
-      const dia = parseInt(match[1]);
-      const mes = parseInt(match[2]) - 1;
+      const dia = parseInt(match[1], 10);
+      const mes = parseInt(match[2], 10) - 1;
       const ano = new Date().getFullYear();
       const data = new Date(ano, mes, dia);
       if (!isNaN(data.getTime())) {
@@ -149,7 +145,7 @@ const getDiaSemana = (dataStr: string): string => {
   }
 };
 
-const parseNumeroBrasileiro = (valor: any): number => {
+const parseNumeroBrasileiro = (valor: unknown): number => {
   if (valor === undefined || valor === null) return 0;
   if (typeof valor === "number" && !isNaN(valor)) return Math.abs(valor);
   const str = String(valor).trim();
@@ -299,13 +295,10 @@ const analisarHorariosCriticos = (
     .slice(0, 10);
 };
 
-const analisarPeriodosCriticos = (
-  data: MassMemoryData[],
-  targetFP: number
-) => {
+const analisarPeriodosCriticos = (data: MassMemoryData[], targetFP: number) => {
   return PERIODOS_DIA.map((periodo) => {
     const registrosPeriodo = data.filter((reg) => {
-      const hora = parseInt(reg.hora.split(":")[0]);
+      const hora = parseInt(reg.hora.split(":")[0], 10);
       if (isNaN(hora)) return false;
       return hora >= periodo.inicio && hora < periodo.fim;
     });
@@ -453,7 +446,7 @@ const gerarEstagiosCapacitores = (totalKvar: number): number[] => {
 };
 
 // ============================================================================
-// FUNÇÃO PRINCIPAL DE PROCESSAMENTO DO CSV (sem export)
+// PROCESSAMENTO DO CSV
 // ============================================================================
 const processarArquivo = async (
   content: string,
@@ -465,8 +458,8 @@ const processarArquivo = async (
       skipEmptyLines: true,
       delimiter: ";",
       encoding: "ISO-8859-1",
-      complete: (result: Papa.ParseResult<any>) => {
-        const rows = result.data as any[];
+      complete: (result: Papa.ParseResult<Record<string, string>>) => {
+        const rows = result.data;
         const results: MassMemoryData[] = [];
         if (rows.length === 0) {
           resolve(results);
@@ -519,9 +512,10 @@ const processarArquivo = async (
               dataStr = parts[0];
               horaStr = parts[1] || "00:00";
             }
-            const dataFormatada = dataStr.split("/").slice(0, 2).map(p => p.padStart(2, "0")).join("/");
+            // Corrigindo erro de tipagem nos map com parâmetros explícitos
+            const dataFormatada = dataStr.split("/").slice(0, 2).map((p: string) => p.padStart(2, "0")).join("/");
             const horaFormatada = horaStr.includes(":")
-              ? horaStr.split(":").slice(0, 2).map(p => p.padStart(2, "0")).join(":")
+              ? horaStr.split(":").slice(0, 2).map((p: string) => p.padStart(2, "0")).join(":")
               : "00:00";
             const timestamp = `${dataFormatada}T${horaFormatada}`;
             const tipoReativo: MassMemoryData["tipoReativo"] =
@@ -553,7 +547,7 @@ const processarArquivo = async (
         }
         resolve(results);
       },
-      error: (error: any) => reject(error),
+      error: (error: Error) => reject(error),
     });
   });
 };
@@ -623,12 +617,13 @@ export default function AnaliseMassaPage() {
         if (dados.length === 0) {
           throw new Error("Nenhum dado válido encontrado. Verifique o formato do arquivo.");
         }
-        setSamplingInterval(detectarIntervaloAmostragem(dados));
+        const intervalo = detectarIntervaloAmostragem(dados);
+        setSamplingInterval(intervalo);
         setData(dados);
         const fpMedio = dados.reduce((a, b) => a + b.fp, 0) / dados.length;
         Swal.fire({
           title: "Arquivo processado!",
-          html: `${dados.length.toLocaleString()} registros<br>Intervalo: ${detectarIntervaloAmostragem(dados)} min<br>FP médio: ${fpMedio.toFixed(3)}`,
+          html: `${dados.length.toLocaleString()} registros<br>Intervalo: ${intervalo} min<br>FP médio: ${fpMedio.toFixed(3)}`,
           icon: "success",
           timer: 3000,
         });
@@ -705,6 +700,7 @@ export default function AnaliseMassaPage() {
     Swal.fire("Sucesso", "CSV exportado com sucesso!", "success");
   }, [data]);
 
+  // Memoized data for charts and stats
   const horariosCriticos = useMemo(
     () => (data.length ? analisarHorariosCriticos(data) : []),
     [data]
@@ -816,7 +812,7 @@ export default function AnaliseMassaPage() {
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
         <div className="bg-white p-8 rounded-2xl flex flex-col items-center gap-4 shadow-2xl">
-          <Loader2 size={48} className="text-primary animate-spin" />
+          <Loader2 size={48} className="text-blue-600 animate-spin" />
           <p className="text-slate-600 font-medium">Processando arquivo...</p>
         </div>
       </div>
@@ -925,6 +921,7 @@ export default function AnaliseMassaPage() {
             id="report-content"
             className="space-y-8"
           >
+            {/* Alertas de multa */}
             {stats?.multaIndutiva > 0 && (
               <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-xl mb-6">
                 <div className="flex items-start gap-3">
@@ -1029,7 +1026,7 @@ export default function AnaliseMassaPage() {
               </div>
             )}
 
-            {/* Dashboard */}
+            {/* Dashboard cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                 <div className="flex items-center gap-3 mb-4">
@@ -1217,7 +1214,7 @@ export default function AnaliseMassaPage() {
                           <td className="py-3 font-bold text-red-600">{row.kvar.toFixed(1)}</td>
                           <td className="py-3 font-bold text-red-500">{row.fp.toFixed(3)}</td>
                           <td className="py-3 text-slate-600">{row.kvarNecessario > 0 ? `${row.kvarNecessario.toFixed(0)} kVAr` : "-"}</td>
-                         </tr>
+                        </tr>
                       ))}
                   </tbody>
                 </table>
