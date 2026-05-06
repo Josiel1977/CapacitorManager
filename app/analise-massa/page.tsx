@@ -532,25 +532,186 @@ const gerarEstagiosCapacitores = (totalKvar: number): number[] => {
 };
 
 // ============================================================================
-// PARSING DE ARQUIVOS
+// PARSING DE ARQUIVOS - VERSÃO UNIFICADA E ROBUSTA
 // ============================================================================
 
+/**
+ * Detecta o formato do arquivo baseado nas primeiras linhas
+ */
 const detectarFormato = (content: string): "landis" | "equatorial" | "padrao" => {
-  const firstLines = content.split("\n").slice(0, 20).join(" ").toLowerCase();
+  const firstLines = content.split("\n").slice(0, 50).join(" ").toLowerCase();
   
+  // Landis+Gyr: contém "reg.;data;hora;kw" ou "landis+gyr"
   if (firstLines.includes("landis+gyr") || 
       firstLines.includes("reg.;data;hora;kw") ||
       (firstLines.includes("reg.") && firstLines.includes("kvarind"))) {
     return "landis";
   }
   
+  // Equatorial: contém "kw fornecido" e "kvar indutivo" e "data" no cabeçalho
   if (firstLines.includes("kw fornecido") && firstLines.includes("kvar indutivo")) {
     return "equatorial";
   }
   
+  // Padrão: tenta tratar como CSV genérico
   return "padrao";
 };
 
+/**
+ * Encontra a linha de cabeçalho real ignorando linhas de comentário e vazias
+ */
+const encontrarLinhaCabecalho = (lines: string[], palavrasChave: string[]): number => {
+  for (let i = 0; i < Math.min(lines.length, 100); i++) {
+    const line = lines[i].toLowerCase();
+    if (line.startsWith("'") || line.trim() === "") continue;
+    if (palavrasChave.some(keyword => line.includes(keyword))) {
+      return i;
+    }
+  }
+  return -1;
+};
+
+/**
+ * Processa qualquer arquivo usando PapaParse com detecção dinâmica de colunas
+ */
+const processarArquivoUniversal = async (
+  content: string,
+  targetFP: number,
+): Promise<ProcessamentoResultado> => {
+  return new Promise((resolve) => {
+    Papa.parse(content, {
+      header: true,
+      skipEmptyLines: true,
+      delimiter: ";",
+      encoding: "ISO-8859-1",
+      complete: (parseResult: Papa.ParseResult<any>) => {
+        const rows = parseResult.data as any[];
+        const results: MassMemoryData[] = [];
+        
+        // Identificar colunas disponíveis (normalizando nomes)
+        const colunas = Object.keys(rows[0] || {}).map(k => k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+        
+        const mapearColuna = (possibilidades: string[]): string | null => {
+          for (const poss of possibilidades) {
+            const normalized = poss.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            const encontrada = colunas.find(c => c.includes(normalized));
+            if (encontrada) return encontrada;
+          }
+          return null;
+        };
+        
+        const colData = mapearColuna(["data", "date", "medicao data"]);
+        const colHora = mapearColuna(["hora", "time", "horario", "hora medicao"]);
+        const colKW = mapearColuna(["kw fornecido", "ativa(kw)", "kw", "ativa", "demanda ativa", "potencia ativa"]);
+        const colKvarInd = mapearColuna(["kvar indutivo", "kvarind", "kvar ind"]);
+        const colKvarCap = mapearColuna(["kvar capacitivo", "kvarcap", "kvar cap"]);
+        const colKvar = mapearColuna(["kvar", "reativa(kvar)", "reativa", "potencia reativa"]);
+        const colFP = mapearColuna(["fp", "fator potencia", "fator de potencia"]);
+        
+        if (!colKW) {
+          console.warn("Coluna de kW não encontrada");
+          resolve({ dados: [], intervaloAmostragem: 15, totalRegistros: 0 });
+          return;
+        }
+        
+        for (const row of rows) {
+          try {
+            const kw = parseNumeroBrasileiro(row[colKW]);
+            
+            let kvar = 0;
+            if (colKvarInd && colKvarCap) {
+              const kvarInd = parseNumeroBrasileiro(row[colKvarInd]);
+              const kvarCap = parseNumeroBrasileiro(row[colKvarCap]);
+              kvar = kvarInd - kvarCap;
+            } else if (colKvar) {
+              kvar = parseNumeroBrasileiro(row[colKvar]);
+            }
+            
+            if (kw === 0 && Math.abs(kvar) < 0.01) continue;
+            
+            let dataStr = colData ? row[colData] : "";
+            let horaStr = colHora ? row[colHora] : "00:00";
+            
+            if (dataStr && dataStr.includes(" ") && !horaStr) {
+              const parts = dataStr.split(" ");
+              dataStr = parts[0];
+              horaStr = parts[1] || "00:00";
+            }
+            
+            let dataFormatada = dataStr;
+            if (dataStr && dataStr.includes("/")) {
+              const partes = dataStr.split("/");
+              if (partes.length >= 2) {
+                dataFormatada = `${partes[0].padStart(2, "0")}/${partes[1].padStart(2, "0")}`;
+              }
+            }
+            
+            let horaFormatada = horaStr;
+            if (horaStr && horaStr.includes(":")) {
+              const [h, m] = horaStr.split(":");
+              horaFormatada = `${h.padStart(2, "0")}:${m.padStart(2, "0")}`;
+            }
+            
+            const tipoReativo: MassMemoryData["tipoReativo"] =
+              kvar > 0.01 ? "indutivo" : kvar < -0.01 ? "capacitivo" : "neutro";
+            
+            const kvarAbs = Math.abs(kvar);
+            const fpCalculado = calcularFP(kw, kvarAbs);
+            
+            let fpFinal = fpCalculado;
+            if (colFP) {
+              let fpValor = parseNumeroBrasileiro(row[colFP]);
+              if (typeof row[colFP] === "string") {
+                const match = row[colFP].match(/(\d+)/);
+                if (match) fpValor = parseInt(match[1]);
+              }
+              if (fpValor > 1 && fpValor <= 100) fpValor = fpValor / 100;
+              if (fpValor > 0 && fpValor <= 1) fpFinal = fpValor;
+            }
+            
+            const timestamp = `${dataFormatada}T${horaFormatada}`;
+            const diaSemana = getDiaSemana(dataFormatada);
+            const kvarNecessario = tipoReativo === "indutivo" && fpFinal < targetFP
+              ? calcularCorrecaoNecessaria(kw, fpFinal, targetFP)
+              : 0;
+            const isHorarioCritico = tipoReativo === "indutivo" && kvarAbs > 5 && fpFinal < targetFP;
+            
+            results.push({
+              data: dataFormatada,
+              hora: horaFormatada,
+              timestamp,
+              kw,
+              kvar: kvarAbs,
+              fp: Math.round(fpFinal * 100) / 100,
+              kvarNecessario,
+              tipoReativo,
+              isHorarioCritico,
+              diaSemana,
+            });
+          } catch (error) {
+            console.warn("Erro ao processar linha:", error);
+            continue;
+          }
+        }
+        
+        const intervalo = detectarIntervaloAmostragem(results);
+        resolve({
+          dados: results,
+          intervaloAmostragem: intervalo,
+          totalRegistros: results.length,
+        });
+      },
+      error: (error: any) => {
+        console.error("Erro no parsing universal:", error);
+        resolve({ dados: [], intervaloAmostragem: 15, totalRegistros: 0 });
+      },
+    });
+  });
+};
+
+/**
+ * Processamento específico para arquivos Landis+Gyr (fallback se o universal falhar)
+ */
 const processarArquivoLandis = (
   content: string,
   targetFP: number,
@@ -565,16 +726,6 @@ const processarArquivoLandis = (
         (line.includes("reg.") && line.includes("kvarind"))) {
       headerLineIndex = i;
       break;
-    }
-  }
-  
-  if (headerLineIndex === -1) {
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].toLowerCase();
-      if (line.includes("data") && line.includes("hora") && line.includes("kw")) {
-        headerLineIndex = i;
-        break;
-      }
     }
   }
   
@@ -602,14 +753,9 @@ const processarArquivoLandis = (
       
       const dataRaw = idxData < parts.length ? parts[idxData] : "";
       const horaRaw = idxHora < parts.length ? parts[idxHora] : "00:00";
-      const kwRaw = idxKW < parts.length ? parts[idxKW] : "0";
-      const kvarIndRaw = idxKvarInd < parts.length ? parts[idxKvarInd] : "0";
-      const kvarCapRaw = idxKvarCap < parts.length ? parts[idxKvarCap] : "0";
-      const fpRaw = idxFP < parts.length ? parts[idxFP] : "";
-      
-      const kw = parseNumeroBrasileiro(kwRaw);
-      const kvarInd = parseNumeroBrasileiro(kvarIndRaw);
-      const kvarCap = parseNumeroBrasileiro(kvarCapRaw);
+      const kw = parseNumeroBrasileiro(parts[idxKW]);
+      const kvarInd = parseNumeroBrasileiro(parts[idxKvarInd]);
+      const kvarCap = parseNumeroBrasileiro(idxKvarCap < parts.length ? parts[idxKvarCap] : "0");
       
       if (kw === 0 && kvarInd === 0 && kvarCap === 0) continue;
       
@@ -622,12 +768,8 @@ const processarArquivoLandis = (
       const fpCalculado = calcularFP(kw, kvarAbs);
       
       let fpFinal = fpCalculado;
-      if (fpRaw) {
-        let fpValor = parseNumeroBrasileiro(fpRaw);
-        if (typeof fpRaw === "string") {
-          const match = fpRaw.match(/(\d+)/);
-          if (match) fpValor = parseInt(match[1]);
-        }
+      if (idxFP < parts.length && parts[idxFP]) {
+        let fpValor = parseNumeroBrasileiro(parts[idxFP]);
         if (fpValor > 1 && fpValor <= 100) fpValor = fpValor / 100;
         if (fpValor > 0 && fpValor <= 1) fpFinal = fpValor;
       }
@@ -674,7 +816,6 @@ const processarArquivoLandis = (
   }
   
   const intervalo = detectarIntervaloAmostragem(results);
-  
   return {
     dados: results,
     intervaloAmostragem: intervalo,
@@ -682,6 +823,9 @@ const processarArquivoLandis = (
   };
 };
 
+/**
+ * Processamento específico para Equatorial (fallback)
+ */
 const processarArquivoEquatorial = (
   content: string,
   targetFP: number,
@@ -710,7 +854,7 @@ const processarArquivoEquatorial = (
     }
     
     const parts = line.split(";");
-    if (parts.length < 5) continue;
+    if (parts.length < 6) continue;
     
     try {
       const dataRaw = parts[0] || "";
@@ -769,7 +913,6 @@ const processarArquivoEquatorial = (
   }
   
   const intervalo = detectarIntervaloAmostragem(results);
-  
   return {
     dados: results,
     intervaloAmostragem: intervalo,
@@ -777,129 +920,9 @@ const processarArquivoEquatorial = (
   };
 };
 
-const processarArquivoPadrao = (
-  content: string,
-  targetFP: number,
-): Promise<ProcessamentoResultado> => {
-  return new Promise((resolve) => {
-    const results: MassMemoryData[] = [];
-    
-    Papa.parse(content, {
-      header: true,
-      skipEmptyLines: true,
-      delimiter: ";",
-      encoding: "ISO-8859-1",
-      complete: (parseResult: Papa.ParseResult<any>) => {
-        const rows = parseResult.data as any[];
-        
-        for (const row of rows) {
-          try {
-            const normalizedRow: Record<string, any> = {};
-            for (const [key, value] of Object.entries(row)) {
-              if (key) {
-                normalizedRow[key.trim().toLowerCase()] = value;
-              }
-            }
-            
-            const getVal = (possibleKeys: string[]): string => {
-              for (const key of possibleKeys) {
-                if (normalizedRow[key] !== undefined && normalizedRow[key] !== "") {
-                  return String(normalizedRow[key]);
-                }
-              }
-              return "0";
-            };
-            
-            const kw = parseNumeroBrasileiro(
-              getVal(["kw fornecido", "ativa(kw)", "kw", "ativa", "demanda ativa", "potencia ativa"])
-            );
-            
-            let kvar = parseNumeroBrasileiro(
-              getVal(["kvar indutivo", "kvar capacitivo", "reativa(kvar)", "kvar", "reativa", "potencia reativa"])
-            );
-            
-            if (kvar === 0) {
-              const kvarInd = parseNumeroBrasileiro(getVal(["kvarind", "kvar ind"]));
-              const kvarCap = parseNumeroBrasileiro(getVal(["kvarcap", "kvar cap"]));
-              if (kvarInd > 0 || kvarCap > 0) {
-                kvar = kvarInd - kvarCap;
-              }
-            }
-            
-            if (kw === 0 && Math.abs(kvar) < 0.01) continue;
-            
-            let dataStr = getVal(["data", "date", "data medicao", "medicao data"]);
-            let horaStr = getVal(["hora", "time", "horario", "hora medicao"]);
-            
-            if (dataStr.includes(" ") && !horaStr) {
-              const parts = dataStr.split(" ");
-              dataStr = parts[0];
-              horaStr = parts[1] || "00:00";
-            }
-            
-            if (!horaStr) horaStr = "00:00";
-            
-            let dataFormatada = dataStr;
-            if (dataStr && dataStr.includes("/")) {
-              const partes = dataStr.split("/");
-              if (partes.length === 2) {
-                dataFormatada = `${partes[0].padStart(2, "0")}/${partes[1].padStart(2, "0")}`;
-              }
-            }
-            
-            let horaFormatada = horaStr;
-            if (horaStr && horaStr.includes(":")) {
-              const [h, m] = horaStr.split(":");
-              horaFormatada = `${h.padStart(2, "0")}:${m.padStart(2, "0")}`;
-            }
-            
-            const tipoReativo: MassMemoryData["tipoReativo"] =
-              kvar > 0.01 ? "indutivo" : kvar < -0.01 ? "capacitivo" : "neutro";
-            
-            const kvarAbs = Math.abs(kvar);
-            const fp = calcularFP(kw, kvarAbs);
-            const kvarNecessario = tipoReativo === "indutivo" && fp < targetFP
-              ? calcularCorrecaoNecessaria(kw, fp, targetFP)
-              : 0;
-            
-            const timestamp = `${dataFormatada}T${horaFormatada}`;
-            const diaSemana = getDiaSemana(dataFormatada);
-            const isHorarioCritico = tipoReativo === "indutivo" && kvarAbs > 5 && fp < targetFP;
-            
-            results.push({
-              data: dataFormatada,
-              hora: horaFormatada,
-              timestamp,
-              kw,
-              kvar: kvarAbs,
-              fp: Math.round(fp * 100) / 100,
-              kvarNecessario,
-              tipoReativo,
-              isHorarioCritico,
-              diaSemana,
-            });
-          } catch (error) {
-            console.warn("Erro ao processar linha:", error);
-            continue;
-          }
-        }
-        
-        const intervalo = detectarIntervaloAmostragem(results);
-        
-        resolve({
-          dados: results,
-          intervaloAmostragem: intervalo,
-          totalRegistros: results.length,
-        });
-      },
-      error: (error: any) => {
-        console.error("Erro no parsing:", error);
-        resolve({ dados: [], intervaloAmostragem: 15, totalRegistros: 0 });
-      },
-    });
-  });
-};
-
+/**
+ * Função principal de processamento - tenta universal primeiro, fallback para específicos
+ */
 const processarArquivo = async (
   content: string,
   targetFP: number,
@@ -907,13 +930,20 @@ const processarArquivo = async (
   const formato = detectarFormato(content);
   console.log("Formato detectado:", formato);
   
-  if (formato === "landis") {
-    return processarArquivoLandis(content, targetFP);
-  } else if (formato === "equatorial") {
-    return processarArquivoEquatorial(content, targetFP);
-  } else {
-    return await processarArquivoPadrao(content, targetFP);
+  // Tentar primeiro o parser universal (mais robusto)
+  let resultado = await processarArquivoUniversal(content, targetFP);
+  
+  // Se falhar ou retornar poucos dados, tentar parser específico
+  if (resultado.dados.length === 0) {
+    console.log("Parser universal falhou, tentando parser específico...");
+    if (formato === "landis") {
+      resultado = processarArquivoLandis(content, targetFP);
+    } else if (formato === "equatorial") {
+      resultado = processarArquivoEquatorial(content, targetFP);
+    }
   }
+  
+  return resultado;
 };
 
 // ============================================================================
@@ -2051,7 +2081,7 @@ export default function AnaliseMassaPage() {
                       <th className="pb-4">kVAr</th>
                       <th className="pb-4">FP</th>
                       <th className="pb-4">Correcao</th>
-                    </tr>
+                    </td>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {data
@@ -2070,7 +2100,7 @@ export default function AnaliseMassaPage() {
                           <td className="py-3 text-slate-600">
                             {row.kvarNecessario > 0 ? `${row.kvarNecessario.toFixed(0)} kVAr` : "-"}
                           </td>
-                        </tr>
+                        <tr>
                       ))}
                   </tbody>
                 </table>
