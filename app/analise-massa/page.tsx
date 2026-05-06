@@ -60,8 +60,8 @@ interface MassMemoryData {
 }
 
 interface AnalysisStats {
-  multaPeriodo: number; // multa total no período do arquivo
-  multaMensalProjetada: number; // multa projetada para 30 dias
+  multaPeriodo: number;
+  multaMensalProjetada: number;
   multaIndutiva: number;
   multaCapacitiva: number;
   picoDemanda: number;
@@ -123,9 +123,8 @@ interface AnaliseDiaSemana {
 }
 
 // ============================================================================
-// FUNÇÕES UTILITÁRIAS
+// CONSTANTES
 // ============================================================================
-
 const diasSemana = [
   "Segunda",
   "Terça",
@@ -136,16 +135,22 @@ const diasSemana = [
   "Domingo",
 ];
 
+// ============================================================================
+// FUNÇÕES UTILITÁRIAS
+// ============================================================================
+
 const getDiaSemana = (dataStr: string): string => {
   if (!dataStr || dataStr === "") return "Desconhecido";
   try {
     let dia: number, mes: number, ano: number;
+    
+    // Formato DD/MM ou DD/MM/YY
     if (dataStr.includes("/")) {
       const partes = dataStr.split("/");
-      if (partes.length === 3) {
+      if (partes.length >= 2) {
         dia = parseInt(partes[0]);
         mes = parseInt(partes[1]) - 1;
-        ano = parseInt(partes[2]);
+        ano = partes.length === 3 ? parseInt(partes[2]) : new Date().getFullYear();
         if (ano < 100) ano = 2000 + ano;
         const data = new Date(ano, mes, dia);
         if (!isNaN(data.getTime())) {
@@ -154,19 +159,8 @@ const getDiaSemana = (dataStr: string): string => {
         }
       }
     }
-    if (dataStr.includes("-")) {
-      const partes = dataStr.split("-");
-      if (partes.length === 3) {
-        ano = parseInt(partes[0]);
-        mes = parseInt(partes[1]) - 1;
-        dia = parseInt(partes[2]);
-        const data = new Date(ano, mes, dia);
-        if (!isNaN(data.getTime())) {
-          const diaNum = data.getDay();
-          return diasSemana[diaNum === 0 ? 6 : diaNum - 1];
-        }
-      }
-    }
+    
+    // Formato ISO ou outro
     const data = new Date(dataStr);
     if (!isNaN(data.getTime())) {
       const diaNum = data.getDay();
@@ -266,7 +260,6 @@ const detectSamplingInterval = (data: MassMemoryData[]): number => {
   }
 
   if (diffMinutes.length === 0) return 15;
-  // Mediana para evitar outliers
   diffMinutes.sort((a, b) => a - b);
   const mid = Math.floor(diffMinutes.length / 2);
   const median =
@@ -338,43 +331,13 @@ const analisarPeriodosCriticos = (
   targetFP: number,
 ): PeriodoAnalise[] => {
   const periodos = [
-    {
-      nome: "Madrugada (00:00 - 06:00)",
-      inicio: 0,
-      fim: 6,
-      cor: "bg-slate-100",
-    },
-    {
-      nome: "Início da Manhã (06:00 - 09:00)",
-      inicio: 6,
-      fim: 9,
-      cor: "bg-blue-50",
-    },
-    {
-      nome: "Meio da Manhã (09:00 - 12:00)",
-      inicio: 9,
-      fim: 12,
-      cor: "bg-red-50",
-    },
-    {
-      nome: "Início da Tarde (12:00 - 15:00)",
-      inicio: 12,
-      fim: 15,
-      cor: "bg-orange-50",
-    },
-    {
-      nome: "Final da Tarde (15:00 - 18:00)",
-      inicio: 15,
-      fim: 18,
-      cor: "bg-amber-50",
-    },
+    { nome: "Madrugada (00:00 - 06:00)", inicio: 0, fim: 6, cor: "bg-slate-100" },
+    { nome: "Início da Manhã (06:00 - 09:00)", inicio: 6, fim: 9, cor: "bg-blue-50" },
+    { nome: "Meio da Manhã (09:00 - 12:00)", inicio: 9, fim: 12, cor: "bg-red-50" },
+    { nome: "Início da Tarde (12:00 - 15:00)", inicio: 12, fim: 15, cor: "bg-orange-50" },
+    { nome: "Final da Tarde (15:00 - 18:00)", inicio: 15, fim: 18, cor: "bg-amber-50" },
     { nome: "Noite (18:00 - 22:00)", inicio: 18, fim: 22, cor: "bg-purple-50" },
-    {
-      nome: "Final da Noite (22:00 - 00:00)",
-      inicio: 22,
-      fim: 24,
-      cor: "bg-slate-100",
-    },
+    { nome: "Final da Noite (22:00 - 00:00)", inicio: 22, fim: 24, cor: "bg-slate-100" },
   ];
 
   return periodos
@@ -550,14 +513,196 @@ const gerarEstagios = (totalKvar: number): number[] => {
 };
 
 // ============================================================================
+// PARSING DE ARQUIVOS - FUNÇÕES ADICIONADAS
+// ============================================================================
+
+const processarArquivoEquatorial = (
+  content: string,
+  targetFP: number,
+): MassMemoryData[] => {
+  const lines = content.split("\n").filter((l) => l.trim());
+  const results: MassMemoryData[] = [];
+  
+  // Encontrar cabeçalho de dados
+  let headerIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].toLowerCase().includes("reg.") && lines[i].includes("kw")) {
+      headerIndex = i;
+      break;
+    }
+  }
+  
+  if (headerIndex === -1) return [];
+  
+  const currentYear = new Date().getFullYear();
+  
+  for (let i = headerIndex + 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line || line.startsWith("Total") || line.startsWith("Sumariza")) break;
+    
+    // Parse com delimitador ;
+    const parts = line.split(";").map((p) => p.trim());
+    if (parts.length < 10) continue;
+    
+    try {
+      // Estrutura esperada: Reg;Data;Hora;kW;C1;kvarIND;C2;kvarCAP;C3;SH;SR;FPot.;DCR;UFER
+      const dataRaw = parts[1] || "";
+      const hora = parts[2] || "00:00";
+      const kw = parseBrazilianNumber(parts[3]);
+      const kvarInd = parseBrazilianNumber(parts[5]);
+      const kvarCap = parseBrazilianNumber(parts[7]);
+      const fpRaw = parts[10] || "0";
+      
+      // Calcular kVAr líquido (indutivo positivo, capacitivo negativo)
+      let kvar = kvarInd - kvarCap;
+      
+      // Determinar tipo reativo
+      const tipoReativo: "indutivo" | "capacitivo" | "neutro" =
+        kvar > 0.01 ? "indutivo" : kvar < -0.01 ? "capacitivo" : "neutro";
+      
+      const kvarAbs = Math.abs(kvar);
+      const fp = calcularFP(kw, kvarAbs);
+      
+      // Parse FP da coluna (pode vir como "83 L" ou "85")
+      let fpValor = parseFloat(fpRaw);
+      if (isNaN(fpValor)) {
+        const match = fpRaw.match(/^(\d+)/);
+        if (match) fpValor = parseInt(match[1]) / 100;
+      }
+      const fpFinal = !isNaN(fpValor) && fpValor > 0 ? fpValor / 100 : fp;
+      
+      // Formatar data DD/MM para timestamp
+      let fullDate = dataRaw;
+      if (dataRaw && dataRaw.includes("/") && !dataRaw.includes("/20")) {
+        fullDate = `${dataRaw}/${currentYear}`;
+      }
+      
+      const timestamp = `${fullDate}T${hora.padStart(5, "0")}`;
+      const diaSemana = getDiaSemana(fullDate);
+      const kvarNecessario =
+        tipoReativo === "indutivo" && fpFinal < targetFP
+          ? calcularCorrecaoNecessaria(kw, fpFinal, targetFP)
+          : 0;
+      const isHorarioCritico =
+        tipoReativo === "indutivo" && kvarAbs > 5 && fpFinal < targetFP;
+
+      results.push({
+        data: dataRaw,
+        hora,
+        timestamp,
+        kw,
+        kvar: kvarAbs,
+        fp: Math.round(fpFinal * 100) / 100,
+        kvarNecessario,
+        tipoReativo,
+        isHorarioCritico,
+        diaSemana,
+      });
+    } catch {
+      continue;
+    }
+  }
+  
+  return results;
+};
+
+const processarArquivoGenerico = (
+  content: string,
+  targetFP: number,
+): MassMemoryData[] => {
+  const results: MassMemoryData[] = [];
+  
+  Papa.parse(content, {
+    header: true,
+    skipEmptyLines: true,
+    delimiter: "",
+    complete: (parseResult) => {
+      const currentYear = new Date().getFullYear();
+      
+      parseResult.data.forEach((row: any) => {
+        const normalizedRow: any = {};
+        Object.keys(row).forEach((key) => {
+          normalizedRow[key.trim().toLowerCase()] = row[key];
+        });
+
+        const getVal = (possibleKeys: string[]) => {
+          for (const key of possibleKeys) {
+            if (normalizedRow[key] !== undefined) return normalizedRow[key];
+          }
+          const foundKey = Object.keys(normalizedRow).find((k) =>
+            possibleKeys.some((pk) => k.includes(pk.toLowerCase())),
+          );
+          return foundKey ? normalizedRow[foundKey] : "0";
+        };
+
+        const kw = parseBrazilianNumber(
+          getVal([
+            "kw fornecido", "ativa(kw)", "kw", "ativa", "demanda ativa",
+            "consumo ativo", "potencia ativa", "canal 1", "ch1", "ch 1",
+          ]),
+        );
+        
+        let kvar = parseBrazilianNumber(
+          getVal([
+            "kvar indutivo", "kvar capacitivo", "reativa(kvar)", "kvar",
+            "reativa", "consumo reativo", "potencia reativa", "canal 2",
+            "ch2", "ch 2",
+          ]),
+        );
+
+        const tipoReativo: "indutivo" | "capacitivo" | "neutro" =
+          kvar > 0.01 ? "indutivo" : kvar < -0.01 ? "capacitivo" : "neutro";
+        const kvarAbs = Math.abs(kvar);
+        const fp = calcularFP(kw, kvarAbs);
+        const kvarNecessario =
+          tipoReativo === "indutivo" && fp < targetFP
+            ? calcularCorrecaoNecessaria(kw, fp, targetFP)
+            : 0;
+
+        let fullDate = getVal(["data", "date"]) || "";
+        let hora = getVal(["hora", "time", "horario"]) || "";
+
+        if (fullDate.includes(" ") && !hora) {
+          const parts = fullDate.split(" ");
+          fullDate = parts[0];
+          hora = parts[1];
+        }
+        if (!hora) hora = "00:00";
+        
+        // Inferir ano se ausente
+        if (fullDate && fullDate.includes("/") && !fullDate.includes("/20")) {
+          fullDate = `${fullDate}/${currentYear}`;
+        }
+
+        const timestamp = `${fullDate}T${hora.padStart(5, "0")}`;
+        const diaSemana = getDiaSemana(fullDate);
+        const isHorarioCritico =
+          tipoReativo === "indutivo" && kvarAbs > 5 && fp < targetFP;
+
+        results.push({
+          data: fullDate.split("/").slice(0, 2).join("/"),
+          hora,
+          timestamp,
+          kw,
+          kvar: kvarAbs,
+          fp: Math.round(fp * 100) / 100,
+          kvarNecessario,
+          tipoReativo,
+          isHorarioCritico,
+          diaSemana,
+        });
+      });
+    },
+  });
+  
+  return results;
+};
+
+// ============================================================================
 // COMPONENTES DE ALERTA
 // ============================================================================
 
-const AlertaMultaCapacitiva = ({
-  multaCapacitiva,
-}: {
-  multaCapacitiva: number;
-}) => {
+const AlertaMultaCapacitiva = ({ multaCapacitiva }: { multaCapacitiva: number }) => {
   if (multaCapacitiva <= 0) return null;
   return (
     <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-xl mb-6">
@@ -683,175 +828,48 @@ export default function AnaliseMassaPage() {
 
       const reader = new FileReader();
       reader.onload = (event) => {
-        const content = event.target?.result as string;
-        const lines = content.split("\n");
+        try {
+          const content = event.target?.result as string;
+          
+          // Detectar formato pelo cabeçalho
+          const isEquatorial =
+            content.toLowerCase().includes("landis+gyr") ||
+            content.toLowerCase().includes("kvarind") ||
+            content.toLowerCase().includes("memória de mass");
 
-        // Procurar linha de cabeçalho que contenha "Data" e pelo menos "kW" ou "kvar"
-        let headerIndex = -1;
-        for (let i = 0; i < Math.min(lines.length, 50); i++) {
-          const lower = lines[i].toLowerCase();
-          if (
-            (lower.includes("data") || lower.includes("date")) &&
-            (lower.includes("kw") ||
-              lower.includes("kvar") ||
-              lower.includes("reativa"))
-          ) {
-            headerIndex = i;
-            break;
+          const processed = isEquatorial
+            ? processarArquivoEquatorial(content, targetFP)
+            : processarArquivoGenerico(content, targetFP);
+
+          if (processed.length === 0) {
+            throw new Error("Nenhum dado válido encontrado após processamento");
           }
-        }
 
-        if (headerIndex === -1) {
+          const detectedInterval = detectSamplingInterval(processed);
+          setSamplingInterval(detectedInterval);
+          setData(processed);
+
+          Swal.fire({
+            title: "✅ Arquivo processado!",
+            text: `${processed.length} registros • ${detectedInterval}min • FP médio: ${(
+              processed.reduce((a, b) => a + b.fp, 0) / processed.length
+            ).toFixed(3)}`,
+            icon: "success",
+            timer: 3000,
+          });
+        } catch (error: any) {
+          console.error(error);
+          Swal.fire("Erro", error.message || "Falha no processamento", "error");
+        } finally {
           setLoading(false);
-          Swal.fire(
-            "Erro",
-            'Não foi possível encontrar o cabeçalho com "Data" e "kW"/"kVAr".',
-            "error",
-          );
-          return;
         }
-
-        const cleanContent = lines.slice(headerIndex).join("\n");
-
-        Papa.parse(cleanContent, {
-          header: true,
-          skipEmptyLines: true,
-          delimiter: "",
-          complete: (results) => {
-            try {
-              const processed = results.data.map((row: any) => {
-                const normalizedRow: any = {};
-                Object.keys(row).forEach((key) => {
-                  normalizedRow[key.trim().toLowerCase()] = row[key];
-                });
-
-                const getVal = (possibleKeys: string[]) => {
-                  for (const key of possibleKeys) {
-                    if (normalizedRow[key] !== undefined)
-                      return normalizedRow[key];
-                  }
-                  const foundKey = Object.keys(normalizedRow).find((k) =>
-                    possibleKeys.some((pk) => k.includes(pk.toLowerCase())),
-                  );
-                  return foundKey ? normalizedRow[foundKey] : "0";
-                };
-
-                const kw = parseBrazilianNumber(
-                  getVal([
-                    "kw fornecido",
-                    "ativa(kw)",
-                    "kw",
-                    "ativa",
-                    "demanda ativa",
-                    "consumo ativo",
-                    "potencia ativa",
-                    "canal 1",
-                    "ch1",
-                    "ch 1",
-                  ]),
-                )/ 100;
-                let kvar = parseBrazilianNumber(
-                  getVal([
-                    "kvar indutivo",
-                    "kvar capacitivo",
-                    "reativa(kvar)",
-                    "kvar",
-                    "reativa",
-                    "consumo reativo",
-                    "potencia reativa",
-                    "canal 2",
-                    "ch2",
-                    "ch 2",
-                  ]),
-                )/ 100;
-
-                const tipoReativo: "indutivo" | "capacitivo" | "neutro" =
-                  kvar > 0.01
-                    ? "indutivo"
-                    : kvar < -0.01
-                      ? "capacitivo"
-                      : "neutro";
-                const kvarAbs = Math.abs(kvar);
-                const fp = calcularFP(kw, kvarAbs);
-                const kvarNecessario =
-                  tipoReativo === "indutivo" && fp < targetFP
-                    ? calcularCorrecaoNecessaria(kw, fp, targetFP)
-                    : 0;
-
-                let fullDate = getVal(["data", "date"]) || "";
-                let hora = getVal(["hora", "time", "horario"]) || "";
-
-                if (fullDate.includes(" ") && !hora) {
-                  const parts = fullDate.split(" ");
-                  fullDate = parts[0];
-                  hora = parts[1];
-                }
-                if (!hora) hora = "00:00";
-
-                const timestamp = `${fullDate}T${hora.padStart(5, "0")}`;
-                const diaSemana = getDiaSemana(fullDate);
-                const isHorarioCritico =
-                  tipoReativo === "indutivo" && kvarAbs > 5 && fp < targetFP;
-
-                return {
-                  data: fullDate,
-                  hora,
-                  timestamp,
-                  kw,
-                  kvar: kvarAbs,
-                  fp: Math.round(fp * 100) / 100,
-                  kvarNecessario,
-                  tipoReativo,
-                  isHorarioCritico,
-                  diaSemana,
-                };
-              });
-
-              const validData = processed.filter(
-                (d) => d.kw > 0 || d.kvar !== 0,
-              );
-              if (validData.length === 0) {
-                throw new Error(
-                  "Nenhum dado de consumo (kW) válido encontrado.",
-                );
-              }
-
-              validData.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-              const detectedInterval = detectSamplingInterval(validData);
-              setSamplingInterval(detectedInterval);
-              setData(validData);
-
-              Swal.fire(
-                "Sucesso",
-                `${validData.length} registros processados! Amostragem: ${detectedInterval}min`,
-                "success",
-              );
-            } catch (error: any) {
-              console.error(error);
-              Swal.fire(
-                "Erro",
-                error.message || "Falha ao processar o arquivo CSV.",
-                "error",
-              );
-            } finally {
-              setLoading(false);
-            }
-          },
-          error: (error: any) => {
-            console.error("Erro no Papa.parse:", error);
-            Swal.fire(
-              "Erro",
-              "Falha ao analisar o CSV. Verifique o formato do arquivo.",
-              "error",
-            );
-            setLoading(false);
-          },
-        });
       };
+      
       reader.onerror = () => {
         setLoading(false);
         Swal.fire("Erro", "Falha ao ler o arquivo.", "error");
       };
+      
       reader.readAsText(file, "ISO-8859-1");
     },
     [targetFP],
@@ -929,6 +947,7 @@ export default function AnaliseMassaPage() {
     () => (data.length ? analisarHorariosCriticos(data) : []),
     [data],
   );
+  
   const periodosAnalise = useMemo(
     () => (data.length ? analisarPeriodosCriticos(data, targetFP) : []),
     [data, targetFP],
@@ -983,14 +1002,8 @@ export default function AnaliseMassaPage() {
 
     const diasNoArquivo = new Set(data.map((d) => d.data)).size;
     const fatorProjecao =
-      diasNoArquivo > 0 ? Math.min(30 / diasNoArquivo, 1) : 1; // Nunca projetar para mais que o período
+      diasNoArquivo > 0 ? Math.min(30 / diasNoArquivo, 1) : 1;
     const multaMensalProjetada = multaDetalhada.total * fatorProjecao;
-
-    const registrosIndutivos = data.filter((d) => d.tipoReativo === "indutivo");
-    const totalExcedenteKvarh =
-      registrosIndutivos
-        .filter((d) => d.fp < targetFP)
-        .reduce((acc, curr) => acc + Math.abs(curr.kvar), 0) / samplesPerHour;
 
     const picoDemanda = Math.max(...data.map((d) => d.kw));
     const fpMedio = data.reduce((acc, curr) => acc + curr.fp, 0) / data.length;
@@ -1074,6 +1087,7 @@ export default function AnaliseMassaPage() {
   }, [data]);
 
   const piorPeriodo = periodosAnalise.length > 0 ? periodosAnalise[0] : null;
+  
   if (loading) return <LoadingOverlay />;
 
   return (
@@ -1152,7 +1166,7 @@ export default function AnaliseMassaPage() {
             Aguardando dados...
           </h2>
           <p className="text-slate-500 max-w-md text-center mb-4">
-            Faça upload do CSV da concessionária (Copel, Enel, Cemig, etc.) com
+            Faça upload do CSV da concessionária (Copel, Enel, Cemig, Equatorial, etc.) com
             colunas de kW e kVAr.
           </p>
           <details className="text-sm text-slate-400 max-w-lg">
