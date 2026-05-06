@@ -16,6 +16,7 @@ import {
   Download,
   Cpu,
   FileDown,
+  Settings,
   Calendar,
   Clock,
   AlertCircle,
