@@ -921,7 +921,7 @@ const processarArquivoPadrao = async (
           totalRegistros: results.length,
         });
       },
-      error: (error) => {
+      error: (error: Error) => {
         console.error("Erro no parsing padrão:", error);
         resolve({ dados: [], intervaloAmostragem: 15, totalRegistros: 0 });
       },
