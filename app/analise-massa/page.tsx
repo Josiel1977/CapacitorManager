@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import Papa from "papaparse";
 import jsPDF from "jspdf";
 import { toPng } from "html-to-image";
@@ -153,14 +153,13 @@ const PERIODOS_DIA = [
 ];
 
 // ============================================================================
-// FUNÇÕES UTILITÁRIAS CORRIGIDAS
+// FUNÇÕES UTILITÁRIAS
 // ============================================================================
 
 const getDiaSemana = (dataStr: string): string => {
   if (!dataStr || dataStr === "") return "Desconhecido";
   
   try {
-    // Tenta extrair data do formato DD/MM
     const matchData = dataStr.match(/(\d{1,2})\/(\d{1,2})/);
     if (matchData) {
       const dia = parseInt(matchData[1]);
@@ -174,7 +173,6 @@ const getDiaSemana = (dataStr: string): string => {
       }
     }
     
-    // Tenta como ISO
     const data = new Date(dataStr);
     if (!isNaN(data.getTime())) {
       const diaNum = data.getDay();
@@ -193,12 +191,10 @@ const parseNumeroBrasileiro = (valor: any): number => {
   
   const str = String(valor).trim();
   if (!str || str === "-" || str === "#VALOR!" || str === "#DIV/0!") return 0;
-
-  // Remove separadores de milhar e troca vírgula decimal por ponto
+  
   let numeroStr = str.replace(/\./g, "");
   numeroStr = numeroStr.replace(",", ".");
   
-  // Extrai apenas números, ponto e sinal negativo
   const match = numeroStr.match(/-?\d+(?:\.\d+)?/);
   if (!match) return 0;
   
@@ -243,11 +239,9 @@ const calcularMultaANEELDetalhada = (
   for (const reg of registros) {
     if (reg.fp >= fpMinimo || reg.kw <= 0.01) continue;
 
-    // Fator de ajuste baseado na fórmula ANEEL
     const fpCalculo = Math.max(0.01, Math.min(0.99, reg.fp));
     const fatorAjuste = Math.max(0, (fpMinimo / fpCalculo) - 1);
     
-    // kVArh no intervalo (considerando potência média no período)
     const kvarhIntervalo = (Math.abs(reg.kvar) / samplesPerHour);
     const multaParcial = kvarhIntervalo * tarifa * fatorAjuste;
 
@@ -278,7 +272,7 @@ const detectarIntervaloAmostragem = (data: MassMemoryData[]): number => {
       
       if (!isNaN(t1.getTime()) && !isNaN(t2.getTime())) {
         const diff = Math.abs(t2.getTime() - t1.getTime()) / (1000 * 60);
-        if (diff >= 1 && diff <= 1440) { // Entre 1 minuto e 24 horas
+        if (diff >= 1 && diff <= 1440) {
           diffMinutes.push(diff);
         }
       }
@@ -289,14 +283,12 @@ const detectarIntervaloAmostragem = (data: MassMemoryData[]): number => {
 
   if (diffMinutes.length === 0) return 15;
   
-  // Usa mediana para maior robustez
   diffMinutes.sort((a, b) => a - b);
   const meio = Math.floor(diffMinutes.length / 2);
   const mediana = diffMinutes.length % 2 === 0
     ? (diffMinutes[meio - 1] + diffMinutes[meio]) / 2
     : diffMinutes[meio];
     
-  // Arredonda para o valor comum mais próximo (15 ou 30 minutos)
   const valorArredondado = Math.round(mediana);
   if (valorArredondado <= 10) return 15;
   if (valorArredondado <= 20) return 15;
@@ -442,14 +434,12 @@ const analisarDimensionamento = (
   const percentil90KvarCritico = calcularPercentil(kvarCriticos, 90);
   const maxKvarCritico = Math.max(...kvarCriticos, 0);
 
-  // Coeficiente de variação para avaliar estabilidade
   const variancia = periodosCriticos.length > 1
     ? periodosCriticos.reduce((acc, d) => acc + Math.pow(d.kvar - mediaKvar, 2), 0) / periodosCriticos.length
     : 0;
   const desvioPadrao = Math.sqrt(variancia);
   const coeficienteVariacao = mediaKvar > 0 ? desvioPadrao / mediaKvar : 0;
 
-  // Lógica de recomendação melhorada
   let tipoRecomendado: DimensionamentoStats["tipoRecomendado"];
   let justificativa: string;
   const percentualTempoCritico = (periodosCriticos.length / data.length) * 100;
@@ -468,11 +458,9 @@ const analisarDimensionamento = (
     justificativa = `⚖️ Variabilidade moderada (CV=${coeficienteVariacao.toFixed(2)}). Banco híbrido (fixo + automático) oferece melhor relação custo-benefício.`;
   }
 
-  // Dimensionamento prático (múltiplos de 5 kVAr)
   let bancoSugeridoFixo = Math.ceil(Math.max(mediaKvarCritico, percentil90KvarCritico * 0.6) / 5) * 5;
   let bancoSugeridoAutomatico = Math.ceil(percentil90KvarCritico / 5) * 5;
   
-  // Validação com potência instalada (máximo 40% para não sobrecarregar)
   const limiteInstalado = potenciaInstalada > 0 ? potenciaInstalada * 0.4 : Infinity;
   const alertaTransformador = bancoSugeridoAutomatico > limiteInstalado;
 
@@ -519,7 +507,6 @@ const gerarEstagiosCapacitores = (totalKvar: number): number[] => {
   const estagios: number[] = [];
   let restante = totalKvar;
   
-  // Define tamanho do estágio baseado no total
   let tamanhoEstagio: number;
   if (totalKvar <= 30) tamanhoEstagio = 5;
   else if (totalKvar <= 90) tamanhoEstagio = 10;
@@ -532,9 +519,7 @@ const gerarEstagiosCapacitores = (totalKvar: number): number[] => {
     restante -= estagio;
   }
   
-  // Otimização: usa vários estágios menores para melhor controle
   if (estagios.length > 1 && estagios[estagios.length - 1] < tamanhoEstagio / 2) {
-    // Se o último estágio é muito pequeno, combina com o anterior
     const ultimo = estagios.pop() || 0;
     if (estagios.length > 0) {
       estagios[estagios.length - 1] += ultimo;
@@ -547,7 +532,7 @@ const gerarEstagiosCapacitores = (totalKvar: number): number[] => {
 };
 
 // ============================================================================
-// PARSING DE ARQUIVOS - VERSÃO CORRIGIDA
+// PARSING DE ARQUIVOS
 // ============================================================================
 
 const processarArquivoEquatorial = (
@@ -558,7 +543,6 @@ const processarArquivoEquatorial = (
   const results: MassMemoryData[] = [];
   const currentYear = new Date().getFullYear();
   
-  // Procurar cabeçalho de dados
   let inicioDados = -1;
   for (let i = 0; i < Math.min(lines.length, 100); i++) {
     const linhaLower = lines[i].toLowerCase();
@@ -577,7 +561,6 @@ const processarArquivoEquatorial = (
       break;
     }
     
-    // Dividir por ponto e vírgula ou vírgula
     let parts = line.split(";");
     if (parts.length < 4) {
       parts = line.split(",");
@@ -586,7 +569,6 @@ const processarArquivoEquatorial = (
     if (parts.length < 3) continue;
     
     try {
-      // Mapeamento flexível de colunas
       let idxData = -1, idxHora = -1, idxKW = -1, idxKvarInd = -1, idxKvarCap = -1, idxFP = -1;
       
       for (let j = 0; j < Math.min(parts.length, 15); j++) {
@@ -599,7 +581,6 @@ const processarArquivoEquatorial = (
         else if (cell.includes("fp") || cell.includes("f.p.")) idxFP = j;
       }
       
-      // Se não encontrou cabeçalho, assume posições padrão
       if (idxData === -1 && parts.length > 1) idxData = 1;
       if (idxHora === -1 && parts.length > 2) idxHora = 2;
       if (idxKW === -1 && parts.length > 3) idxKW = 3;
@@ -614,7 +595,6 @@ const processarArquivoEquatorial = (
       
       if (kw === 0 && kvarInd === 0 && kvarCap === 0) continue;
       
-      // Calcular kVAr líquido (indutivo positivo, capacitivo negativo)
       let kvar = kvarInd - kvarCap;
       
       const tipoReativo: MassMemoryData["tipoReativo"] =
@@ -623,16 +603,14 @@ const processarArquivoEquatorial = (
       const kvarAbs = Math.abs(kvar);
       const fp = calcularFP(kw, kvarAbs);
       
-      // Tentar extrair FP da coluna específica
       let fpFinal = fp;
       if (idxFP !== -1) {
         const fpRaw = parts[idxFP];
         let fpValor = parseNumeroBrasileiro(fpRaw);
-        if (fpValor > 1) fpValor = fpValor / 100; // Se veio como 83 (83%)
+        if (fpValor > 1) fpValor = fpValor / 100;
         if (fpValor > 0 && fpValor <= 1) fpFinal = fpValor;
       }
       
-      // Formatar data
       let dataFormatada = dataRaw;
       if (dataRaw && dataRaw.includes("/")) {
         const partes = dataRaw.split("/");
@@ -681,19 +659,17 @@ const processarArquivoGenerico = (
 ): Promise<ProcessamentoResultado> => {
   return new Promise((resolve) => {
     const results: MassMemoryData[] = [];
-    const currentYear = new Date().getFullYear();
     
     Papa.parse(content, {
       header: true,
       skipEmptyLines: true,
       delimiter: ";",
       encoding: "ISO-8859-1",
-      complete: (parseResult) => {
+      complete: (parseResult: Papa.ParseResult<any>) => {
         const rows = parseResult.data as any[];
         
         for (const row of rows) {
           try {
-            // Normalizar chaves
             const normalizedRow: Record<string, any> = {};
             for (const [key, value] of Object.entries(row)) {
               if (key) {
@@ -718,7 +694,6 @@ const processarArquivoGenerico = (
               getVal(["kvar indutivo", "kvar capacitivo", "reativa(kvar)", "kvar", "reativa", "potencia reativa"])
             );
             
-            // Se kvar for 0, tenta outras combinações
             if (kvar === 0) {
               const kvarInd = parseNumeroBrasileiro(getVal(["kvarind", "kvar ind"]));
               const kvarCap = parseNumeroBrasileiro(getVal(["kvarcap", "kvar cap"]));
@@ -732,7 +707,6 @@ const processarArquivoGenerico = (
             let dataStr = getVal(["data", "date", "data medicao", "medicao data"]);
             let horaStr = getVal(["hora", "time", "horario", "hora medicao"]);
             
-            // Tentar extrair data/hora de campos combinados
             if (dataStr.includes(" ") && !horaStr) {
               const parts = dataStr.split(" ");
               dataStr = parts[0];
@@ -741,7 +715,6 @@ const processarArquivoGenerico = (
             
             if (!horaStr) horaStr = "00:00";
             
-            // Formatar data
             let dataFormatada = dataStr;
             if (dataStr && dataStr.includes("/")) {
               const partes = dataStr.split("/");
@@ -789,7 +762,7 @@ const processarArquivoGenerico = (
           totalRegistros: results.length,
         });
       },
-      error: (error) => {
+      error: (error: any) => {
         console.error("Erro no parsing:", error);
         resolve({ dados: [], intervaloAmostragem: 15, totalRegistros: 0 });
       },
@@ -933,7 +906,6 @@ export default function AnaliseMassaPage() {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      // Validação do arquivo
       if (!file.name.match(/\.(csv|txt)$/i)) {
         Swal.fire("Erro", "Por favor, selecione um arquivo CSV ou TXT.", "error");
         return;
@@ -950,7 +922,6 @@ export default function AnaliseMassaPage() {
           reader.readAsText(file, "ISO-8859-1");
         });
         
-        // Detectar formato pelo conteúdo
         const isEquatorial = 
           content.toLowerCase().includes("landis+gyr") ||
           content.toLowerCase().includes("memória de massa") ||
@@ -1067,7 +1038,6 @@ export default function AnaliseMassaPage() {
     Swal.fire("Sucesso", "CSV exportado com sucesso!", "success");
   }, [data]);
 
-  // Memoizações para performance
   const horariosCriticos = useMemo(
     () => (data.length ? analisarHorariosCriticos(data) : []),
     [data],
@@ -1176,11 +1146,9 @@ export default function AnaliseMassaPage() {
     return analisarDimensionamento(data, targetFP, potenciaInstalada, stats?.multaMensalProjetada || 0);
   }, [data, targetFP, potenciaInstalada, stats?.multaMensalProjetada, recalcKey]);
 
-  // Dados para gráficos (limitado para performance)
   const chartData = useMemo(() => {
     if (data.length === 0) return [];
     
-    // Limita a 1000 pontos para performance
     const step = Math.max(1, Math.floor(data.length / 1000));
     const sampled = data.filter((_, idx) => idx % step === 0);
     
@@ -1308,7 +1276,6 @@ export default function AnaliseMassaPage() {
             <AlertaMultaIndutiva multaIndutiva={stats?.multaIndutiva || 0} />
             <AlertaMultaCapacitiva multaCapacitiva={stats?.multaCapacitiva || 0} />
 
-            {/* HORÁRIOS CRÍTICOS */}
             {horariosCriticos.length > 0 && (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -1363,7 +1330,6 @@ export default function AnaliseMassaPage() {
               </motion.div>
             )}
 
-            {/* ANÁLISE POR DIA DA SEMANA */}
             {analiseDiasSemana.length > 0 && (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -1405,7 +1371,6 @@ export default function AnaliseMassaPage() {
               </motion.div>
             )}
 
-            {/* ANÁLISE POR PERÍODO DO DIA */}
             {periodosAnalise.length > 0 && (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -1495,7 +1460,7 @@ export default function AnaliseMassaPage() {
               </motion.div>
             )}
 
-            {/* DASHBOARD DE IMPACTO */}
+            {/* DASHBOARD */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               <motion.div 
                 initial={{ opacity: 0, scale: 0.95 }}
@@ -1935,7 +1900,7 @@ export default function AnaliseMassaPage() {
               </div>
             </div>
 
-            {/* TABELA DE REGISTROS CRÍTICOS */}
+            {/* TABELA */}
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
