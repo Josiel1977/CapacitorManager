@@ -721,13 +721,11 @@ export default function AnaliseMassaPage() {
         <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="relative z-10 max-w-2xl space-y-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-amber-300 text-xs font-bold tracking-wider uppercase">
-            <Cpu size={14} />
-            Análise Avançada • ANEEL 414/2010
+            <Cpu size={14} /> Análise Avançada • ANEEL 414/2010
           </div>
           <h1 className="text-4xl md:text-5xl font-black tracking-tight leading-tight">Capacitor Manager</h1>
           <p className="text-lg text-white/70 leading-relaxed">
-            Transforme dados brutos em economia real. Detectamos reativo excedente, calculamos multas
-            conforme ANEEL e sugerimos a correção exata para sua instalação.
+            Transforme dados brutos em economia real. Detectamos reativo excedente, calculamos multas conforme ANEEL e sugerimos a correção exata para sua instalação.
           </p>
           <div className="flex flex-wrap gap-4 pt-4">
             <label className="flex items-center gap-2 bg-amber-500 text-blue-900 px-6 py-3 rounded-xl font-bold shadow-lg shadow-amber-500/20 cursor-pointer hover:scale-105 transition-transform">
@@ -758,7 +756,13 @@ export default function AnaliseMassaPage() {
 
       <AnimatePresence mode="wait">
         {data.length === 0 ? (
-          <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200">
+          <motion.div
+            key="empty"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200"
+          >
             <div className="bg-slate-50 p-6 rounded-full mb-6">
               <FileText size={48} className="text-slate-300" />
             </div>
@@ -776,9 +780,16 @@ export default function AnaliseMassaPage() {
             </div>
           </motion.div>
         ) : (
-          <motion.div key="content" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} id="report-content" className="space-y-8">
-            {/* Alertas de multa - corrigido com optional chaining */}
-            {stats?.multaIndutiva && stats.multaIndutiva > 0 && (
+          <motion.div
+            key="content"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            id="report-content"
+            className="space-y-8"
+          >
+            {/* Alertas de multa */}
+            {stats && stats.multaIndutiva > 0 && (
               <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-xl mb-6">
                 <div className="flex items-start gap-3">
                   <Zap size={20} className="text-red-600 mt-0.5 flex-shrink-0" />
@@ -792,7 +803,7 @@ export default function AnaliseMassaPage() {
                 </div>
               </div>
             )}
-            {stats?.multaCapacitiva && stats.multaCapacitiva > 0 && (
+            {stats && stats.multaCapacitiva > 0 && (
               <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-xl mb-6">
                 <div className="flex items-start gap-3">
                   <Battery size={20} className="text-blue-600 mt-0.5 flex-shrink-0" />
@@ -975,7 +986,7 @@ export default function AnaliseMassaPage() {
                       <th className="pb-4">kVAr</th>
                       <th className="pb-4">FP</th>
                       <th className="pb-4">Correção</th>
-                    </table>
+                    </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {data
