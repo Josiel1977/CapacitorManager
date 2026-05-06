@@ -1490,7 +1490,7 @@ export default function AnaliseMassaPage() {
             </div>
           </div>
 
-           <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
+                    <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
             <h3 className="text-lg font-bold text-primary mb-6 flex items-center gap-2">
               <AlertTriangle size={18} className="text-red-500" />
               Top 10 Registros com Maior Criticidade
@@ -1505,7 +1505,7 @@ export default function AnaliseMassaPage() {
                     <th className="pb-4">kVAr</th>
                     <th className="pb-4">FP</th>
                     <th className="pb-4">Correção</th>
-                  </tr>
+                  </td>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {data
@@ -1527,7 +1527,7 @@ export default function AnaliseMassaPage() {
             </div>
           </div>
         </div>
-      );
-    }
+      </div>
+    </div>
   );
 }
