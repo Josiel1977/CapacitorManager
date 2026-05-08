@@ -27,13 +27,13 @@ const publicMenuItems = [
 
 // Itens privados (só aparecem quando logado E com assinatura ativa OU for admin)
 const privateMenuItems = [
-  { name: 'Dashboard', href: '/dimensionar', icon: LayoutDashboard },
+  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Clientes', href: '/clientes', icon: Users },
   { name: 'Bancos', href: '/bancos', icon: Database },
   { name: 'Capacitores', href: '/capacitores', icon: Zap },
   { name: 'Análise de Massa', href: '/analise-massa', icon: Activity },
   { name: 'Dimensionar', href: '/dimensionar', icon: Calculator },
-  { name: 'VAlidar-Capacitores', href: '/validar-capacitores', icon: ClipboardCheck },
+  { name: 'Medicoes', href: '/medicoes', icon: ClipboardCheck },
   { name: 'Gráficos', href: '/graficos', icon: BarChart3 },
   { name: 'Histórico', href: '/historico', icon: History },
   { name: 'Relatórios', href: '/relatorios', icon: FileText },
