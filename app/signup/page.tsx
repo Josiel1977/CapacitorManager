@@ -1,185 +1,167 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
-import Swal from "sweetalert2";
-import { motion } from "motion/react";
-import { Zap, Mail, Lock, Building } from "lucide-react";
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
+import Swal from 'sweetalert2';
+import { motion } from 'motion/react';
+import { Zap, Mail, Lock, Building } from 'lucide-react';
 
 const PLANOS = [
-  {
-    id: "basico",
-    nome: "Básico",
-    preco: "R$ 149/mês",
-    descricao: "1 cliente, 1 banco, 6 capacitores",
-  },
-  {
-    id: "essencial",
-    nome: "Essencial",
-    preco: "R$ 297/mês",
-    descricao: "5 clientes, 10 bancos, 50 capacitores",
-  },
-  {
-    id: "pro",
-    nome: "Pro",
-    preco: "R$ 597/mês",
-    descricao: "20 clientes, 50 bancos, 200 capacitores",
-  },
-  {
-    id: "master",
-    nome: "Master",
-    preco: "R$ 797/mês",
-    descricao: "50+ clientes, bancos ilimitados",
-  },
+  { id: 'basico', nome: 'Básico', preco: 'R$ 149/mês', descricao: '1 cliente, 1 banco, 6 capacitores' },
+  { id: 'essencial', nome: 'Essencial', preco: 'R$ 297/mês', descricao: '5 clientes, 10 bancos, 50 capacitores' },
+  { id: 'pro', nome: 'Pro', preco: 'R$ 597/mês', descricao: '20 clientes, 50 bancos, 200 capacitores' },
+  { id: 'master', nome: 'Master', preco: 'R$ 797/mês', descricao: '50+ clientes, bancos ilimitados' },
 ];
+
+// Função para gerar subdomain a partir do nome da empresa
+const gerarSubdomain = (nome: string): string => {
+  const baseSubdomain = nome
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .replace(/[^a-z0-9]+/g, '-')     // Substitui caracteres especiais por hífen
+    .replace(/^-+|-+$/g, '');        // Remove hífens do início e fim
+  
+  // Adiciona timestamp para garantir unicidade
+  return `${baseSubdomain}-${Date.now()}`;
+};
 
 export default function SignupPage() {
   const router = useRouter();
-  const [empresa, setEmpresa] = useState("");
-  const [email, setEmail] = useState("");
-  const [senha, setSenha] = useState("");
-  const [plano, setPlano] = useState("basico");
+  const [empresa, setEmpresa] = useState('');
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+  const [plano, setPlano] = useState('basico');
   const [aceiteTermos, setAceiteTermos] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!aceiteTermos) {
-      Swal.fire(
-        "Aceite necessário",
-        "Você precisa aceitar os Termos de Uso e a Política de Privacidade.",
-        "warning",
-      );
+      Swal.fire('Aceite necessário', 'Você precisa aceitar os Termos de Uso e a Política de Privacidade.', 'warning');
       return;
     }
     setLoading(true);
 
     try {
-      const response = await fetch("/api/auth/signup", {
-        // Ajuste o caminho da sua API
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          empresa,
-          email,
-          senha,
-          plano,
-          aceiteTermos,
-        }),
+      // 1. Criar usuário no Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password: senha,
+        options: { data: { nome: empresa, plano_interesse: plano } },
       });
+      if (authError) throw new Error(authError.message);
+      const userId = authData.user?.id;
+      if (!userId) throw new Error('Erro ao criar usuário');
 
-      const data = await response.json();
+      // 2. Criar tenant (empresa)
+      const tenantId = crypto.randomUUID();
+      const subdomain = gerarSubdomain(empresa); // Gera subdomain automaticamente
 
-      if (!response.ok) {
-        throw new Error(data.error || "Erro ao criar conta");
-      }
+      const { error: tenantError } = await supabase
+        .from('tenants')
+        .insert({
+          id: tenantId,
+          name: empresa,
+          subdomain: subdomain, // Campo obrigatório
+          payment_status: 'pending',
+          plano: null,
+        });
+      if (tenantError) throw new Error(tenantError.message);
+
+      // 3. Criar perfil do usuário
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: userId,
+          tenant_id: tenantId,
+          email,
+          nome: empresa,
+          plan: 'demo',
+          subscription_status: 'inactive',
+        });
+      if (profileError) throw new Error(profileError.message);
+
+      // 4. Fazer login automático (já que a sessão pode não estar ativa após signUp)
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password: senha });
+      if (signInError) console.warn('Login automático falhou', signInError);
 
       Swal.fire({
-        title: "Conta criada!",
-        text: "Agora escolha o plano para ativar seu acesso.",
-        icon: "success",
-        confirmButtonColor: "#0a2b3c",
+        title: 'Conta criada!',
+        text: 'Agora escolha o plano para ativar seu acesso.',
+        icon: 'success',
+        confirmButtonColor: '#0a2b3c',
       });
-
-      router.push("/planos");
+      router.push(`/planos?tenant_id=${tenantId}`);
     } catch (error: any) {
-      Swal.fire("Erro", error.message, "error");
+      Swal.fire('Erro', error.message, 'error');
     } finally {
       setLoading(false);
     }
   };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 to-secondary/10 p-4">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden"
-      >
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
         <div className="bg-primary p-6 text-center">
-          <div className="inline-flex p-3 bg-white/10 rounded-xl mb-4">
-            <Zap size={32} className="text-secondary" />
-          </div>
+          <div className="inline-flex p-3 bg-white/10 rounded-xl mb-4"><Zap size={32} className="text-secondary" /></div>
           <h1 className="text-2xl font-bold text-white">CapacitorManager</h1>
           <p className="text-white/70 text-sm">Comece sua jornada</p>
         </div>
         <form onSubmit={handleSignup} className="p-6 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Nome da Empresa *
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Empresa *</label>
             <div className="relative">
-              <Building
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                size={18}
-              />
+              <Building className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input
                 type="text"
                 required
                 placeholder="Minha Empresa Ltda"
                 className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:border-primary focus:outline-none"
                 value={empresa}
-                onChange={(e) => setEmpresa(e.target.value)}
+                onChange={e => setEmpresa(e.target.value)}
               />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              E-mail *
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">E-mail *</label>
             <div className="relative">
-              <Mail
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                size={18}
-              />
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input
                 type="email"
                 required
                 placeholder="contato@empresa.com"
                 className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:border-primary focus:outline-none"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={e => setEmail(e.target.value)}
               />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Senha *
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Senha *</label>
             <div className="relative">
-              <Lock
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                size={18}
-              />
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input
                 type="password"
                 required
-                placeholder="••••••"
+                placeholder="Minimo 6 caracteres"
                 className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:border-primary focus:outline-none"
                 value={senha}
-                onChange={(e) => setSenha(e.target.value)}
+                onChange={e => setSenha(e.target.value)}
               />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Escolha seu plano *
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Escolha seu plano *</label>
             <div className="space-y-2">
-              {PLANOS.map((p) => (
+              {PLANOS.map(p => (
                 <label
                   key={p.id}
-                  className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition ${plano === p.id ? "border-primary bg-primary/5" : "border-slate-200 hover:bg-slate-50"}`}
+                  className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition ${plano === p.id ? 'border-primary bg-primary/5' : 'border-slate-200 hover:bg-slate-50'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <input
-                      type="radio"
-                      name="plano"
-                      value={p.id}
-                      checked={plano === p.id}
-                      onChange={() => setPlano(p.id)}
-                      className="text-primary"
-                    />
+                    <input type="radio" name="plano" value={p.id} checked={plano === p.id} onChange={() => setPlano(p.id)} className="text-primary" />
                     <div>
                       <p className="font-medium">{p.nome}</p>
                       <p className="text-xs text-slate-500">{p.descricao}</p>
@@ -191,31 +173,10 @@ export default function SignupPage() {
             </div>
           </div>
           <div className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              id="termos"
-              checked={aceiteTermos}
-              onChange={(e) => setAceiteTermos(e.target.checked)}
-              className="mt-1 text-primary focus:ring-primary"
-            />
+            <input type="checkbox" id="termos" checked={aceiteTermos} onChange={e => setAceiteTermos(e.target.checked)} className="mt-1 text-primary focus:ring-primary" />
             <label htmlFor="termos" className="text-xs text-slate-600">
-              Li e aceito os{" "}
-              <a
-                href="/termos"
-                target="_blank"
-                className="text-primary hover:underline"
-              >
-                Termos de Uso
-              </a>{" "}
-              e a{" "}
-              <a
-                href="/privacidade"
-                target="_blank"
-                className="text-primary hover:underline"
-              >
-                Política de Privacidade
-              </a>
-              .
+              Li e aceito os <a href="/termos" target="_blank" className="text-primary hover:underline">Termos de Uso</a> e a{' '}
+              <a href="/privacidade" target="_blank" className="text-primary hover:underline">Política de Privacidade</a>.
             </label>
           </div>
           <button
@@ -223,17 +184,10 @@ export default function SignupPage() {
             disabled={loading || !aceiteTermos}
             className="w-full bg-primary text-white py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {loading ? (
-              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              "Criar conta"
-            )}
+            {loading ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Criar conta'}
           </button>
           <p className="text-center text-xs text-slate-400">
-            Já tem conta?{" "}
-            <a href="/login" className="text-primary hover:underline">
-              Faça login
-            </a>
+            Já tem conta? <a href="/login" className="text-primary hover:underline">Faça login</a>
           </p>
         </form>
       </motion.div>
