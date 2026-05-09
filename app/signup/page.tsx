@@ -14,16 +14,13 @@ const PLANOS = [
   { id: 'master', nome: 'Master', preco: 'R$ 797/mês', descricao: '50+ clientes, bancos ilimitados' },
 ];
 
-// Função para gerar subdomain a partir do nome da empresa
 const gerarSubdomain = (nome: string): string => {
   const baseSubdomain = nome
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
-    .replace(/[^a-z0-9]+/g, '-')     // Substitui caracteres especiais por hífen
-    .replace(/^-+|-+$/g, '');        // Remove hífens do início e fim
-  
-  // Adiciona timestamp para garantir unicidade
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
   return `${baseSubdomain}-${Date.now()}`;
 };
 
@@ -45,47 +42,108 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      // 1. Criar usuário no Supabase Auth
+      let userId: string | undefined;
+      let isExistingUser = false;
+
+      // 1. Tentar criar usuário no Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password: senha,
         options: { data: { nome: empresa, plano_interesse: plano } },
       });
-      if (authError) throw new Error(authError.message);
-      const userId = authData.user?.id;
-      if (!userId) throw new Error('Erro ao criar usuário');
 
-      // 2. Criar tenant (empresa)
+      if (authError) {
+        // Se o usuário já existe, tentar fazer login
+        if (authError.message.includes('already registered') || authError.message.includes('already exists')) {
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email,
+            password: senha,
+          });
+          
+          if (signInError) {
+            throw new Error('Usuário já cadastrado. Tente fazer login ou use outra senha.');
+          }
+          
+          userId = signInData.user?.id;
+          isExistingUser = true;
+        } else {
+          throw new Error(authError.message);
+        }
+      } else {
+        userId = authData.user?.id;
+      }
+
+      if (!userId) throw new Error('Erro ao criar/buscar usuário');
+
+      // 2. Verificar se já existe profile para este usuário
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('tenant_id')
+        .eq('id', userId)
+        .single();
+
+      if (existingProfile?.tenant_id) {
+        // Usuário já tem profile e tenant, redirecionar
+        Swal.fire({
+          title: 'Bem-vindo de volta!',
+          text: 'Você já possui uma conta. Redirecionando...',
+          icon: 'info',
+          confirmButtonColor: '#0a2b3c',
+        });
+        router.push(`/planos?tenant_id=${existingProfile.tenant_id}`);
+        return;
+      }
+
+      // 3. Criar tenant (empresa)
       const tenantId = crypto.randomUUID();
       const subdomain = gerarSubdomain(empresa);
-      
+
       const { error: tenantError } = await supabase
         .from('tenants')
         .insert({
           id: tenantId,
           name: empresa,
-          subdomain: subdomain,  // CORRIGIDO: campo obrigatório adicionado
+          subdomain: subdomain,
           payment_status: 'pending',
           plano: null,
         });
-      if (tenantError) throw new Error(tenantError.message);
+      
+      if (tenantError) {
+        // Se o tenant já existe com esse subdomain, gerar outro
+        if (tenantError.message.includes('duplicate') || tenantError.message.includes('unique')) {
+          const newSubdomain = `${subdomain}-${Math.random().toString(36).substring(2, 7)}`;
+          const { error: retryError } = await supabase
+            .from('tenants')
+            .insert({
+              id: tenantId,
+              name: empresa,
+              subdomain: newSubdomain,
+              payment_status: 'pending',
+              plano: null,
+            });
+          if (retryError) throw new Error(retryError.message);
+        } else {
+          throw new Error(tenantError.message);
+        }
+      }
 
-      // 3. Criar perfil do usuário
+      // 4. Criar perfil do usuário (SEM o campo 'nome')
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
           id: userId,
           tenant_id: tenantId,
           email,
-          // CORRIGIDO: removido campo 'nome' que não existe na tabela
           plan: 'demo',
           subscription_status: 'inactive',
         });
+      
       if (profileError) throw new Error(profileError.message);
 
-      // 4. Fazer login automático (já que a sessão pode não estar ativa após signUp)
-      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password: senha });
-      if (signInError) console.warn('Login automático falhou', signInError);
+      // 5. Fazer login automático se for novo usuário
+      if (!isExistingUser) {
+        await supabase.auth.signInWithPassword({ email, password: senha });
+      }
 
       Swal.fire({
         title: 'Conta criada!',
