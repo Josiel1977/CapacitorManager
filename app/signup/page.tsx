@@ -14,6 +14,16 @@ const PLANOS = [
   { id: 'master', nome: 'Master', preco: 'R$ 797/mês', descricao: '50+ clientes, bancos ilimitados' },
 ];
 
+// Função para gerar subdomain a partir do nome da empresa
+const gerarSubdomain = (nome: string): string => {
+  return nome
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .replace(/[^a-z0-9]+/g, '-')     // Substitui caracteres especiais por hífen
+    .replace(/^-+|-+$/g, '');        // Remove hífens do início e fim
+};
+
 export default function SignupPage() {
   const router = useRouter();
   const [empresa, setEmpresa] = useState('');
@@ -44,11 +54,14 @@ export default function SignupPage() {
 
       // 2. Criar tenant (empresa)
       const tenantId = crypto.randomUUID();
+      const subdomain = gerarSubdomain(empresa); // Gera o subdomain automaticamente
+
       const { error: tenantError } = await supabase
         .from('tenants')
         .insert({
           id: tenantId,
           name: empresa,
+          subdomain: subdomain, // Campo obrigatório adicionado
           payment_status: 'pending',
           plano: null,
         });
