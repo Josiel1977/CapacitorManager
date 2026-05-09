@@ -57,14 +57,14 @@ export default function SignupPage() {
 
       // 2. Criar tenant (empresa)
       const tenantId = crypto.randomUUID();
-      const subdomain = gerarSubdomain(empresa); // Gera subdomain automaticamente
-
+      const subdomain = gerarSubdomain(empresa);
+      
       const { error: tenantError } = await supabase
         .from('tenants')
         .insert({
           id: tenantId,
           name: empresa,
-          subdomain: subdomain, // Campo obrigatório
+          subdomain: subdomain,  // CORRIGIDO: campo obrigatório adicionado
           payment_status: 'pending',
           plano: null,
         });
@@ -77,7 +77,7 @@ export default function SignupPage() {
           id: userId,
           tenant_id: tenantId,
           email,
-          nome: empresa,
+          // CORRIGIDO: removido campo 'nome' que não existe na tabela
           plan: 'demo',
           subscription_status: 'inactive',
         });
@@ -145,7 +145,7 @@ export default function SignupPage() {
               <input
                 type="password"
                 required
-                placeholder="Minimo 6 caracteres"
+                placeholder="Mínimo 6 caracteres"
                 className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:border-primary focus:outline-none"
                 value={senha}
                 onChange={e => setSenha(e.target.value)}
