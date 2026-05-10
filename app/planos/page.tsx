@@ -1,8 +1,8 @@
 'use client';
 
 import { useAuth } from '@/lib/AuthContext';
-import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState, Suspense } from 'react';
 import Swal from 'sweetalert2';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -20,21 +20,26 @@ const PLANOS = [
   { id: 'master', nome: 'Master', preco: 797, descricao: '50 clientes · 100 bancos · 600 capacitores', checkoutUrl: CHECKOUT_URLS.master },
 ];
 
-export default function PlanosPage() {
+function PlanosContent() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tenantId, setTenantId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchTenant = async () => {
-      if (!isAuthenticated || !user) {
-        // Se não estiver logado, tenta pegar da URL (caso venha do cadastro)
-        const params = new URLSearchParams(window.location.search);
-        const tid = params.get('tenant_id');
-        if (tid) setTenantId(tid);
+      // Prioritize URL parameter (comes from redirect after signup)
+      const tid = searchParams.get('tenant_id');
+      if (tid) {
+        setTenantId(tid);
         return;
       }
-      // Se logado, busca do perfil
+
+      if (!isAuthenticated || !user) {
+        return;
+      }
+      
+      // Se logado e sem parametro, busca do perfil
       const { data: profile } = await supabase
         .from('profiles')
         .select('tenant_id')
@@ -43,7 +48,7 @@ export default function PlanosPage() {
       setTenantId(profile?.tenant_id || null);
     };
     fetchTenant();
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user, searchParams]);
 
   if (isLoading) {
     return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" /></div>;
@@ -85,5 +90,13 @@ export default function PlanosPage() {
         ))}
       </div>
     </div>
+  );
+}
+
+export default function PlanosPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" /></div>}>
+      <PlanosContent />
+    </Suspense>
   );
 }
