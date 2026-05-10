@@ -53,7 +53,6 @@ export default function SignupPage() {
       });
 
       if (authError) {
-        // Se o usuário já existe, tentar fazer login
         if (authError.message.includes('already registered') || authError.message.includes('already exists')) {
           const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
             email,
@@ -83,7 +82,6 @@ export default function SignupPage() {
         .single();
 
       if (existingProfile?.tenant_id) {
-        // Usuário já tem profile e tenant, redirecionar
         Swal.fire({
           title: 'Bem-vindo de volta!',
           text: 'Você já possui uma conta. Redirecionando...',
@@ -97,6 +95,7 @@ export default function SignupPage() {
       // 3. Criar tenant (empresa)
       const tenantId = crypto.randomUUID();
       const subdomain = gerarSubdomain(empresa);
+      const planoNome = PLANOS.find(p => p.id === plano)?.nome || 'Básico';
 
       const { error: tenantError } = await supabase
         .from('tenants')
@@ -104,43 +103,37 @@ export default function SignupPage() {
           id: tenantId,
           name: empresa,
           subdomain: subdomain,
+          email: email,
+          plan: 'trial',
+          status: 'active',
+          plano: plano,
           payment_status: 'pending',
-          plano: null,
+          termos_aceito: true,
+          data_aceite_termos: new Date().toISOString(),
+          limite_clientes: 5,
+          limite_bancos: 10,
+          limite_capacitores: 50,
         });
       
-      if (tenantError) {
-        // Se o tenant já existe com esse subdomain, gerar outro
-        if (tenantError.message.includes('duplicate') || tenantError.message.includes('unique')) {
-          const newSubdomain = `${subdomain}-${Math.random().toString(36).substring(2, 7)}`;
-          const { error: retryError } = await supabase
-            .from('tenants')
-            .insert({
-              id: tenantId,
-              name: empresa,
-              subdomain: newSubdomain,
-              payment_status: 'pending',
-              plano: null,
-            });
-          if (retryError) throw new Error(retryError.message);
-        } else {
-          throw new Error(tenantError.message);
-        }
-      }
+      if (tenantError) throw new Error(tenantError.message);
 
-      // 4. Criar perfil do usuário (SEM o campo 'nome')
+      // 4. Criar perfil do usuário (com campos corretos da tabela)
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
           id: userId,
           tenant_id: tenantId,
-          email,
-          plan: 'demo',
+          email: email,
+          role: 'cliente',
+          status: 'pendente',
+          plano: planoNome,
+          plan: 'free',
           subscription_status: 'inactive',
         });
       
       if (profileError) throw new Error(profileError.message);
 
-      // 5. Fazer login automático se for novo usuário
+      // 5. Fazer login automático
       if (!isExistingUser) {
         await supabase.auth.signInWithPassword({ email, password: senha });
       }
