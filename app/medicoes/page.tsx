@@ -18,38 +18,21 @@ import { cn } from '@/lib/utils';
 // FUNÇÕES DE CÁLCULO (já validadas)
 // ============================================================================
 
-/**
- * Calcula a corrente teórica do capacitor (considerando a tensão fornecida)
- */
-function calcularCorrenteTeorica(
-  potenciaKvar: number,
-  tensao: number,
-): number {
+function calcularCorrenteTeorica(potenciaKvar: number, tensao: number): number {
   if (!tensao || tensao === 0) return 0;
   return (potenciaKvar * 1000) / (Math.sqrt(3) * tensao);
 }
 
-/**
- * Calcula a capacitância teórica para ligação delta (C_total = C_fase * 1.5)
- */
-function calcularCapacitanciaTeoricaDelta(
-  capacitanciaNominalFase: number,
-): number {
+function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
   if (!capacitanciaNominalFase) return 0;
   return capacitanciaNominalFase * 1.5;
 }
 
-/**
- * Calcula desvio percentual
- */
 function calcularDesvio(valorMedido: number, valorTeorico: number): number {
   if (!valorTeorico || valorTeorico === 0) return 0;
   return ((valorMedido - valorTeorico) / valorTeorico) * 100;
 }
 
-/**
- * Obtém status baseado nas tolerâncias da configuração
- */
 function getStatusValidacao(
   desvio: number,
   config: {
@@ -72,9 +55,6 @@ function getStatusValidacao(
   return 'reprovado';
 }
 
-/**
- * Converte string para número (trata vírgula e ponto)
- */
 function parseNumber(value: string): number {
   if (!value) return 0;
   const str = value.replace(',', '.');
@@ -91,7 +71,6 @@ function ValidarCapacitoresContent() {
   const searchParams = useSearchParams();
   const capacitorIdParam = searchParams.get('capacitor_id');
 
-  // Estados
   const [clientes, setClientes] = useState<any[]>([]);
   const [bancos, setBancos] = useState<any[]>([]);
   const [capacitores, setCapacitores] = useState<any[]>([]);
@@ -103,7 +82,6 @@ function ValidarCapacitoresContent() {
     tolerancia_max_atencao: 15,
   });
 
-  // Seleção e medição
   const [selection, setSelection] = useState({
     cliente_id: '',
     banco_id: '',
@@ -119,13 +97,11 @@ function ValidarCapacitoresContent() {
 
   const [resultado, setResultado] = useState<any>(null);
 
-  // Carregar configurações e clientes
   useEffect(() => {
     fetchConfig();
     fetchClientes();
   }, []);
 
-  // Se veio capacitor_id pela URL, buscar e pré-selecionar
   useEffect(() => {
     if (capacitorIdParam) {
       buscarEPreSelecionarCapacitor(capacitorIdParam);
@@ -184,7 +160,6 @@ function ValidarCapacitoresContent() {
 
       if (error || !cap) throw new Error('Capacitor não encontrado');
 
-      // Pré-seleciona cliente e banco
       const clienteId = cap.bancos_capacitores?.cliente_id;
       const bancoId = cap.banco_id;
 
@@ -204,7 +179,6 @@ function ValidarCapacitoresContent() {
     }
   }
 
-  // Efeitos para carregar bancos/capacitores quando seleção mudar
   useEffect(() => {
     if (selection.cliente_id) {
       fetchBancos(selection.cliente_id);
@@ -223,7 +197,6 @@ function ValidarCapacitoresContent() {
     }
   }, [selection.banco_id]);
 
-  // Reset resultado ao mudar seleção ou medição
   useEffect(() => {
     setResultado(null);
   }, [selection, medicao]);
@@ -254,10 +227,7 @@ function ValidarCapacitoresContent() {
       }
 
       const correnteTeorica = calcularCorrenteTeorica(cap.potencia_kvar, vMedida);
-      const correnteNominal = calcularCorrenteTeorica(
-        cap.potencia_kvar,
-        cap.tensao_nominal_v,
-      );
+      const correnteNominal = calcularCorrenteTeorica(cap.potencia_kvar, cap.tensao_nominal_v);
       const desvio = calcularDesvio(iMedida, correnteTeorica);
       const status = getStatusValidacao(desvio, config);
 
@@ -278,9 +248,7 @@ function ValidarCapacitoresContent() {
         return;
       }
 
-      const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(
-        cap.capacitancia_nominal_uf,
-      );
+      const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(cap.capacitancia_nominal_uf);
       const desvio = calcularDesvio(cMedida, capacitanciaTeorica);
       const status = getStatusValidacao(desvio, config);
 
@@ -296,6 +264,9 @@ function ValidarCapacitoresContent() {
     }
   }
 
+  // ==========================================================================
+  // FUNÇÃO CORRIGIDA: tenant_id adicionado
+  // ==========================================================================
   async function handleSalvar() {
     if (!resultado) {
       Swal.fire('Atenção', 'Calcule o resultado antes de salvar', 'warning');
@@ -308,7 +279,9 @@ function ValidarCapacitoresContent() {
       const iMedida = parseNumber(medicao.corrente_medida_a);
       const cMedida = parseNumber(medicao.capacitancia_medida_uf);
 
+      // 🔥 CORREÇÃO: tenant_id é obrigatório e usa o cliente_id selecionado
       const payload: any = {
+        tenant_id: selection.cliente_id,   // <-- LINHA ADICIONADA
         capacitor_id: selection.capacitor_id,
         cliente_id: selection.cliente_id,
         banco_id: selection.banco_id,
@@ -344,7 +317,6 @@ function ValidarCapacitoresContent() {
         capacitancia_medida_uf: '',
       });
       if (!capacitorIdParam) {
-        // Se não veio parâmetro, apenas limpa a seleção do capacitor
         setSelection((prev) => ({ ...prev, capacitor_id: '' }));
       }
     } catch (error: any) {
@@ -354,6 +326,7 @@ function ValidarCapacitoresContent() {
       setLoading(false);
     }
   }
+  // ==========================================================================
 
   function getRecomendacao(status: string) {
     switch (status) {
@@ -370,7 +343,6 @@ function ValidarCapacitoresContent() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-8 pb-12">
-      {/* Cabeçalho com botão voltar se veio por parâmetro */}
       <div className="flex items-center gap-4">
         {capacitorIdParam && (
           <button
@@ -390,7 +362,6 @@ function ValidarCapacitoresContent() {
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-        {/* Formulário de seleção e medição */}
         <div className="lg:col-span-2 space-y-6">
           <section className="rounded-xl bg-white p-6 shadow-sm">
             <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-primary">
@@ -603,7 +574,6 @@ function ValidarCapacitoresContent() {
           </section>
         </div>
 
-        {/* Painel de resultado */}
         <div className="space-y-6">
           <section className="flex min-h-[400px] flex-col rounded-xl bg-white p-6 shadow-sm">
             <h2 className="mb-6 text-lg font-semibold text-primary">
@@ -747,7 +717,6 @@ function ValidarCapacitoresContent() {
   );
 }
 
-// Componente principal com Suspense (por causa do useSearchParams)
 export default function ValidarCapacitoresPage() {
   return (
     <Suspense
