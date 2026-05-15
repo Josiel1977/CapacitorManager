@@ -15,24 +15,41 @@ import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 
 // ============================================================================
-// FUNÇÕES DE CÁLCULO
+// FUNÇÕES DE CÁLCULO (já validadas)
 // ============================================================================
 
-function calcularCorrenteTeorica(potenciaKvar: number, tensao: number): number {
+/**
+ * Calcula a corrente teórica do capacitor (considerando a tensão fornecida)
+ */
+function calcularCorrenteTeorica(
+  potenciaKvar: number,
+  tensao: number,
+): number {
   if (!tensao || tensao === 0) return 0;
   return (potenciaKvar * 1000) / (Math.sqrt(3) * tensao);
 }
 
-function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
+/**
+ * Calcula a capacitância teórica para ligação delta (C_total = C_fase * 1.5)
+ */
+function calcularCapacitanciaTeoricaDelta(
+  capacitanciaNominalFase: number,
+): number {
   if (!capacitanciaNominalFase) return 0;
   return capacitanciaNominalFase * 1.5;
 }
 
+/**
+ * Calcula desvio percentual
+ */
 function calcularDesvio(valorMedido: number, valorTeorico: number): number {
   if (!valorTeorico || valorTeorico === 0) return 0;
   return ((valorMedido - valorTeorico) / valorTeorico) * 100;
 }
 
+/**
+ * Obtém status baseado nas tolerâncias da configuração
+ */
 function getStatusValidacao(
   desvio: number,
   config: {
@@ -55,6 +72,9 @@ function getStatusValidacao(
   return 'reprovado';
 }
 
+/**
+ * Converte string para número (trata vírgula e ponto)
+ */
 function parseNumber(value: string): number {
   if (!value) return 0;
   const str = value.replace(',', '.');
@@ -71,13 +91,11 @@ function ValidarCapacitoresContent() {
   const searchParams = useSearchParams();
   const capacitorIdParam = searchParams.get('capacitor_id');
 
+  // Estados
   const [clientes, setClientes] = useState<any[]>([]);
   const [bancos, setBancos] = useState<any[]>([]);
   const [capacitores, setCapacitores] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [userTenantId, setUserTenantId] = useState<string | null>(null);
-
   const [config, setConfig] = useState<any>({
     tolerancia_min_aprovado: -5,
     tolerancia_max_aprovado: 10,
@@ -85,6 +103,7 @@ function ValidarCapacitoresContent() {
     tolerancia_max_atencao: 15,
   });
 
+  // Seleção e medição
   const [selection, setSelection] = useState({
     cliente_id: '',
     banco_id: '',
@@ -100,47 +119,18 @@ function ValidarCapacitoresContent() {
 
   const [resultado, setResultado] = useState<any>(null);
 
-  // ==========================================================================
-  // INICIALIZAÇÃO: detecta admin (por lista de e-mails) e tenant do usuário comum
-  // ==========================================================================
+  // Carregar configurações e clientes
   useEffect(() => {
-    async function loadUserInfo() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        // Lista de e-mails considerados administradores
-        const adminEmails = [
-          'suporte@capacitormanager.com.br',
-          'eng.eletrica1977@gmail.com',
-          'admin@capacitormanager.com',
-        ];
-        const isUserAdmin = adminEmails.includes(user.email || '');
-        setIsAdmin(isUserAdmin);
-
-        if (!isUserAdmin) {
-          // Usuário comum: busca tenant_id
-          let tenant = user.user_metadata?.tenant_id;
-          if (!tenant) {
-            const { data: perfil } = await supabase
-              .from('perfis')
-              .select('tenant_id')
-              .eq('user_id', user.id)
-              .single();
-            tenant = perfil?.tenant_id;
-          }
-          setUserTenantId(tenant || null);
-        } else {
-          setUserTenantId(null); // Admin não tem tenant fixo
-        }
-      }
-    }
-    loadUserInfo();
     fetchConfig();
+    fetchClientes();
   }, []);
 
-  // Carrega clientes conforme permissão
+  // Se veio capacitor_id pela URL, buscar e pré-selecionar
   useEffect(() => {
-    fetchClientes();
-  }, [isAdmin, userTenantId]);
+    if (capacitorIdParam) {
+      buscarEPreSelecionarCapacitor(capacitorIdParam);
+    }
+  }, [capacitorIdParam]);
 
   async function fetchConfig() {
     try {
@@ -156,11 +146,11 @@ function ValidarCapacitoresContent() {
   }
 
   async function fetchClientes() {
-    let query = supabase.from('clientes').select('id, nome').eq('ativo', true);
-    if (!isAdmin && userTenantId) {
-      query = query.eq('tenant_id', userTenantId);
-    }
-    const { data } = await query.order('nome');
+    const { data } = await supabase
+      .from('clientes')
+      .select('id, nome')
+      .eq('ativo', true)
+      .order('nome');
     setClientes(data || []);
   }
 
@@ -194,6 +184,7 @@ function ValidarCapacitoresContent() {
 
       if (error || !cap) throw new Error('Capacitor não encontrado');
 
+      // Pré-seleciona cliente e banco
       const clienteId = cap.bancos_capacitores?.cliente_id;
       const bancoId = cap.banco_id;
 
@@ -213,12 +204,7 @@ function ValidarCapacitoresContent() {
     }
   }
 
-  useEffect(() => {
-    if (capacitorIdParam) {
-      buscarEPreSelecionarCapacitor(capacitorIdParam);
-    }
-  }, [capacitorIdParam]);
-
+  // Efeitos para carregar bancos/capacitores quando seleção mudar
   useEffect(() => {
     if (selection.cliente_id) {
       fetchBancos(selection.cliente_id);
@@ -237,6 +223,7 @@ function ValidarCapacitoresContent() {
     }
   }, [selection.banco_id]);
 
+  // Reset resultado ao mudar seleção ou medição
   useEffect(() => {
     setResultado(null);
   }, [selection, medicao]);
@@ -267,7 +254,10 @@ function ValidarCapacitoresContent() {
       }
 
       const correnteTeorica = calcularCorrenteTeorica(cap.potencia_kvar, vMedida);
-      const correnteNominal = calcularCorrenteTeorica(cap.potencia_kvar, cap.tensao_nominal_v);
+      const correnteNominal = calcularCorrenteTeorica(
+        cap.potencia_kvar,
+        cap.tensao_nominal_v,
+      );
       const desvio = calcularDesvio(iMedida, correnteTeorica);
       const status = getStatusValidacao(desvio, config);
 
@@ -288,7 +278,9 @@ function ValidarCapacitoresContent() {
         return;
       }
 
-      const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(cap.capacitancia_nominal_uf);
+      const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(
+        cap.capacitancia_nominal_uf,
+      );
       const desvio = calcularDesvio(cMedida, capacitanciaTeorica);
       const status = getStatusValidacao(desvio, config);
 
@@ -304,33 +296,10 @@ function ValidarCapacitoresContent() {
     }
   }
 
-  // ==========================================================================
-  // FUNÇÃO SALVAR CORRIGIDA (ADMIN USA cliente_id COMO tenant_id)
-  // ==========================================================================
   async function handleSalvar() {
     if (!resultado) {
       Swal.fire('Atenção', 'Calcule o resultado antes de salvar', 'warning');
       return;
-    }
-
-    let tenantIdParaSalvar: string | null = null;
-
-    if (isAdmin) {
-      if (!selection.cliente_id) {
-        Swal.fire('Erro', 'Como administrador, selecione um cliente antes de salvar.', 'error');
-        return;
-      }
-      tenantIdParaSalvar = selection.cliente_id;
-    } else {
-      if (!userTenantId) {
-        Swal.fire('Erro', 'Seu usuário não está associado a um tenant. Contate o administrador.', 'error');
-        return;
-      }
-      if (selection.cliente_id && selection.cliente_id !== userTenantId) {
-        Swal.fire('Erro', 'Você só pode salvar medições para o cliente associado à sua conta.', 'error');
-        return;
-      }
-      tenantIdParaSalvar = userTenantId;
     }
 
     setLoading(true);
@@ -340,9 +309,8 @@ function ValidarCapacitoresContent() {
       const cMedida = parseNumber(medicao.capacitancia_medida_uf);
 
       const payload: any = {
-        tenant_id: tenantIdParaSalvar,
         capacitor_id: selection.capacitor_id,
-        cliente_id: selection.cliente_id || (isAdmin ? selection.cliente_id : userTenantId),
+        cliente_id: selection.cliente_id,
         banco_id: selection.banco_id,
         tipo_teste: selection.tipo_teste,
         desvio_percentual: resultado.desvioOriginal,
@@ -375,7 +343,8 @@ function ValidarCapacitoresContent() {
         corrente_medida_a: '',
         capacitancia_medida_uf: '',
       });
-      if (!capacitorIdParam && !isAdmin) {
+      if (!capacitorIdParam) {
+        // Se não veio parâmetro, apenas limpa a seleção do capacitor
         setSelection((prev) => ({ ...prev, capacitor_id: '' }));
       }
     } catch (error: any) {
@@ -401,6 +370,7 @@ function ValidarCapacitoresContent() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-8 pb-12">
+      {/* Cabeçalho com botão voltar se veio por parâmetro */}
       <div className="flex items-center gap-4">
         {capacitorIdParam && (
           <button
@@ -416,15 +386,11 @@ function ValidarCapacitoresContent() {
           <p className="text-slate-500">
             Teste de campo (corrente) ou bancada (capacitância)
           </p>
-          {isAdmin && (
-            <span className="inline-block mt-1 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-              Modo Administrador – você pode salvar para qualquer cliente
-            </span>
-          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+        {/* Formulário de seleção e medição */}
         <div className="lg:col-span-2 space-y-6">
           <section className="rounded-xl bg-white p-6 shadow-sm">
             <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-primary">
@@ -455,11 +421,6 @@ function ValidarCapacitoresContent() {
                     </option>
                   ))}
                 </select>
-                {!isAdmin && userTenantId && (
-                  <p className="text-xs text-slate-400 mt-1">
-                    Você está vinculado ao cliente ID {userTenantId}
-                  </p>
-                )}
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -642,6 +603,7 @@ function ValidarCapacitoresContent() {
           </section>
         </div>
 
+        {/* Painel de resultado */}
         <div className="space-y-6">
           <section className="flex min-h-[400px] flex-col rounded-xl bg-white p-6 shadow-sm">
             <h2 className="mb-6 text-lg font-semibold text-primary">
@@ -785,6 +747,7 @@ function ValidarCapacitoresContent() {
   );
 }
 
+// Componente principal com Suspense (por causa do useSearchParams)
 export default function ValidarCapacitoresPage() {
   return (
     <Suspense
