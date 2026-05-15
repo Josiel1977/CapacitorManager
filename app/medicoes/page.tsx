@@ -101,23 +101,25 @@ function ValidarCapacitoresContent() {
   const [resultado, setResultado] = useState<any>(null);
 
   // ==========================================================================
-  // INICIALIZAÇÃO: detecta admin e tenant do usuário
+  // INICIALIZAÇÃO: detecta admin (por lista de e-mails) e tenant do usuário comum
   // ==========================================================================
   useEffect(() => {
     async function loadUserInfo() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        // Verifica se é admin (pode ser por metadados ou email fixo)
-        const adminByMetadata = user.user_metadata?.is_admin === true;
-        const adminByEmail = user.email === 'seu-email-admin@exemplo.com'; // Altere para seu email
-        const isUserAdmin = adminByMetadata || adminByEmail;
+        // Lista de e-mails considerados administradores
+        const adminEmails = [
+          'suporte@capacitormanager.com.br',
+          'eng.eletrica1977@gmail.com',
+          'admin@capacitormanager.com',
+        ];
+        const isUserAdmin = adminEmails.includes(user.email || '');
         setIsAdmin(isUserAdmin);
 
-        // Para usuários não admin, busca o tenant_id
         if (!isUserAdmin) {
+          // Usuário comum: busca tenant_id
           let tenant = user.user_metadata?.tenant_id;
           if (!tenant) {
-            // Tenta buscar na tabela perfis (ajuste conforme sua base)
             const { data: perfil } = await supabase
               .from('perfis')
               .select('tenant_id')
@@ -126,6 +128,8 @@ function ValidarCapacitoresContent() {
             tenant = perfil?.tenant_id;
           }
           setUserTenantId(tenant || null);
+        } else {
+          setUserTenantId(null); // Admin não tem tenant fixo
         }
       }
     }
@@ -301,7 +305,7 @@ function ValidarCapacitoresContent() {
   }
 
   // ==========================================================================
-  // FUNÇÃO SALVAR CORRIGIDA PARA MULTI-TENANT
+  // FUNÇÃO SALVAR CORRIGIDA (ADMIN USA cliente_id COMO tenant_id)
   // ==========================================================================
   async function handleSalvar() {
     if (!resultado) {
@@ -309,28 +313,24 @@ function ValidarCapacitoresContent() {
       return;
     }
 
-    // Validação do tenant_id conforme perfil do usuário
-    let tenantId: string | null = null;
+    let tenantIdParaSalvar: string | null = null;
 
     if (isAdmin) {
-      // Admin: usa o cliente_id selecionado
       if (!selection.cliente_id) {
-        Swal.fire('Erro', 'Como administrador, você deve selecionar um cliente antes de salvar.', 'error');
+        Swal.fire('Erro', 'Como administrador, selecione um cliente antes de salvar.', 'error');
         return;
       }
-      tenantId = selection.cliente_id;
+      tenantIdParaSalvar = selection.cliente_id;
     } else {
-      // Usuário comum: tenant_id vindo do perfil
       if (!userTenantId) {
         Swal.fire('Erro', 'Seu usuário não está associado a um tenant. Contate o administrador.', 'error');
         return;
       }
-      tenantId = userTenantId;
-      // Se o usuário comum tentar salvar para um cliente que não seja seu tenant, bloqueia
-      if (selection.cliente_id && selection.cliente_id !== tenantId) {
+      if (selection.cliente_id && selection.cliente_id !== userTenantId) {
         Swal.fire('Erro', 'Você só pode salvar medições para o cliente associado à sua conta.', 'error');
         return;
       }
+      tenantIdParaSalvar = userTenantId;
     }
 
     setLoading(true);
@@ -340,9 +340,9 @@ function ValidarCapacitoresContent() {
       const cMedida = parseNumber(medicao.capacitancia_medida_uf);
 
       const payload: any = {
-        tenant_id: tenantId,   // 🔥 AGORA NUNCA É NULL
+        tenant_id: tenantIdParaSalvar,
         capacitor_id: selection.capacitor_id,
-        cliente_id: selection.cliente_id || tenantId, // se não admin, cliente_id = tenant_id
+        cliente_id: selection.cliente_id || (isAdmin ? selection.cliente_id : userTenantId),
         banco_id: selection.banco_id,
         tipo_teste: selection.tipo_teste,
         desvio_percentual: resultado.desvioOriginal,
