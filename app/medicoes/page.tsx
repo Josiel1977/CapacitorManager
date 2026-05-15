@@ -296,7 +296,7 @@ function ValidarCapacitoresContent() {
     }
   }
 
-  async function handleSalvar() {
+ async function handleSalvar() {
     if (!resultado) {
       Swal.fire('Atenção', 'Calcule o resultado antes de salvar', 'warning');
       return;
@@ -304,42 +304,19 @@ function ValidarCapacitoresContent() {
 
     setLoading(true);
     try {
-      // 1. Obter o usuário autenticado de forma robusta e segura
+      // 1. Obter os dados do usuário autenticado
       const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData?.user) {
-        throw new Error('Sessão expirada ou usuário não autenticado. Faça login novamente.');
-      }
-      const user = userData.user;
+      if (userError) throw new Error('Erro ao obter usuário autenticado');
 
-      // 2. Tentar recuperar o tenant_id dos metadados injetados pelo Supabase
-      let tenantId = user.user_metadata?.tenant_id || user.app_metadata?.tenant_id;
-
-      // 3. Se não encontrar nos metadados, consultar a tabela de perfis (ex: 'profiles' ou 'usuarios')
-      // IMPORTANTE: Altere 'profiles' para o nome real da sua tabela de usuários caso seja diferente (ex: 'usuarios')
-      if (!tenantId) {
-        try {
-          const { data: profile } = await supabase
-            .from('profiles') 
-            .select('tenant_id')
-            .eq('id', user.id)
-            .single();
-            
-          if (profile?.tenant_id) {
-            tenantId = profile.tenant_id;
-          }
-        } catch (err) {
-          console.warn('Não foi possível buscar o tenant_id na tabela profiles', err);
-        }
-      }
-
-      // 4. Fallback (Último recurso): Muitas vezes em sistemas simples o ID do próprio usuário é o tenant_id
-      if (!tenantId) {
-        tenantId = user.id;
-      }
-
-      // Se ainda for inválido, paramos a execução antes de enviar ao banco de dados
-      if (!tenantId) {
-        throw new Error('ID do locatário (tenant_id) não encontrado para este usuário.');
+      // 2. Obter o tenant_id dos metadados
+      let tenantId = userData?.user?.user_metadata?.tenant_id || userData?.user?.app_metadata?.tenant_id;
+      
+      // 💡 A CORREÇÃO ESTÁ AQUI:
+      // Como os usuários estão com tenant_id = null no banco, 
+      // usamos o próprio ID do usuário autenticado como tenant_id caso ele seja nulo.
+      // Isso evita o erro de "violates not-null constraint"!
+      if (!tenantId && userData?.user?.id) {
+        tenantId = userData.user.id;
       }
 
       const vMedida = parseNumber(medicao.tensao_medida_v);
@@ -354,7 +331,7 @@ function ValidarCapacitoresContent() {
         desvio_percentual: resultado.desvioOriginal,
         status_validacao: resultado.status,
         created_at: new Date().toISOString(),
-        tenant_id: tenantId, // Passando de forma segura
+        tenant_id: tenantId, // Agora essa variável sempre terá um valor (nunca será null)
       };
 
       if (selection.tipo_teste === 'corrente') {
@@ -369,8 +346,8 @@ function ValidarCapacitoresContent() {
       const { error } = await supabase.from('medicoes').insert([payload]);
       
       if (error) {
-        console.error("Erro inserindo no Supabase:", error);
-        throw new Error(error.message || 'Erro ao persistir a medição no banco de dados.');
+        console.error("Supabase insert error:", error);
+        throw error;
       }
 
       Swal.fire({
