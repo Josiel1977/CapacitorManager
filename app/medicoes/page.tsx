@@ -92,6 +92,7 @@ function ValidarCapacitoresContent() {
   const capacitorIdParam = searchParams.get('capacitor_id');
 
   // Estados
+  const [tenantId, setTenantId] = useState<string | null>(null); // NOVO ESTADO
   const [clientes, setClientes] = useState<any[]>([]);
   const [bancos, setBancos] = useState<any[]>([]);
   const [capacitores, setCapacitores] = useState<any[]>([]);
@@ -119,10 +120,32 @@ function ValidarCapacitoresContent() {
 
   const [resultado, setResultado] = useState<any>(null);
 
-  // Carregar configurações e clientes
+  // Carregar configurações, tenant_id e clientes
   useEffect(() => {
-    fetchConfig();
-    fetchClientes();
+    async function initData() {
+      // 1. Busca o usuário atual logado
+      const { data: { user } } = await supabase.auth.getUser();
+      let currentTenantId = null;
+
+      // 2. Recupera o tenant_id da tabela profiles
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('tenant_id')
+          .eq('id', user.id)
+          .single();
+
+        if (profile?.tenant_id) {
+          currentTenantId = profile.tenant_id;
+          setTenantId(currentTenantId); // Salva no estado
+        }
+      }
+
+      fetchConfig();
+      fetchClientes(currentTenantId);
+    }
+    
+    initData();
   }, []);
 
   // Se veio capacitor_id pela URL, buscar e pré-selecionar
@@ -145,32 +168,41 @@ function ValidarCapacitoresContent() {
     }
   }
 
-  async function fetchClientes() {
-    const { data } = await supabase
-      .from('clientes')
-      .select('id, nome')
-      .eq('ativo', true)
-      .order('nome');
+  async function fetchClientes(currentTenantId?: string | null) {
+    let query = supabase.from('clientes').select('id, nome').eq('ativo', true);
+    
+    // Filtra pela Tenant, garantindo que o usuário veja só os clientes corretos
+    if (currentTenantId) {
+      query = query.eq('tenant_id', currentTenantId);
+    }
+
+    const { data } = await query.order('nome');
     setClientes(data || []);
   }
 
   async function fetchBancos(clienteId: string) {
-    const { data } = await supabase
+    let query = supabase
       .from('bancos_capacitores')
       .select('id, nome_banco')
       .eq('cliente_id', clienteId)
-      .eq('ativo', true)
-      .order('nome_banco');
+      .eq('ativo', true);
+      
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+
+    const { data } = await query.order('nome_banco');
     setBancos(data || []);
   }
 
   async function fetchCapacitores(bancoId: string) {
-    const { data } = await supabase
+    let query = supabase
       .from('capacitores')
       .select('*')
       .eq('banco_id', bancoId)
-      .eq('ativo', true)
-      .order('codigo_identificacao');
+      .eq('ativo', true);
+      
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+
+    const { data } = await query.order('codigo_identificacao');
     setCapacitores(data || []);
   }
 
@@ -212,7 +244,7 @@ function ValidarCapacitoresContent() {
       setBancos([]);
       setSelection((s) => ({ ...s, banco_id: '', capacitor_id: '' }));
     }
-  }, [selection.cliente_id]);
+  }, [selection.cliente_id, tenantId]);
 
   useEffect(() => {
     if (selection.banco_id) {
@@ -221,7 +253,7 @@ function ValidarCapacitoresContent() {
       setCapacitores([]);
       setSelection((s) => ({ ...s, capacitor_id: '' }));
     }
-  }, [selection.banco_id]);
+  }, [selection.banco_id, tenantId]);
 
   // Reset resultado ao mudar seleção ou medição
   useEffect(() => {
@@ -315,6 +347,7 @@ function ValidarCapacitoresContent() {
         tipo_teste: selection.tipo_teste,
         desvio_percentual: resultado.desvioOriginal,
         status_validacao: resultado.status,
+        tenant_id: tenantId,  // <==== AQUI ESTÁ A CORREÇÃO DA FALHA NOT-NULL ====
         created_at: new Date().toISOString(),
       };
 
