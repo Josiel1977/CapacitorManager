@@ -15,7 +15,7 @@ import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 
 // ============================================================================
-// FUNÇÕES DE CÁLCULO (já validadas)
+// FUNÇÕES DE CÁLCULO
 // ============================================================================
 
 function calcularCorrenteTeorica(potenciaKvar: number, tensao: number): number {
@@ -75,6 +75,9 @@ function ValidarCapacitoresContent() {
   const [bancos, setBancos] = useState<any[]>([]);
   const [capacitores, setCapacitores] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [userTenantId, setUserTenantId] = useState<string | null>(null);
+
   const [config, setConfig] = useState<any>({
     tolerancia_min_aprovado: -5,
     tolerancia_max_aprovado: 10,
@@ -97,16 +100,43 @@ function ValidarCapacitoresContent() {
 
   const [resultado, setResultado] = useState<any>(null);
 
+  // ==========================================================================
+  // INICIALIZAÇÃO: detecta admin e tenant do usuário
+  // ==========================================================================
   useEffect(() => {
+    async function loadUserInfo() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Verifica se é admin (pode ser por metadados ou email fixo)
+        const adminByMetadata = user.user_metadata?.is_admin === true;
+        const adminByEmail = user.email === 'seu-email-admin@exemplo.com'; // Altere para seu email
+        const isUserAdmin = adminByMetadata || adminByEmail;
+        setIsAdmin(isUserAdmin);
+
+        // Para usuários não admin, busca o tenant_id
+        if (!isUserAdmin) {
+          let tenant = user.user_metadata?.tenant_id;
+          if (!tenant) {
+            // Tenta buscar na tabela perfis (ajuste conforme sua base)
+            const { data: perfil } = await supabase
+              .from('perfis')
+              .select('tenant_id')
+              .eq('user_id', user.id)
+              .single();
+            tenant = perfil?.tenant_id;
+          }
+          setUserTenantId(tenant || null);
+        }
+      }
+    }
+    loadUserInfo();
     fetchConfig();
-    fetchClientes();
   }, []);
 
+  // Carrega clientes conforme permissão
   useEffect(() => {
-    if (capacitorIdParam) {
-      buscarEPreSelecionarCapacitor(capacitorIdParam);
-    }
-  }, [capacitorIdParam]);
+    fetchClientes();
+  }, [isAdmin, userTenantId]);
 
   async function fetchConfig() {
     try {
@@ -122,11 +152,11 @@ function ValidarCapacitoresContent() {
   }
 
   async function fetchClientes() {
-    const { data } = await supabase
-      .from('clientes')
-      .select('id, nome')
-      .eq('ativo', true)
-      .order('nome');
+    let query = supabase.from('clientes').select('id, nome').eq('ativo', true);
+    if (!isAdmin && userTenantId) {
+      query = query.eq('tenant_id', userTenantId);
+    }
+    const { data } = await query.order('nome');
     setClientes(data || []);
   }
 
@@ -178,6 +208,12 @@ function ValidarCapacitoresContent() {
       Swal.fire('Aviso', 'Capacitor não encontrado ou inativo', 'warning');
     }
   }
+
+  useEffect(() => {
+    if (capacitorIdParam) {
+      buscarEPreSelecionarCapacitor(capacitorIdParam);
+    }
+  }, [capacitorIdParam]);
 
   useEffect(() => {
     if (selection.cliente_id) {
@@ -265,12 +301,36 @@ function ValidarCapacitoresContent() {
   }
 
   // ==========================================================================
-  // FUNÇÃO CORRIGIDA: tenant_id adicionado
+  // FUNÇÃO SALVAR CORRIGIDA PARA MULTI-TENANT
   // ==========================================================================
   async function handleSalvar() {
     if (!resultado) {
       Swal.fire('Atenção', 'Calcule o resultado antes de salvar', 'warning');
       return;
+    }
+
+    // Validação do tenant_id conforme perfil do usuário
+    let tenantId: string | null = null;
+
+    if (isAdmin) {
+      // Admin: usa o cliente_id selecionado
+      if (!selection.cliente_id) {
+        Swal.fire('Erro', 'Como administrador, você deve selecionar um cliente antes de salvar.', 'error');
+        return;
+      }
+      tenantId = selection.cliente_id;
+    } else {
+      // Usuário comum: tenant_id vindo do perfil
+      if (!userTenantId) {
+        Swal.fire('Erro', 'Seu usuário não está associado a um tenant. Contate o administrador.', 'error');
+        return;
+      }
+      tenantId = userTenantId;
+      // Se o usuário comum tentar salvar para um cliente que não seja seu tenant, bloqueia
+      if (selection.cliente_id && selection.cliente_id !== tenantId) {
+        Swal.fire('Erro', 'Você só pode salvar medições para o cliente associado à sua conta.', 'error');
+        return;
+      }
     }
 
     setLoading(true);
@@ -279,11 +339,10 @@ function ValidarCapacitoresContent() {
       const iMedida = parseNumber(medicao.corrente_medida_a);
       const cMedida = parseNumber(medicao.capacitancia_medida_uf);
 
-      // 🔥 CORREÇÃO: tenant_id é obrigatório e usa o cliente_id selecionado
       const payload: any = {
-        tenant_id: selection.cliente_id,   // <-- LINHA ADICIONADA
+        tenant_id: tenantId,   // 🔥 AGORA NUNCA É NULL
         capacitor_id: selection.capacitor_id,
-        cliente_id: selection.cliente_id,
+        cliente_id: selection.cliente_id || tenantId, // se não admin, cliente_id = tenant_id
         banco_id: selection.banco_id,
         tipo_teste: selection.tipo_teste,
         desvio_percentual: resultado.desvioOriginal,
@@ -316,7 +375,7 @@ function ValidarCapacitoresContent() {
         corrente_medida_a: '',
         capacitancia_medida_uf: '',
       });
-      if (!capacitorIdParam) {
+      if (!capacitorIdParam && !isAdmin) {
         setSelection((prev) => ({ ...prev, capacitor_id: '' }));
       }
     } catch (error: any) {
@@ -326,7 +385,6 @@ function ValidarCapacitoresContent() {
       setLoading(false);
     }
   }
-  // ==========================================================================
 
   function getRecomendacao(status: string) {
     switch (status) {
@@ -358,6 +416,11 @@ function ValidarCapacitoresContent() {
           <p className="text-slate-500">
             Teste de campo (corrente) ou bancada (capacitância)
           </p>
+          {isAdmin && (
+            <span className="inline-block mt-1 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+              Modo Administrador – você pode salvar para qualquer cliente
+            </span>
+          )}
         </div>
       </div>
 
@@ -392,6 +455,11 @@ function ValidarCapacitoresContent() {
                     </option>
                   ))}
                 </select>
+                {!isAdmin && userTenantId && (
+                  <p className="text-xs text-slate-400 mt-1">
+                    Você está vinculado ao cliente ID {userTenantId}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
