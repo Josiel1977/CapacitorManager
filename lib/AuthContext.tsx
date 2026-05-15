@@ -1,8 +1,8 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { supabase } from '@/lib/supabaseClient'; // use seu cliente já existente
 import { User } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/client'; // seu createBrowserClient
 
 interface AuthContextType {
   user: User | null;
@@ -15,26 +15,25 @@ interface AuthContextType {
 const AuthContext = createContext({} as AuthContextType);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const supabase = createClient();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Busca usuário atual
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
       setIsLoading(false);
-    });
+    };
+    getUser();
 
-    // Escuta mudanças na autenticação
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       setIsLoading(false);
     });
 
-    return () => {
-      listener?.subscription.unsubscribe();
-    };
-  }, []);
+    return () => listener?.subscription.unsubscribe();
+  }, [supabase]);
 
   const login = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -43,7 +42,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     await supabase.auth.signOut();
-    setUser(null);
   };
 
   return (
