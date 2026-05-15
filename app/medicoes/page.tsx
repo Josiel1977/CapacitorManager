@@ -304,6 +304,44 @@ function ValidarCapacitoresContent() {
 
     setLoading(true);
     try {
+      // 1. Obter o usuário autenticado de forma robusta e segura
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData?.user) {
+        throw new Error('Sessão expirada ou usuário não autenticado. Faça login novamente.');
+      }
+      const user = userData.user;
+
+      // 2. Tentar recuperar o tenant_id dos metadados injetados pelo Supabase
+      let tenantId = user.user_metadata?.tenant_id || user.app_metadata?.tenant_id;
+
+      // 3. Se não encontrar nos metadados, consultar a tabela de perfis (ex: 'profiles' ou 'usuarios')
+      // IMPORTANTE: Altere 'profiles' para o nome real da sua tabela de usuários caso seja diferente (ex: 'usuarios')
+      if (!tenantId) {
+        try {
+          const { data: profile } = await supabase
+            .from('profiles') 
+            .select('tenant_id')
+            .eq('id', user.id)
+            .single();
+            
+          if (profile?.tenant_id) {
+            tenantId = profile.tenant_id;
+          }
+        } catch (err) {
+          console.warn('Não foi possível buscar o tenant_id na tabela profiles', err);
+        }
+      }
+
+      // 4. Fallback (Último recurso): Muitas vezes em sistemas simples o ID do próprio usuário é o tenant_id
+      if (!tenantId) {
+        tenantId = user.id;
+      }
+
+      // Se ainda for inválido, paramos a execução antes de enviar ao banco de dados
+      if (!tenantId) {
+        throw new Error('ID do locatário (tenant_id) não encontrado para este usuário.');
+      }
+
       const vMedida = parseNumber(medicao.tensao_medida_v);
       const iMedida = parseNumber(medicao.corrente_medida_a);
       const cMedida = parseNumber(medicao.capacitancia_medida_uf);
@@ -316,6 +354,7 @@ function ValidarCapacitoresContent() {
         desvio_percentual: resultado.desvioOriginal,
         status_validacao: resultado.status,
         created_at: new Date().toISOString(),
+        tenant_id: tenantId, // Passando de forma segura
       };
 
       if (selection.tipo_teste === 'corrente') {
@@ -328,7 +367,11 @@ function ValidarCapacitoresContent() {
       }
 
       const { error } = await supabase.from('medicoes').insert([payload]);
-      if (error) throw error;
+      
+      if (error) {
+        console.error("Erro inserindo no Supabase:", error);
+        throw new Error(error.message || 'Erro ao persistir a medição no banco de dados.');
+      }
 
       Swal.fire({
         title: 'Sucesso!',
@@ -344,7 +387,6 @@ function ValidarCapacitoresContent() {
         capacitancia_medida_uf: '',
       });
       if (!capacitorIdParam) {
-        // Se não veio parâmetro, apenas limpa a seleção do capacitor
         setSelection((prev) => ({ ...prev, capacitor_id: '' }));
       }
     } catch (error: any) {
