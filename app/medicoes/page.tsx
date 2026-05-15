@@ -322,83 +322,89 @@ function ValidarCapacitoresContent() {
   }
 
   async function handleSalvar() {
-    if (!resultado) {
-      Swal.fire('Atenção', 'Calcule o resultado antes de salvar', 'warning');
+  if (!resultado) {
+    Swal.fire('Atenção', 'Calcule o resultado antes de salvar', 'warning');
+    return;
+  }
+
+  let tenantIdParaSalvar: string | null = null;
+
+  if (isAdmin) {
+    if (!selection.cliente_id) {
+      Swal.fire('Erro', 'Como administrador, selecione um cliente antes de salvar.', 'error');
       return;
     }
-
-    let tenantIdParaSalvar: string | null = null;
-
-    if (isAdmin) {
-      if (!selection.cliente_id) {
-        Swal.fire('Erro', 'Como administrador, selecione um cliente antes de salvar.', 'error');
-        return;
-      }
-      tenantIdParaSalvar = selection.cliente_id;
-    } else {
-      if (!userTenantId) {
-        Swal.fire('Erro', 'Seu usuário não está associado a um tenant. Contate o administrador.', 'error');
-        return;
-      }
-      if (selection.cliente_id && selection.cliente_id !== userTenantId) {
-        Swal.fire('Erro', 'Você só pode salvar medições para o cliente associado à sua conta.', 'error');
-        return;
-      }
-      tenantIdParaSalvar = userTenantId;
+    // Busca o tenant_id do cliente selecionado
+    const { data: cliente, error: errCliente } = await supabase
+      .from('clientes')
+      .select('tenant_id')
+      .eq('id', selection.cliente_id)
+      .single();
+    if (errCliente || !cliente?.tenant_id) {
+      Swal.fire('Erro', 'Cliente não possui um tenant associado. Contate o administrador.', 'error');
+      return;
     }
-
-    setLoading(true);
-    try {
-      const vMedida = parseNumber(medicao.tensao_medida_v);
-      const iMedida = parseNumber(medicao.corrente_medida_a);
-      const cMedida = parseNumber(medicao.capacitancia_medida_uf);
-
-      const payload: any = {
-        tenant_id: tenantIdParaSalvar,
-        capacitor_id: selection.capacitor_id,
-        cliente_id: selection.cliente_id || (isAdmin ? selection.cliente_id : userTenantId),
-        banco_id: selection.banco_id,
-        tipo_teste: selection.tipo_teste,
-        desvio_percentual: resultado.desvioOriginal,
-        status_validacao: resultado.status,
-        created_at: new Date().toISOString(),
-      };
-
-      if (selection.tipo_teste === 'corrente') {
-        payload.tensao_medida_v = vMedida;
-        payload.corrente_medida_a = iMedida;
-        payload.corrente_teorica_a = resultado.correnteTeorica;
-      } else {
-        payload.capacitancia_medida_uf = cMedida;
-        payload.capacitancia_teorica_uf = resultado.capacitanciaTeorica;
-      }
-
-      const { error } = await supabase.from('medicoes').insert([payload]);
-      if (error) throw error;
-
-      Swal.fire({
-        title: 'Sucesso!',
-        text: `Medição salva como ${resultado.status.toUpperCase()}`,
-        icon: 'success',
-      });
-
-      // Limpa o formulário
-      setResultado(null);
-      setMedicao({
-        tensao_medida_v: '',
-        corrente_medida_a: '',
-        capacitancia_medida_uf: '',
-      });
-      if (!capacitorIdParam && !isAdmin) {
-        setSelection((prev) => ({ ...prev, capacitor_id: '' }));
-      }
-    } catch (error: any) {
-      console.error(error);
-      Swal.fire('Erro', error.message, 'error');
-    } finally {
-      setLoading(false);
+    tenantIdParaSalvar = cliente.tenant_id;
+  } else {
+    // Usuário comum
+    if (!userTenantId) {
+      Swal.fire('Erro', 'Seu usuário não está associado a um tenant. Contate o administrador.', 'error');
+      return;
     }
+    if (selection.cliente_id && selection.cliente_id !== userTenantId) {
+      Swal.fire('Erro', 'Você só pode salvar medições para o cliente associado à sua conta.', 'error');
+      return;
+    }
+    tenantIdParaSalvar = userTenantId;
   }
+
+  setLoading(true);
+  try {
+    const vMedida = parseNumber(medicao.tensao_medida_v);
+    const iMedida = parseNumber(medicao.corrente_medida_a);
+    const cMedida = parseNumber(medicao.capacitancia_medida_uf);
+
+    const payload: any = {
+      tenant_id: tenantIdParaSalvar,  // agora é um ID válido de tenants
+      capacitor_id: selection.capacitor_id,
+      cliente_id: selection.cliente_id,
+      banco_id: selection.banco_id,
+      tipo_teste: selection.tipo_teste,
+      desvio_percentual: resultado.desvioOriginal,
+      status_validacao: resultado.status,
+      created_at: new Date().toISOString(),
+    };
+
+    if (selection.tipo_teste === 'corrente') {
+      payload.tensao_medida_v = vMedida;
+      payload.corrente_medida_a = iMedida;
+      payload.corrente_teorica_a = resultado.correnteTeorica;
+    } else {
+      payload.capacitancia_medida_uf = cMedida;
+      payload.capacitancia_teorica_uf = resultado.capacitanciaTeorica;
+    }
+
+    const { error } = await supabase.from('medicoes').insert([payload]);
+    if (error) throw error;
+
+    Swal.fire('Sucesso!', `Medição salva como ${resultado.status.toUpperCase()}`, 'success');
+    // Limpa o formulário
+    setResultado(null);
+    setMedicao({
+      tensao_medida_v: '',
+      corrente_medida_a: '',
+      capacitancia_medida_uf: '',
+    });
+    if (!capacitorIdParam && !isAdmin) {
+      setSelection((prev) => ({ ...prev, capacitor_id: '' }));
+    }
+  } catch (error: any) {
+    console.error(error);
+    Swal.fire('Erro', error.message, 'error');
+  } finally {
+    setLoading(false);
+  }
+}
 
   function getRecomendacao(status: string) {
     switch (status) {
