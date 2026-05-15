@@ -373,7 +373,6 @@ function ValidarCapacitoresContent() {
       setLoading(false);
     }
   }
-
   function getRecomendacao(status: string) {
     switch (status) {
       case 'aprovado':
