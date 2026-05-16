@@ -14,8 +14,8 @@ const CHECKOUT_URLS = {
 };
 
 const PLANOS = [
-  { id: 'basico', nome: 'Básico', preco: 149, descricao: '1 cliente · 1 banco · 50 capacitores', checkoutUrl: CHECKOUT_URLS.basico },
-  { id: 'essencial', nome: 'Essencial', preco: 297, descricao: '5 clientes · 10 bancos · 6 capacitores', checkoutUrl: CHECKOUT_URLS.essencial },
+  { id: 'basico', nome: 'Básico', preco: 149, descricao: '1 cliente · 1 banco · 6 capacitores', checkoutUrl: CHECKOUT_URLS.basico },
+  { id: 'essencial', nome: 'Essencial', preco: 297, descricao: '5 clientes · 10 bancos · 50 capacitores', checkoutUrl: CHECKOUT_URLS.essencial },
   { id: 'pro', nome: 'Pro', preco: 597, descricao: '20 clientes · 20 bancos · 200 capacitores', checkoutUrl: CHECKOUT_URLS.pro },
   { id: 'master', nome: 'Master', preco: 797, descricao: '50 clientes · 100 bancos · 600 capacitores', checkoutUrl: CHECKOUT_URLS.master },
 ];
