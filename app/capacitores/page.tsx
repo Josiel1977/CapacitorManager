@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useEffect, useState, Suspense } from 'react';
-import { supabase } from '@/lib/supabase';
-import { Plus, Search, Edit2, Trash2, X, Save, Zap, Filter, ChevronDown, Eye, ArrowLeft, Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient';
+import { Plus, Search, Edit2, Trash2, X, Save, Zap, ChevronDown, Eye, ArrowLeft, Loader2 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseNumber, cn } from '@/lib/utils';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useAuth } from '@/lib/AuthContext';
 
 // Componente que usa useSearchParams (precisa de Suspense)
 function CapacitoresContent() {
@@ -14,6 +15,11 @@ function CapacitoresContent() {
   const searchParams = useSearchParams();
   const bancoIdFromUrl = searchParams.get('banco_id');
   
+  const { user, isLoading: authLoading } = useAuth();
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [userTenantId, setUserTenantId] = useState<string | null>(null);
+  const [loadingInitial, setLoadingInitial] = useState(true);
+
   const [capacitores, setCapacitores] = useState<any[]>([]);
   const [bancos, setBancos] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
@@ -34,9 +40,45 @@ function CapacitoresContent() {
     modelo: '',
   });
 
+  // Detecta admin e tenant do usuário
   useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+    const adminEmails = [
+      'suporte@capacitormanager.com.br',
+      'eng.eletrica1977@gmail.com',
+    ];
+    const isUserAdmin = adminEmails.includes(user.email || '');
+    setIsAdmin(isUserAdmin);
+    if (!isUserAdmin) {
+      const tenant = user.user_metadata?.tenant_id;
+      if (tenant) {
+        setUserTenantId(tenant);
+        setLoadingInitial(false);
+      } else {
+        supabase
+          .from('profiles')
+          .select('tenant_id')
+          .eq('id', user.id)
+          .single()
+          .then(({ data }) => {
+            setUserTenantId(data?.tenant_id || null);
+            setLoadingInitial(false);
+          });
+      }
+    } else {
+      setUserTenantId(null);
+      setLoadingInitial(false);
+    }
+  }, [user, authLoading, router]);
+
+  useEffect(() => {
+    if (loadingInitial) return;
     fetchData();
-  }, []);
+  }, [loadingInitial, bancoFiltro]);
 
   useEffect(() => {
     if (bancoIdFromUrl) {
@@ -51,46 +93,45 @@ function CapacitoresContent() {
       .select('*, clientes(id, nome)')
       .eq('id', bancoId)
       .single();
-    
-    if (data) {
-      setBancoSelecionadoInfo(data);
-    }
+    if (data) setBancoSelecionadoInfo(data);
   }
 
   async function fetchData() {
     try {
       setLoading(true);
       
-      const { data: bancosData, error: bancosError } = await supabase
+      // Buscar bancos (com filtro de tenant se não admin)
+      let bancosQuery = supabase
         .from('bancos_capacitores')
         .select('*, clientes(id, nome)')
-        .eq('ativo', true)
-        .order('nome_banco');
-      
+        .eq('ativo', true);
+      if (!isAdmin && userTenantId) {
+        bancosQuery = bancosQuery.eq('tenant_id', userTenantId);
+      }
+      const { data: bancosData, error: bancosError } = await bancosQuery.order('nome_banco');
       if (bancosError) throw bancosError;
+      setBancos(bancosData || []);
 
-      let query = supabase
+      // Buscar capacitores
+      let capacitoresQuery = supabase
         .from('capacitores')
         .select('*, bancos_capacitores(*, clientes(id, nome))')
         .eq('ativo', true);
-
       if (bancoFiltro !== 'todos') {
-        query = query.eq('banco_id', bancoFiltro);
+        capacitoresQuery = capacitoresQuery.eq('banco_id', bancoFiltro);
       }
-
-      const { data: capacitoresData, error: capacitoresError } = await query.order('codigo_identificacao');
-
+      const { data: capacitoresData, error: capacitoresError } = await capacitoresQuery.order('codigo_identificacao');
       if (capacitoresError) throw capacitoresError;
-
-      const { data: clientesData } = await supabase
-        .from('clientes')
-        .select('id, nome')
-        .eq('ativo', true)
-        .order('nome');
-
       setCapacitores(capacitoresData || []);
-      setBancos(bancosData || []);
+
+      // Buscar clientes (apenas para exibição, não usado em filtro)
+      let clientesQuery = supabase.from('clientes').select('id, nome').eq('ativo', true);
+      if (!isAdmin && userTenantId) {
+        clientesQuery = clientesQuery.eq('tenant_id', userTenantId);
+      }
+      const { data: clientesData } = await clientesQuery.order('nome');
       setClientes(clientesData || []);
+
     } catch (error) {
       console.error('Error:', error);
       Swal.fire('Erro', 'Não foi possível carregar os dados', 'error');
@@ -152,7 +193,18 @@ function CapacitoresContent() {
     }
     
     try {
-      const data = {
+      // Obter o tenant_id do banco selecionado (obrigatório para a trigger)
+      const { data: banco, error: bancoError } = await supabase
+        .from('bancos_capacitores')
+        .select('tenant_id')
+        .eq('id', formData.banco_id)
+        .single();
+      if (bancoError || !banco?.tenant_id) {
+        throw new Error('Banco não possui tenant associado. Contate o administrador.');
+      }
+      const tenantId = banco.tenant_id;
+
+      const dataCapacitor = {
         banco_id: formData.banco_id,
         codigo_identificacao: formData.codigo_identificacao,
         potencia_kvar: parseNumber(formData.potencia_kvar),
@@ -161,28 +213,33 @@ function CapacitoresContent() {
         data_instalacao: formData.data_instalacao || null,
         fabricante: formData.fabricante || null,
         modelo: formData.modelo || null,
+        tenant_id: tenantId,   // 🔥 CAMPO OBRIGATÓRIO
+        ativo: true,
       };
 
       if (editingCapacitor) {
         const { error } = await supabase
           .from('capacitores')
-          .update(data)
+          .update(dataCapacitor)
           .eq('id', editingCapacitor.id);
         if (error) throw error;
         Swal.fire('Sucesso', 'Capacitor atualizado com sucesso!', 'success');
       } else {
         const { error } = await supabase
           .from('capacitores')
-          .insert([{ ...data, ativo: true }]);
+          .insert([dataCapacitor]);
         if (error) throw error;
-        
         await recalcularPotenciaBanco(formData.banco_id);
         Swal.fire('Sucesso', 'Capacitor cadastrado com sucesso!', 'success');
       }
       setIsModalOpen(false);
       fetchData();
     } catch (error: any) {
-      Swal.fire('Erro', error.message, 'error');
+      let msg = error.message;
+      if (msg.includes('Limite de capacitores excedido')) {
+        msg = '❌ Você atingiu o limite de capacitores permitido para o seu plano. Entre em contato para fazer upgrade.';
+      }
+      Swal.fire('Erro', msg, 'error');
     }
   }
 
@@ -192,9 +249,7 @@ function CapacitoresContent() {
       .select('potencia_kvar')
       .eq('banco_id', bancoId)
       .eq('ativo', true);
-
     const potenciaTotal = capacitores?.reduce((sum, cap) => sum + (cap.potencia_kvar || 0), 0) || 0;
-
     await supabase
       .from('bancos_capacitores')
       .update({ potencia_total_kvar: potenciaTotal })
@@ -212,7 +267,6 @@ function CapacitoresContent() {
       confirmButtonText: 'Sim, desativar',
       cancelButtonText: 'Cancelar'
     });
-
     if (result.isConfirmed) {
       try {
         const { error } = await supabase
@@ -220,9 +274,7 @@ function CapacitoresContent() {
           .update({ ativo: false })
           .eq('id', id);
         if (error) throw error;
-        
         await recalcularPotenciaBanco(bancoId);
-        
         Swal.fire('Desativado!', 'Capacitor removido com sucesso.', 'success');
         fetchData();
       } catch (error: any) {
@@ -237,13 +289,15 @@ function CapacitoresContent() {
 
   const bancoSelecionado = bancos.find(b => b.id === bancoFiltro);
 
-  if (loading) {
+  if (authLoading || loadingInitial) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
   }
+
+  if (!user) return null;
 
   return (
     <div className="space-y-6">
@@ -598,4 +652,3 @@ export default function CapacitoresPage() {
     </Suspense>
   );
 }
-
