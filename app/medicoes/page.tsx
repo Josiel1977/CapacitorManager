@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient'; // seu cliente Supabase para o front
+import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
 import {
   ClipboardCheck,
@@ -70,13 +70,13 @@ function ValidarCapacitoresContent() {
   const searchParams = useSearchParams();
   const capacitorIdParam = searchParams.get('capacitor_id');
 
-  // Obtém usuário e estado de loading do contexto
   const { user, isLoading: authLoading } = useAuth();
 
   const [clientes, setClientes] = useState<any[]>([]);
   const [bancos, setBancos] = useState<any[]>([]);
   const [capacitores, setCapacitores] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingClientes, setLoadingClientes] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [userTenantId, setUserTenantId] = useState<string | null>(null);
 
@@ -123,7 +123,6 @@ function ValidarCapacitoresContent() {
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
-      // Se não há usuário, redireciona para login
       router.push('/login');
       return;
     }
@@ -133,10 +132,10 @@ function ValidarCapacitoresContent() {
       'eng.eletrica1977@gmail.com',
     ];
     const isUserAdmin = adminEmails.includes(user.email || '');
+    console.log('🔍 Usuário logado:', user.email, 'isAdmin:', isUserAdmin);
     setIsAdmin(isUserAdmin);
 
     if (!isUserAdmin) {
-      // Usuário comum: tenta obter tenant_id dos metadados ou do perfil
       let tenant = user.user_metadata?.tenant_id;
       if (!tenant) {
         supabase
@@ -151,24 +150,44 @@ function ValidarCapacitoresContent() {
         setUserTenantId(tenant);
       }
     } else {
-      setUserTenantId(null); // admin não precisa de tenant fixo
+      setUserTenantId(null);
     }
   }, [user, authLoading, router]);
 
-  // Carrega clientes quando o tenant_id estiver definido (ou se for admin)
+  // Carrega clientes (corrigido com logs e loading)
   useEffect(() => {
     if (authLoading) return;
     if (!user) return;
-    if (!isAdmin && !userTenantId) return; // aguarda o tenant_id do usuário comum
+    if (!isAdmin && !userTenantId) return;
 
-    async function fetchClientes() {
-      let query = supabase.from('clientes').select('id, nome').eq('ativo', true);
-      if (!isAdmin && userTenantId) {
-        query = query.eq('tenant_id', userTenantId);
+    const fetchClientes = async () => {
+      setLoadingClientes(true);
+      try {
+        let query = supabase.from('clientes').select('id, nome').eq('ativo', true);
+        if (!isAdmin && userTenantId) {
+          query = query.eq('tenant_id', userTenantId);
+        }
+        const { data, error } = await query.order('nome');
+        if (error) {
+          console.error('❌ Erro ao buscar clientes:', error);
+          Swal.fire('Erro', 'Não foi possível carregar a lista de clientes.', 'error');
+          setClientes([]);
+        } else {
+          console.log(`✅ Clientes carregados: ${data?.length || 0}`);
+          setClientes(data || []);
+          if (!data || data.length === 0) {
+            Swal.fire('Aviso', 'Nenhum cliente ativo encontrado. Cadastre um cliente primeiro.', 'warning');
+          }
+        }
+      } catch (err) {
+        console.error('❌ Erro inesperado:', err);
+        Swal.fire('Erro', 'Erro ao carregar clientes.', 'error');
+        setClientes([]);
+      } finally {
+        setLoadingClientes(false);
       }
-      const { data } = await query.order('nome');
-      setClientes(data || []);
-    }
+    };
+
     fetchClientes();
   }, [isAdmin, userTenantId, user, authLoading]);
 
@@ -322,89 +341,86 @@ function ValidarCapacitoresContent() {
   }
 
   async function handleSalvar() {
-  if (!resultado) {
-    Swal.fire('Atenção', 'Calcule o resultado antes de salvar', 'warning');
-    return;
-  }
-
-  let tenantIdParaSalvar: string | null = null;
-
-  if (isAdmin) {
-    if (!selection.cliente_id) {
-      Swal.fire('Erro', 'Como administrador, selecione um cliente antes de salvar.', 'error');
+    if (!resultado) {
+      Swal.fire('Atenção', 'Calcule o resultado antes de salvar', 'warning');
       return;
     }
-    // Busca o tenant_id do cliente selecionado
-    const { data: cliente, error: errCliente } = await supabase
-      .from('clientes')
-      .select('tenant_id')
-      .eq('id', selection.cliente_id)
-      .single();
-    if (errCliente || !cliente?.tenant_id) {
-      Swal.fire('Erro', 'Cliente não possui um tenant associado. Contate o administrador.', 'error');
-      return;
-    }
-    tenantIdParaSalvar = cliente.tenant_id;
-  } else {
-    // Usuário comum
-    if (!userTenantId) {
-      Swal.fire('Erro', 'Seu usuário não está associado a um tenant. Contate o administrador.', 'error');
-      return;
-    }
-    if (selection.cliente_id && selection.cliente_id !== userTenantId) {
-      Swal.fire('Erro', 'Você só pode salvar medições para o cliente associado à sua conta.', 'error');
-      return;
-    }
-    tenantIdParaSalvar = userTenantId;
-  }
 
-  setLoading(true);
-  try {
-    const vMedida = parseNumber(medicao.tensao_medida_v);
-    const iMedida = parseNumber(medicao.corrente_medida_a);
-    const cMedida = parseNumber(medicao.capacitancia_medida_uf);
+    let tenantIdParaSalvar: string | null = null;
 
-    const payload: any = {
-      tenant_id: tenantIdParaSalvar,  // agora é um ID válido de tenants
-      capacitor_id: selection.capacitor_id,
-      cliente_id: selection.cliente_id,
-      banco_id: selection.banco_id,
-      tipo_teste: selection.tipo_teste,
-      desvio_percentual: resultado.desvioOriginal,
-      status_validacao: resultado.status,
-      created_at: new Date().toISOString(),
-    };
-
-    if (selection.tipo_teste === 'corrente') {
-      payload.tensao_medida_v = vMedida;
-      payload.corrente_medida_a = iMedida;
-      payload.corrente_teorica_a = resultado.correnteTeorica;
+    if (isAdmin) {
+      if (!selection.cliente_id) {
+        Swal.fire('Erro', 'Como administrador, selecione um cliente antes de salvar.', 'error');
+        return;
+      }
+      const { data: cliente, error: errCliente } = await supabase
+        .from('clientes')
+        .select('tenant_id')
+        .eq('id', selection.cliente_id)
+        .single();
+      if (errCliente || !cliente?.tenant_id) {
+        Swal.fire('Erro', 'Cliente não possui um tenant associado. Contate o administrador.', 'error');
+        return;
+      }
+      tenantIdParaSalvar = cliente.tenant_id;
     } else {
-      payload.capacitancia_medida_uf = cMedida;
-      payload.capacitancia_teorica_uf = resultado.capacitanciaTeorica;
+      if (!userTenantId) {
+        Swal.fire('Erro', 'Seu usuário não está associado a um tenant. Contate o administrador.', 'error');
+        return;
+      }
+      if (selection.cliente_id && selection.cliente_id !== userTenantId) {
+        Swal.fire('Erro', 'Você só pode salvar medições para o cliente associado à sua conta.', 'error');
+        return;
+      }
+      tenantIdParaSalvar = userTenantId;
     }
 
-    const { error } = await supabase.from('medicoes').insert([payload]);
-    if (error) throw error;
+    setLoading(true);
+    try {
+      const vMedida = parseNumber(medicao.tensao_medida_v);
+      const iMedida = parseNumber(medicao.corrente_medida_a);
+      const cMedida = parseNumber(medicao.capacitancia_medida_uf);
 
-    Swal.fire('Sucesso!', `Medição salva como ${resultado.status.toUpperCase()}`, 'success');
-    // Limpa o formulário
-    setResultado(null);
-    setMedicao({
-      tensao_medida_v: '',
-      corrente_medida_a: '',
-      capacitancia_medida_uf: '',
-    });
-    if (!capacitorIdParam && !isAdmin) {
-      setSelection((prev) => ({ ...prev, capacitor_id: '' }));
+      const payload: any = {
+        tenant_id: tenantIdParaSalvar,
+        capacitor_id: selection.capacitor_id,
+        cliente_id: selection.cliente_id,
+        banco_id: selection.banco_id,
+        tipo_teste: selection.tipo_teste,
+        desvio_percentual: resultado.desvioOriginal,
+        status_validacao: resultado.status,
+        created_at: new Date().toISOString(),
+      };
+
+      if (selection.tipo_teste === 'corrente') {
+        payload.tensao_medida_v = vMedida;
+        payload.corrente_medida_a = iMedida;
+        payload.corrente_teorica_a = resultado.correnteTeorica;
+      } else {
+        payload.capacitancia_medida_uf = cMedida;
+        payload.capacitancia_teorica_uf = resultado.capacitanciaTeorica;
+      }
+
+      const { error } = await supabase.from('medicoes').insert([payload]);
+      if (error) throw error;
+
+      Swal.fire('Sucesso!', `Medição salva como ${resultado.status.toUpperCase()}`, 'success');
+      setResultado(null);
+      setMedicao({
+        tensao_medida_v: '',
+        corrente_medida_a: '',
+        capacitancia_medida_uf: '',
+      });
+      if (!capacitorIdParam && !isAdmin) {
+        setSelection((prev) => ({ ...prev, capacitor_id: '' }));
+      }
+    } catch (error: any) {
+      console.error(error);
+      Swal.fire('Erro', error.message, 'error');
+    } finally {
+      setLoading(false);
     }
-  } catch (error: any) {
-    console.error(error);
-    Swal.fire('Erro', error.message, 'error');
-  } finally {
-    setLoading(false);
   }
-}
 
   function getRecomendacao(status: string) {
     switch (status) {
@@ -419,7 +435,7 @@ function ValidarCapacitoresContent() {
     }
   }
 
-  if (authLoading) {
+  if (authLoading || loadingClientes) {
     return (
       <div className="flex h-64 items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
@@ -428,7 +444,7 @@ function ValidarCapacitoresContent() {
   }
 
   if (!user) {
-    return null; // redirecionamento já ocorre no useEffect
+    return null;
   }
 
   return (
