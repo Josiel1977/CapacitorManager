@@ -21,16 +21,13 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   transpilePackages: ['motion'],
   webpack: (config, { dev, isServer }) => {
-    // HMR is disabled in AI Studio via DISABLE_HMR env var.
+    // Desativa o HMR se necessário (não mexa nessa parte)
     if (dev && process.env.DISABLE_HMR === 'true') {
-      config.watchOptions = {
-        ignored: /.*/,
-      };
+      config.watchOptions = { ignored: /.*/ };
     }
 
-    // 🔧 FIX: Configurações para o pdfjs-dist funcionar no cliente
+    // 🔧 CRÍTICO: Impede o webpack de tentar incluir módulos Node.js no bundle do cliente
     if (!isServer) {
-      // Impede o webpack de tentar incluir módulos Node.js no bundle do cliente
       config.resolve.fallback = {
         ...config.resolve.fallback,
         fs: false,
@@ -41,16 +38,17 @@ const nextConfig: NextConfig = {
         zlib: false,
         http: false,
         https: false,
+        util: false,
       };
     }
 
-    // Alias para forçar o uso da versão legada do pdfjs-dist (compatível)
+    // 🔧 Força o uso da versão legada do PDF.js (compatível com Next.js)
     config.resolve.alias = {
       ...config.resolve.alias,
       'pdfjs-dist': 'pdfjs-dist/legacy/build/pdf.js',
     };
 
-    // Ignora alguns warnings específicos que o pdfjs-dist pode gerar
+    // 🔧 Ignora warnings desnecessários
     config.ignoreWarnings = [
       ...(config.ignoreWarnings || []),
       /Critical dependency: the request of a dependency is an expression/,
