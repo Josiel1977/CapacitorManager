@@ -704,9 +704,11 @@ function DimensionarContent() {
       const demandaMaxRegistrada = Math.max(...faturasProcessadas.map((f) => f.demandaMaxKw));
 
       let potenciaBase =
-        demandaPersonalizadaKw > 0
-          ? demandaPersonalizadaKw
-          : Math.max(demandaMaxRegistrada, potenciaTotalTransformadores * fatorCarga * fpAtual);
+  demandaPersonalizadaKw > 0
+    ? demandaPersonalizadaKw
+    : demandaMaxRegistrada > 0
+      ? demandaMaxRegistrada
+      : potenciaTotalTransformadores * fatorCarga * fpAtual;
       let potenciaAtivaFinal = potenciaBase * (1 + margemSeguranca / 100);
       const precisaCapacitor = fpAtual < FP_MINIMO_REGULAMENTAR || mediaMulta > 200;
       let kvarAutomatico = 0,
