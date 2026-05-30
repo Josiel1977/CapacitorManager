@@ -311,9 +311,12 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
   if (texto.includes("Equatorial Pará")) dados.concessionaria = "EQUATORIAL_PARA";
 
   // 2. Mês/Ano – busca por "Competência:" ou o primeiro "XX/XXXX" após "ND00A027"
-  let mesMatch = texto.match(/Competência:\s*(\d{2}\/\d{4})/i);
-  if (!mesMatch) mesMatch = texto.match(/ND00A027[\s\S]*?(\d{2}\/\d{4})/i);
-  if (mesMatch) dados.mes_referencia = mesMatch[1];
+  // 2. Mês/Ano – prioritário: "Competência:", depois "ND00A027", depois qualquer "dd/aaaa" que não seja data de vencimento
+let mesMatch = texto.match(/Competência:\s*(\d{2}\/\d{4})/i);
+if (!mesMatch) mesMatch = texto.match(/ND00A027[\s\S]*?(\d{2}\/\d{4})/i);
+// Fallback: encontra qualquer "dd/aaaa" que não seja parte de uma data completa (ex: 10/12/2025 não corresponde)
+if (!mesMatch) mesMatch = texto.match(/\b(\d{2}\/\d{4})\b/);
+if (mesMatch) dados.mes_referencia = mesMatch[1];
 
   // 3. Consumo ativo (kWh) – valores que vêm imediatamente antes de "kWh" na tabela
   // Exemplo: "... 5.974,50 kWh ..." (para fora ponta) e "... 558,52 kWh ..." (ponta)
