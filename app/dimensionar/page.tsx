@@ -309,53 +309,56 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
 
   // 1. Concessionária
   if (texto.includes("Equatorial Pará")) dados.concessionaria = "EQUATORIAL_PARA";
-  else if (texto.includes("CELG Distribuição")) dados.concessionaria = "CELG";
+  else if (texto.includes("CELG")) dados.concessionaria = "CELG";
   else if (texto.includes("Roraima Energia")) dados.concessionaria = "RORAIMA_ENERGIA";
 
-  // 2. Mês/Ano
-  const mesMatch = texto.match(/(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\/(\d{4})/i);
-  if (mesMatch) {
-    const mesMap: Record<string, string> = {
-      JAN: "01", FEV: "02", MAR: "03", ABR: "04", MAI: "05", JUN: "06",
-      JUL: "07", AGO: "08", SET: "09", OUT: "10", NOV: "11", DEZ: "12",
-    };
-    dados.mes_referencia = `${mesMap[mesMatch[1].toUpperCase()]}/${mesMatch[2]}`;
-  } else {
-    const numMatch = texto.match(/(\d{2})\/(\d{4})/);
-    if (numMatch) dados.mes_referencia = numMatch[0];
-  }
+  // 2. Mês/Ano (prioriza "Competência:" ou padrão "01/2026")
+  let mesMatch = texto.match(/Competência:\s*(\d{2}\/\d{4})/i);
+  if (!mesMatch) mesMatch = texto.match(/(\d{2})\/(\d{4})/);
+  if (mesMatch) dados.mes_referencia = mesMatch[1];
 
-  // 3. Consumos ativos (kWh)
-  const consPonta = texto.match(/Consumo Ativo NP Reg[^\d]*(\d+[\.,]?\d*)/i);
-  if (consPonta) dados.consumo_ponta_kwh = parseFloat(consPonta[1].replace(",", "."));
+  // 3. Consumos ativos (kWh) – baseado nas faturas
+  // Tabela de consumo: "Consumo Ativo FP Reg" seguido do valor
   const consFP = texto.match(/Consumo Ativo FP Reg[^\d]*(\d+[\.,]?\d*)/i);
-  if (consFP) dados.consumo_fora_ponta_kwh = parseFloat(consFP[1].replace(",", "."));
+  if (consFP) dados.consumo_fora_ponta_kwh = parseFloat(consFP[1].replace(/\./g, "").replace(",", "."));
+  
+  const consPonta = texto.match(/Consumo Ativo NP Reg[^\d]*(\d+[\.,]?\d*)/i);
+  if (consPonta) dados.consumo_ponta_kwh = parseFloat(consPonta[1].replace(/\./g, "").replace(",", "."));
 
+  // Fallback: campos de resumo (caso os acima falhem)
   if (!dados.consumo_fora_ponta_kwh) {
-    const fpMatch = texto.match(/Fora Ponta[^\d]*(\d+[\.,]?\d*)\s*kWh/i);
-    if (fpMatch) dados.consumo_fora_ponta_kwh = parseFloat(fpMatch[1].replace(",", "."));
+    const outroFP = texto.match(/Fora Ponta[^\d]*(\d+[\.,]?\d*)\s*kWh/i);
+    if (outroFP) dados.consumo_fora_ponta_kwh = parseFloat(outroFP[1].replace(",", "."));
   }
   if (!dados.consumo_ponta_kwh) {
-    const pMatch = texto.match(/Ponta[^\d]*(\d+[\.,]?\d*)\s*kWh/i);
-    if (pMatch) dados.consumo_ponta_kwh = parseFloat(pMatch[1].replace(",", "."));
+    const outroP = texto.match(/Ponta[^\d]*(\d+[\.,]?\d*)\s*kWh/i);
+    if (outroP) dados.consumo_ponta_kwh = parseFloat(outroP[1].replace(",", "."));
   }
 
-  // 4. Reativo excedente (kVArh)
-  const reatPonta = texto.match(/Consumo Reativo Excedente (?:NP|Ponta)[^\d]*(\d+[\.,]?\d*)/i);
-  if (reatPonta) dados.reativo_ponta_kvarh = parseFloat(reatPonta[1].replace(",", "."));
-  const reatFP = texto.match(/Consumo Reativo Excedente (?:FP|Fora Ponta)[^\d]*(\d+[\.,]?\d*)/i);
-  if (reatFP) dados.reativo_fora_ponta_kvarh = parseFloat(reatFP[1].replace(",", "."));
+  // 4. Reativo excedente (kVArh) – parte mais crítica
+  // Nas faturas: "Reat. Exced. F. Ponta" seguido de valor (ex: 8.690,47 kVAr)
+  const reatFP = texto.match(/Reat\.\s*Exced\.\s*F\.\s*Ponta[^\d]*(\d+[\.,]?\d*)/i);
+  if (reatFP) dados.reativo_fora_ponta_kvarh = parseFloat(reatFP[1].replace(/\./g, "").replace(",", "."));
+  
+  const reatPonta = texto.match(/Reat\.\s*Exced\.\s*Ponta[^\d]*(\d+[\.,]?\d*)/i);
+  if (reatPonta) dados.reativo_ponta_kvarh = parseFloat(reatPonta[1].replace(/\./g, "").replace(",", "."));
 
-  // 5. Demanda (kW)
-  const demPonta = texto.match(/Demanda Distribui[çc][ãa]o Ponta[^\d]*(\d+[\.,]?\d*)/i);
-  if (demPonta) dados.demanda_ponta_kw = parseFloat(demPonta[1].replace(",", "."));
-  const demFP = texto.match(/Demanda Distribui[çc][ãa]o F[.]?Ponta[^\d]*(\d+[\.,]?\d*)/i);
-  if (demFP) dados.demanda_fora_ponta_kw = parseFloat(demFP[1].replace(",", "."));
-  if (!dados.demanda_fora_ponta_kw && dados.demanda_ponta_kw)
-    dados.demanda_fora_ponta_kw = dados.demanda_ponta_kw;
+  // 5. Demanda (kW) – captura os valores das linhas "Dem. Máx. F. Ponta (kW):" e "Dem. Máx. Ponta (kW):"
+  const demFPMax = texto.match(/Dem\.\s*Máx\.\s*F\.\s*Ponta\s*\(kW\):\s*(\d+[\.,]?\d*)/i);
+  if (demFPMax) dados.demanda_fora_ponta_kw = parseFloat(demFPMax[1].replace(",", "."));
+  
+  const demPMax = texto.match(/Dem\.\s*Máx\.\s*Ponta\s*\(kW\):\s*(\d+[\.,]?\d*)/i);
+  if (demPMax) dados.demanda_ponta_kw = parseFloat(demPMax[1].replace(",", "."));
 
-  // 6. Valor total a pagar
-  const valorMatch = texto.match(/Total a Pagar\s*R\$\s*([\d\.]+,\d{2})/i);
+  // Alternativa: campos "Demanda Distribuição (kW)" (valor único, pode ser usado como fora ponta)
+  if (!dados.demanda_fora_ponta_kw) {
+    const demDist = texto.match(/Demanda Distribui[çc][ãa]o\s*\(kW\):\s*(\d+[\.,]?\d*)/i);
+    if (demDist) dados.demanda_fora_ponta_kw = parseFloat(demDist[1].replace(",", "."));
+  }
+
+  // 6. Valor total a pagar (linha "Valor cobrado (R$):" ou "Total a Pagar")
+  let valorMatch = texto.match(/Valor cobrado\s*\(R\$\):\s*([\d\.]+,\d{2})/i);
+  if (!valorMatch) valorMatch = texto.match(/Total a Pagar\s*R\$\s*([\d\.]+,\d{2})/i);
   if (valorMatch) {
     dados.total_pagar = parseFloat(valorMatch[1].replace(/\./g, "").replace(",", "."));
   } else {
@@ -363,9 +366,32 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
     if (valorSimples) dados.total_pagar = parseFloat(valorSimples[1].replace(/\./g, "").replace(",", "."));
   }
 
-  // 7. Dias do ciclo
+  // 7. Dias do ciclo (geralmente 30 ou 31)
   const diasMatch = texto.match(/(\d{2})\s*dias/i);
   if (diasMatch) dados.dias_ciclo = parseInt(diasMatch[1]);
+
+  // Validação mínima: se ainda não temos demanda, tenta pegar o maior entre consumo médio diário * fator de carga fictício
+  if (dados.demanda_ponta_kw === 0 && dados.demanda_fora_ponta_kw === 0) {
+    const consumoDiario = texto.match(/Consumo Médio Diário \(kWh\):\s*(\d+[\.,]?\d*)/i);
+    if (consumoDiario) {
+      const mediaDiaria = parseFloat(consumoDiario[1].replace(",", "."));
+      // Estimativa grosseira: demanda = consumo diário / 8 (supondo 8 horas de pico)
+      dados.demanda_fora_ponta_kw = Math.ceil(mediaDiaria / 8);
+      dados.demanda_ponta_kw = dados.demanda_fora_ponta_kw;
+    }
+  }
+
+  // Log para depuração (opcional, remova depois)
+  console.log("📊 Dados extraídos:", {
+    mes: dados.mes_referencia,
+    consumoFP: dados.consumo_fora_ponta_kwh,
+    consumoP: dados.consumo_ponta_kwh,
+    reativoFP: dados.reativo_fora_ponta_kvarh,
+    reativoP: dados.reativo_ponta_kvarh,
+    demandaFP: dados.demanda_fora_ponta_kw,
+    demandaP: dados.demanda_ponta_kw,
+    valor: dados.total_pagar,
+  });
 
   return dados;
 }
