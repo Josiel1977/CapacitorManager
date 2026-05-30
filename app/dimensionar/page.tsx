@@ -608,7 +608,7 @@ function DimensionarContent() {
               <p><strong>Reativo Fora Ponta:</strong> ${dadosExtraidos.reativo_fora_ponta_kvarh} kVArh</p>
               <p><strong>Demanda Ponta:</strong> ${dadosExtraidos.demanda_ponta_kw} kW</p>
               <p><strong>Demanda Fora Ponta:</strong> ${dadosExtraidos.demanda_fora_ponta_kw} kW</p>
-              <p><strong>Valor Total:</strong> ${formatMoney(dadosExtraidos.total_pagar)}</p>
+              <p><strong>Valor Total:</strong> ${formatMoney(dadosExtraidos.total_pagar || 0)}</p>
               <p><strong>Concessionária:</strong> ${dadosExtraidos.concessionaria}</p>
             </div>
           `,
