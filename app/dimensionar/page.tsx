@@ -2,7 +2,6 @@
 
 import React, { useState, useRef, useEffect, Suspense, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import * as pdfjsLib from "pdfjs-dist";
 import { useDropzone } from "react-dropzone";
 import {
   Calculator,
@@ -30,8 +29,8 @@ import jsPDF from "jspdf";
 import { toPng } from "html-to-image";
 import { supabase } from "@/lib/supabase";
 
-// Configura o worker do PDF.js (essencial para Next.js)
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// 🔧 Força a página a ser renderizada apenas no cliente (desativa SSG/SSR)
+export const dynamic = 'force-dynamic';
 
 // ==================== CONSTANTES ====================
 const FP_MINIMO_REGULAMENTAR = 0.92;
@@ -256,10 +255,25 @@ const distribuirKvarPorTrafo = (
   });
 };
 
-// ==================== FUNÇÕES DE LEITURA DE PDF ====================
+// ==================== FUNÇÕES DE LEITURA DE PDF (com carregamento dinâmico) ====================
+// Declaração da variável global para o pdfjs (será preenchida no cliente)
+let pdfjsLib: any = null;
+
+async function carregarPDFJS() {
+  if (typeof window === 'undefined') return null;
+  if (pdfjsLib) return pdfjsLib;
+  const module = await import('pdfjs-dist');
+  pdfjsLib = module;
+  // Configura o worker usando CDN (apenas no cliente)
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+  return pdfjsLib;
+}
+
 async function extrairTextoDoPDF(file: File): Promise<string> {
+  const pdfjs = await carregarPDFJS();
+  if (!pdfjs) throw new Error("PDF.js não carregado");
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
   let textoCompleto = "";
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
@@ -289,7 +303,7 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
   else if (texto.includes("CELG Distribuição")) dados.concessionaria = "CELG";
   else if (texto.includes("Roraima Energia")) dados.concessionaria = "RORAIMA_ENERGIA";
 
-  // 2. Mês/Ano (ex: "JUN/2023" ou "01/2026")
+  // 2. Mês/Ano
   const mesMatch = texto.match(/(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\/(\d{4})/i);
   if (mesMatch) {
     const mesMap: Record<string, string> = {
@@ -317,7 +331,7 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
     if (pMatch) dados.consumo_ponta_kwh = parseFloat(pMatch[1].replace(",", "."));
   }
 
-  // 4. Reativo excedente (kVArh) – já é o valor que será multado
+  // 4. Reativo excedente (kVArh)
   const reatPonta = texto.match(/Consumo Reativo Excedente (?:NP|Ponta)[^\d]*(\d+[\.,]?\d*)/i);
   if (reatPonta) dados.reativo_ponta_kvarh = parseFloat(reatPonta[1].replace(",", "."));
   const reatFP = texto.match(/Consumo Reativo Excedente (?:FP|Fora Ponta)[^\d]*(\d+[\.,]?\d*)/i);
@@ -340,7 +354,7 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
     if (valorSimples) dados.total_pagar = parseFloat(valorSimples[1].replace(/\./g, "").replace(",", "."));
   }
 
-  // 7. Dias do ciclo (geralmente 30 ou 31)
+  // 7. Dias do ciclo
   const diasMatch = texto.match(/(\d{2})\s*dias/i);
   if (diasMatch) dados.dias_ciclo = parseInt(diasMatch[1]);
 
