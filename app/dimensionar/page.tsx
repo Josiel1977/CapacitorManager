@@ -257,15 +257,24 @@ const distribuirKvarPorTrafo = (
 
 // ==================== FUNÇÕES DE LEITURA DE PDF (com carregamento dinâmico) ====================
 // Declaração da variável global para o pdfjs (será preenchida no cliente)
+// ==================== FUNÇÕES DE LEITURA DE PDF (com carregamento correto do worker) ====================
 let pdfjsLib: any = null;
 
 async function carregarPDFJS() {
   if (typeof window === 'undefined') return null;
   if (pdfjsLib) return pdfjsLib;
+
+  // Importa dinamicamente o módulo principal
   const module = await import('pdfjs-dist');
   pdfjsLib = module;
-  // Configura o worker usando CDN (apenas no cliente)
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
+  // Configura o worker usando o caminho absoluto do pacote (sem depender de CDN)
+  // Em Next.js, o import.meta.url resolve corretamente.
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.min.mjs',
+    import.meta.url
+  ).toString();
+
   return pdfjsLib;
 }
 
