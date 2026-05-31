@@ -477,64 +477,70 @@ function DimensionarContent() {
   };
 
   const calcular = () => {
-    if (faturas.length < 2) return Swal.fire("Atenção", "Adicione pelo menos 2 faturas.", "warning");
-    setCalculando(true);
-    
-    setTimeout(() => {
-      try {
-        const alertas: string[] = [];
-        const fps = faturas.map(f => f.fp_calculado);
-        const fpPior = Math.min(...fps);
-        const fpMedio = fps.reduce((a,b) => a+b, 0) / fps.length;
-        
-        // ✅ SELETOR DE CRITÉRIO DE DIMENSIONAMENTO
-        let potenciaBase = 0; 
-        let criterioTexto = "";
-        
-        if (criterioCalculo === "carga_atual") {
-          potenciaBase = Math.max(...faturas.map(f => f.demanda_max_kw), 0);
-          criterioTexto = `Carga Real (Demanda medida: ${potenciaBase.toFixed(1)} kW)`;
-          if (potenciaBase < 30) {
-            alertas.push(`ℹ️ Carga atual baixa (${potenciaBase.toFixed(1)} kW). Banco de ${kvarCom} kVAr elimina multa hoje. Para expansão futura, considere modo "Transformadores".`);
-          }
-        } else if (criterioCalculo === "contratada") {
-          potenciaBase = 280;
-          criterioTexto = "Demanda Contratada (280 kW)";
-        } else {
-          const totalTrafo = transformadores.reduce((acc, t) => acc + (t.potencia_kva * t.quantidade), 0);
-          potenciaBase = totalTrafo * 0.35; // FC realista para armazém
-          criterioTexto = `Capacidade Instalada (${totalTrafo} kVA × 0,35 = ${potenciaBase.toFixed(1)} kW)`;
-          alertas.push(`⚠️ Modo expansão: Banco dimensionado para ${potenciaBase.toFixed(0)} kW. Se a carga real permanecer baixa, pode ocorrer sobrecorreção (FP capacitivo) em horários ociosos.`);
-        }
+  if (faturas.length < 2) return Swal.fire("Atenção", "Adicione pelo menos 2 faturas.", "warning");
+  setCalculando(true);
+  
+  setTimeout(() => {
+    try {
+      const alertas: string[] = [];
+      const fps = faturas.map(f => f.fp_calculado);
+      const fpPior = Math.min(...fps);
+      const fpMedio = fps.reduce((a,b) => a+b, 0) / fps.length;
+      
+      // ✅ 1º: Determinar potência base conforme critério
+      let potenciaBase = 0; 
+      let criterioTexto = "";
+      
+      if (criterioCalculo === "carga_atual") {
+        potenciaBase = Math.max(...faturas.map(f => f.demanda_max_kw), 0);
+        criterioTexto = `Carga Real (Demanda medida: ${potenciaBase.toFixed(1)} kW)`;
+      } else if (criterioCalculo === "contratada") {
+        potenciaBase = 280;
+        criterioTexto = "Demanda Contratada (280 kW)";
+      } else {
+        const totalTrafo = transformadores.reduce((acc, t) => acc + (t.potencia_kva * t.quantidade), 0);
+        potenciaBase = totalTrafo * 0.35;
+        criterioTexto = `Capacidade Instalada (${totalTrafo} kVA × 0,35 = ${potenciaBase.toFixed(1)} kW)`;
+      }
 
-        const kvarNec = calcularKvarNecessario(potenciaBase, fpPior, targetFP, margemSeg, harmonicos);
-        const kvarCom = Math.ceil(kvarNec / 10) * 10;
-        const estagios = distribuirEstagios(kvarCom, 6 + Math.floor(kvarCom/50));
-        const investimento = calcularPrecoMercado(kvarCom);
-        const multaMedia = faturas.reduce((a,b)=>a+b.multa_estimada,0)/faturas.length;
-        const economia = multaMedia * 0.85;
-        const payback = economia > 0 ? Math.ceil(investimento / economia) : 99;
-        const roi5 = ((economia * 12 * 5 - investimento) / investimento) * 100;
-        
-        // ✅ GERA LISTA DE MATERIAL
-        const tensaoSistema = transformadores[0]?.tensao_v || 380;
-        const listaMaterial = gerarListaMaterial(kvarCom, tensaoSistema);
+      // ✅ 2º: Calcular kVAr e derivados (AGORA sim temos kvarCom)
+      const kvarNec = calcularKvarNecessario(potenciaBase, fpPior, targetFP, margemSeg, harmonicos);
+      const kvarCom = Math.ceil(kvarNec / 10) * 10;
+      const estagios = distribuirEstagios(kvarCom, 6 + Math.floor(kvarCom/50));
+      const investimento = calcularPrecoMercado(kvarCom);
+      const multaMedia = faturas.reduce((a,b)=>a+b.multa_estimada,0)/faturas.length;
+      const economia = multaMedia * 0.85;
+      const payback = economia > 0 ? Math.ceil(investimento / economia) : 99;
+      const roi5 = ((economia * 12 * 5 - investimento) / investimento) * 100;
+      
+      // ✅ 3º: Alertas que dependem de kvarCom (AGORA está declarado)
+      if (criterioCalculo === "carga_atual" && potenciaBase < 30) {
+        alertas.push(`ℹ️ Carga atual baixa (${potenciaBase.toFixed(1)} kW). Banco de ${kvarCom} kVAr elimina multa hoje. Para expansão futura, considere modo "Transformadores".`);
+      }
+      if (criterioCalculo !== "carga_atual") {
+        alertas.push(`⚠️ Modo expansão: Banco dimensionado para ${potenciaBase.toFixed(0)} kW. Se a carga real permanecer baixa, pode ocorrer sobrecorreção (FP capacitivo) em horários ociosos.`);
+      }
+      
+      // ✅ 4º: Gerar lista de material
+      const tensaoSistema = transformadores[0]?.tensao_v || 380;
+      const listaMaterial = gerarListaMaterial(kvarCom, tensaoSistema);
 
-        setResult({
-          kvar_necessario: kvarNec, kvar_comercial: kvarCom, estagios, fp_medio: fpMedio, fp_pior_mes: fpPior,
-          multa_media: multaMedia, investimento, economia_mensal: economia, payback_meses: payback, roi_5_anos: roi5,
-          lista_material: listaMaterial,
-          detalhes_calculo: {
-            potencia_base_kw: potenciaBase, criterio_usado: criterioTexto, margem_seguranca: margemSeg,
-            formula_aplicada: `Qc = ${potenciaBase.toFixed(1)} × (tan φ₁ ${(fpPior*100).toFixed(1)}% → tan φ₂ ${(targetFP*100).toFixed(1)}%) × ${(1+margemSeg/100).toFixed(2)}${harmonicos?' × 1,08 (harmônicos)':''}`
-          },
-          alertas
-        });
-      } catch (e) {
-        Swal.fire("Erro", "Falha no cálculo.", "error");
-      } finally { setCalculando(false); }
-    }, 600);
-  };
+      // ✅ 5º: Setar resultado
+      setResult({
+        kvar_necessario: kvarNec, kvar_comercial: kvarCom, estagios, fp_medio: fpMedio, fp_pior_mes: fpPior,
+        multa_media: multaMedia, investimento, economia_mensal: economia, payback_meses: payback, roi_5_anos: roi5,
+        lista_material: listaMaterial,
+        detalhes_calculo: {
+          potencia_base_kw: potenciaBase, criterio_usado: criterioTexto, margem_seguranca: margemSeg,
+          formula_aplicada: `Qc = ${potenciaBase.toFixed(1)} × (tan φ₁ ${(fpPior*100).toFixed(1)}% → tan φ₂ ${(targetFP*100).toFixed(1)}%) × ${(1+margemSeg/100).toFixed(2)}${harmonicos?' × 1,08 (harmônicos)':''}`
+        },
+        alertas
+      });
+    } catch (e) {
+      Swal.fire("Erro", "Falha no cálculo.", "error");
+    } finally { setCalculando(false); }
+  }, 600);
+};
 
   const exportarPDF = async () => {
     if (!reportRef.current) return;
