@@ -79,24 +79,57 @@ const calcularKvarNecessario = (potenciaAtivaKW: number, fpAtual: number, fpDese
   return Math.ceil(kvar / 2.5) * 2.5;
 };
 
-const distribuirEstagios = (totalKvar: number, numEstagios: number): number[] => {
-  const base = [1, 2, 2, 3, 5, 5, 8, 10, 15, 20, 25, 30];
+// Substitua APENAS a função distribuirEstagios e o bloco de calculo de potenciaBase
+
+const distribuirEstagios = (totalKvar: number, numEstagiosMax: number = 12): number[] => {
+  const valoresComerciais = [1, 2.5, 5, 7.5, 10, 12.5, 15, 20, 25, 30, 40, 50];
+  const numEstagios = Math.min(12, Math.max(6, numEstagiosMax));
   const etapas: number[] = [];
   let soma = 0;
-  for (let i = 0; i < base.length && etapas.length < numEstagios; i++) {
-    if (soma + base[i] <= totalKvar) { etapas.push(base[i]); soma += base[i]; }
-  }
-  let restante = totalKvar - soma;
-  let faltando = numEstagios - etapas.length;
-  if (faltando > 0 && restante > 0) {
-    const unit = Math.ceil((restante / faltando) / 2.5) * 2.5;
-    for (let i = 0; i < faltando; i++) {
-      const add = i === faltando - 1 ? restante - (unit * (faltando - 1)) : unit;
-      etapas.push(Math.max(2.5, add));
+  
+  for (const valor of valoresComerciais) {
+    if (etapas.length >= numEstagios) break;
+    if (soma + valor <= totalKvar * 0.85) {
+      etapas.push(valor);
+      soma += valor;
     }
   }
-  return etapas.filter(s => s > 0).sort((a, b) => a - b);
+  
+  let restante = totalKvar - soma;
+  let faltando = numEstagios - etapas.length;
+  
+  if (faltando > 0 && restante > 0) {
+    const valorUnitario = Math.min(50, Math.max(2.5, Math.round(restante / faltando / 2.5) * 2.5));
+    for (let i = 0; i < faltando; i++) {
+      const add = i === faltando - 1 
+        ? Math.max(2.5, Math.round((restante - (valorUnitario * (faltando - 1))) / 2.5) * 2.5)
+        : valorUnitario;
+      etapas.push(add);
+      soma += add;
+      restante = totalKvar - soma;
+    }
+  }
+  
+  const diff = Math.round((totalKvar - soma) / 2.5) * 2.5;
+  if (Math.abs(diff) > 0.01 && etapas.length > 0) {
+    etapas[etapas.length - 1] = Math.max(2.5, etapas[etapas.length - 1] + diff);
+  }
+  
+  return etapas.filter(v => v >= 2.5).map(v => Math.round(v / 2.5) * 2.5).sort((a, b) => a - b);
 };
+
+// No bloco de cálculo dentro de calcular():
+if (criterioCalculo === "carga_atual") {
+  potenciaBase = Math.max(...faturas.map(f => f.demanda_max_kw), 0);
+  criterioTexto = `Carga Real (Demanda medida: ${potenciaBase.toFixed(1)} kW)`;
+} else if (criterioCalculo === "transformadores") {
+  const totalTrafo = transformadores.reduce((acc, t) => acc + (t.potencia_kva * t.quantidade), 0);
+  potenciaBase = totalTrafo * 0.35; // FC realista para armazém
+  criterioTexto = `Capacidade Instalada (${totalTrafo} kVA × 0,35 = ${potenciaBase.toFixed(1)} kW)`;
+} else {
+  potenciaBase = 280; // Contratada
+  criterioTexto = "Demanda Contratada (280 kW)";
+}
 
 const calcularPrecoMercado = (kvar: number): number => {
   const chaves = Object.keys(PRECOS_MERCADO_CAPACITORES).map(Number).sort((a,b) => a-b);
