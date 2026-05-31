@@ -626,22 +626,37 @@ function DimensionarContent() {
     const concessionarias = [...new Set(faturas.map((f) => f.concessionaria))];
     if (concessionarias.length > 1) alertas.push(`⚠️ Faturas de diferentes concessionárias: ${concessionarias.join(", ")}`);
 
-    // Processa cada fatura: calcula ativo, reativo, FP e demanda máxima
+    // Processa as faturas: calcula ativo, reativo, FP (prioriza lido) e demanda máxima
     const faturasProcessadas = faturas.map((f) => {
-      const ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
-      const reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
+      let ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
+      let reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
+      const demandaMaxKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
+
       let fp;
       if (f.fp_calculado && f.fp_calculado > 0.3 && f.fp_calculado < 1) {
         fp = f.fp_calculado;
-      } else if (reativoTotal === 0) {
-        // Se não há reativo, não podemos calcular; assume um valor típico para este perfil
-        fp = 0.92;
-        alertas.push(`⚠️ Fatura ${f.mes_referencia} sem dados de reativo excedente. FP assumido 0,92.`);
-      } else {
+        // Se ativoTotal estiver zerado, estimamos com base na demanda (200h/mês)
+        if (ativoTotal === 0 && demandaMaxKw > 0) {
+          const horasEstimadas = 200;
+          ativoTotal = demandaMaxKw * horasEstimadas;
+          console.log(`⚠️ Fatura ${f.mes_referencia}: ativo estimado (${ativoTotal.toFixed(0)} kWh) a partir da demanda.`);
+        }
+        // Se reativoTotal estiver zerado, calculamos a partir do FP e ativo
+        if (reativoTotal === 0 && ativoTotal > 0) {
+          const tanPhi = Math.tan(Math.acos(fp));
+          reativoTotal = ativoTotal * tanPhi;
+          console.log(`⚠️ Fatura ${f.mes_referencia}: reativo estimado (${reativoTotal.toFixed(0)} kVArh) a partir do FP.`);
+        }
+      } else if (ativoTotal > 0 && reativoTotal > 0) {
         fp = calcularFatorPotencia(ativoTotal, reativoTotal);
+      } else {
+        fp = 0.92;
+        alertas.push(`⚠️ Fatura ${f.mes_referencia} sem dados suficientes. FP assumido 0,92.`);
       }
-      const multa = calcularMultaDaFatura(f);
-      const demandaMaxKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
+
+      const tarifa = TARIFAS_REATIVO[f.concessionaria] ?? TARIFAS_REATIVO.DEFAULT;
+      const multa = reativoTotal * tarifa;
+
       return { ...f, ativoTotal, reativoTotal, fp, multa, demandaMaxKw };
     });
 
@@ -649,29 +664,25 @@ function DimensionarContent() {
     const piorMes = faturasProcessadas.reduce((prev, curr) => (curr.fp < prev.fp ? curr : prev), faturasProcessadas[0]);
     let fpAtual = piorMes.fp;
     if (fpAtual >= 0.99 || fpAtual <= 0.3) {
-      // Recalcula usando totais gerais se o FP for inválido
       const totalAtivo = faturasProcessadas.reduce((s, f) => s + f.ativoTotal, 0);
       const totalReativo = faturasProcessadas.reduce((s, f) => s + f.reativoTotal, 0);
       fpAtual = calcularFatorPotencia(totalAtivo, totalReativo);
-      alertas.push(`⚠️ FP do pior mês inválido. Recalculado (média geral): ${(fpAtual*100).toFixed(1)}%`);
+      alertas.push(`⚠️ FP do pior mês inválido. Recalculado (média geral): ${(fpAtual * 100).toFixed(1)}%`);
     }
 
-    // Demanda real: a maior demanda máxima entre todas as faturas (sem multiplicadores)
+    // Demanda real: maior demanda máxima entre as faturas
     let demandaReal = Math.max(...faturasProcessadas.map((f) => f.demandaMaxKw), 0);
     console.log(`📈 Demanda real máxima extraída: ${demandaReal} kW | Pior FP: ${fpAtual}`);
 
-    // Se mesmo assim a demanda for zero (falha total), tenta estimar pelo consumo médio (fallback final)
-    if (demandaReal < 1) {
-      const consumoMedio = faturasProcessadas.reduce((s, f) => s + f.ativoTotal, 0) / faturasProcessadas.length;
-      const horasEstimadas = 200; // média de horas de operação mensal
-      demandaReal = consumoMedio / horasEstimadas;
-      alertas.push(`⚠️ Demanda não identificada. Estimada com base no consumo: ${demandaReal.toFixed(1)} kW.`);
+    // Se a demanda for zero, estima (fallback final)
+    if (demandaReal < 1 && potenciaTotalTransformadores > 0) {
+      demandaReal = potenciaTotalTransformadores * 0.2;
+      alertas.push(`⚠️ Demanda não identificada. Utilizado valor estimado de ${demandaReal.toFixed(1)} kW.`);
     }
 
-    // Potência base = demanda real (sem fator de carga, sem margem ainda)
     let potenciaBase = demandaReal;
     let potenciaAtivaFinal = potenciaBase * (1 + margemSeguranca / 100);
-    console.log(`✅ Potência ativa utilizada: ${potenciaBase} kW → final com margem: ${potenciaAtivaFinal} kW`);
+    console.log(`✅ Potência ativa utilizada: ${potenciaBase} kW → final: ${potenciaAtivaFinal} kW`);
 
     const precisaCapacitor = fpAtual < FP_MINIMO_REGULAMENTAR;
     let kvarAutomatico = 0, estagios: number[] = [], economiaMensal = 0, motivo = "";
@@ -680,14 +691,14 @@ function DimensionarContent() {
       const phi1 = Math.acos(Math.min(0.99, Math.max(0.3, fpAtual)));
       const phi2 = Math.acos(FP_MINIMO_REGULAMENTAR);
       const kvarTeorico = potenciaAtivaFinal * (Math.tan(phi1) - Math.tan(phi2));
-      
+
       // Arredondamento comercial igual ao Python
       let baseStep = 2.5;
       if (kvarTeorico >= 60) baseStep = 12.5;
       else if (kvarTeorico >= 20) baseStep = 5;
       let kvarComercial = Math.ceil(kvarTeorico / baseStep) * baseStep;
       kvarComercial = Math.max(kvarComercial, CONFIG_CAPACITORES.minimo_kvar_grupo_a);
-      
+
       // Distribuição de estágios: um fixo (menor) e os restantes automáticos (múltiplos de 2×baseStep)
       let fixedStep = baseStep;
       if (kvarComercial <= fixedStep) fixedStep = kvarComercial;
@@ -699,16 +710,14 @@ function DimensionarContent() {
       for (let i = 0; i < numMajor; i++) stepsList.push(majorStep);
       let remainder = autoCapacity % majorStep;
       if (remainder > 0) stepsList.push(remainder);
-      
+
       estagios = stepsList.sort((a, b) => a - b);
       kvarAutomatico = kvarComercial;
-      // Economia mensal estimada: como os reativos podem estar zerados, usamos a multa média das faturas
       const mediaMulta = faturasProcessadas.reduce((acc, f) => acc + f.multa, 0) / faturasProcessadas.length;
       economiaMensal = mediaMulta * 0.92;
-      motivo = `Potência ativa = ${potenciaAtivaFinal.toFixed(1)} kW | FP atual = ${(fpAtual*100).toFixed(1)}% | Meta = ${(FP_MINIMO_REGULAMENTAR*100).toFixed(0)}% → kVAr teórico = ${kvarTeorico.toFixed(1)} → comercial = ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios).`;
+      motivo = `Potência ativa = ${potenciaAtivaFinal.toFixed(1)} kW | FP atual = ${(fpAtual * 100).toFixed(1)}% | Meta = ${(FP_MINIMO_REGULAMENTAR * 100).toFixed(0)}% → kVAr teórico = ${kvarTeorico.toFixed(1)} → comercial = ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios).`;
     } else {
-      const mediaFp = faturasProcessadas.reduce((a, b) => a + b.fp, 0) / faturasProcessadas.length;
-      motivo = `✅ Sistema regularizado (FP médio: ${(mediaFp*100).toFixed(1)}%)`;
+      motivo = `✅ Sistema regularizado (FP médio: ${(fpAtual * 100).toFixed(1)}%)`;
     }
 
     const investimentoTotal = calcularPrecoMercado(kvarAutomatico);
@@ -723,49 +732,7 @@ function DimensionarContent() {
     const precoPorKvar = kvarAutomatico > 0 ? investimentoTotal / kvarAutomatico : 0;
     const distribuicaoPorTrafo = distribuirKvarPorTrafo(transformadores, estagios, kvarAutomatico);
     const tensaoCapacitores = transformadores[0]?.tensao_v === 380 ? CONFIG_CAPACITORES.tensao_padrao_380v : CONFIG_CAPACITORES.tensao_padrao_220v;
-const faturasProcessadas = faturas.map((f) => {
-  // Valores originais (podem estar zerados)
-  let ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
-  let reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
-
-  // Demanda real (kW)
-  const demandaRealKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
-
-  // 1. Se temos FP lido (campo fp_calculado) e ele é válido
-  let fp;
-  if (f.fp_calculado && f.fp_calculado > 0.3 && f.fp_calculado < 1) {
-    fp = f.fp_calculado;
-
-    // Se ativoTotal estiver zerado, estimamos com base na demanda (considerando 200 horas/mês)
-    if (ativoTotal === 0 && demandaRealKw > 0) {
-      const horasEstimadas = 200; // média para perfil industrial/comercial
-      ativoTotal = demandaRealKw * horasEstimadas;
-      console.log(`⚠️ Fatura ${f.mes_referencia}: ativo estimado (${ativoTotal.toFixed(0)} kWh) a partir da demanda.`);
-    }
-
-    // Se reativoTotal estiver zerado, calculamos a partir do FP e ativo
-    if (reativoTotal === 0 && ativoTotal > 0) {
-      const tanPhi = Math.tan(Math.acos(fp));
-      reativoTotal = ativoTotal * tanPhi;
-      console.log(`⚠️ Fatura ${f.mes_referencia}: reativo estimado (${reativoTotal.toFixed(0)} kVArh) a partir do FP.`);
-    }
-  } 
-  // 2. Se não temos FP lido, mas temos ativo e reativo, calcula o FP
-  else if (ativoTotal > 0 && reativoTotal > 0) {
-    fp = calcularFatorPotencia(ativoTotal, reativoTotal);
-  } 
-  // 3. Fallback: usa FP padrão (não deve ocorrer para as faturas com FP lido)
-  else {
-    fp = 0.92;
-    alertas.push(`⚠️ Fatura ${f.mes_referencia} sem dados suficientes. FP assumido 0,92.`);
-  }
-
-  // Cálculo da multa usando o reativo (real ou estimado)
-  const tarifa = TARIFAS_REATIVO[f.concessionaria] ?? TARIFAS_REATIVO.DEFAULT;
-  const multa = reativoTotal * tarifa;
-
-  return { ...f, ativoTotal, reativoTotal, fp, multa, demandaMaxKw: demandaRealKw };
-});
+    const mediaFpPorMes = faturasProcessadas.map((f) => ({ mes: f.mes_referencia, fp: f.fp * 100, multa: f.multa })).sort((a, b) => a.fp - b.fp);
     const grupoTarifario = potenciaTotalTransformadores >= 75 ? "A" : "B";
 
     setResult({
@@ -805,7 +772,7 @@ const faturasProcessadas = faturas.map((f) => {
 
     Swal.fire({
       title: precisaCapacitor ? "✅ Dimensionamento Concluído" : "✅ Análise Concluída",
-      html: `<div class="text-center"><p class="text-lg font-bold">FP no pior mês: ${(fpAtual*100).toFixed(1)}%</p>${
+      html: `<div class="text-center"><p class="text-lg font-bold">FP no pior mês: ${(fpAtual * 100).toFixed(1)}%</p>${
         precisaCapacitor ? `<p class="text-primary font-bold mt-2">🔋 Recomendação:<br/>• Banco automático: ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios)</p>` : '<p class="text-green-600 mt-2">Sistema dentro das normas ANEEL</p>'
       }<p class="text-xs text-slate-500 mt-2">💰 Multa média: ${formatMoney(faturasProcessadas.reduce((acc, f) => acc + f.multa, 0) / faturasProcessadas.length)}/mês</p><p class="text-xs text-slate-500">💰 Investimento estimado: ${formatMoney(investimentoTotal)}</p><p class="text-xs text-slate-500">⏱️ Payback: ${payback} meses</p></div>`,
       icon: precisaCapacitor ? "success" : "info",
