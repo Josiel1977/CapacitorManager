@@ -247,53 +247,93 @@ function parseFaturaFromMarkdown(texto: string): Partial<Fatura> & { concessiona
     fp_calculado: undefined,
   };
 
-  if (!texto.includes("Equatorial Pará")) {
-    dados.concessionaria = "DESCONHECIDA";
-    return dados;
-  }
-
-  // Mês/Ano
+  // 1. Mês/Ano (prioriza "Conta Mês" ou "Competência")
   let mesMatch = texto.match(/(?:Conta Mês|Competência)\s*(\d{2}\/\d{4})/i);
   if (!mesMatch) mesMatch = texto.match(/\b(\d{2}\/\d{4})\b/);
   if (mesMatch) dados.mes_referencia = mesMatch[1];
 
-  // Consumos ativos (kWh)
-  const consumoFP = texto.match(/TUSD Energia Fora Ponta \(kWh\)\s*([\d\.,]+)/i);
-  if (consumoFP) dados.consumo_fora_ponta_kwh = parseFloat(consumoFP[1].replace(/\./g, "").replace(",", "."));
-  const consumoP = texto.match(/TUSD Energia Ponta \(kWh\)\s*([\d\.,]+)/i);
-  if (consumoP) dados.consumo_ponta_kwh = parseFloat(consumoP[1].replace(/\./g, "").replace(",", "."));
+  // 2. Consumos ativos (kWh) – busca nas tabelas ou nas linhas "TUSD Energia ..."
+  // Exemplo: "TUSD Energia Fora Ponta (kWh)\n5.974,50"
+  const consumoFPMatch = texto.match(/TUSD Energia Fora Ponta\s*\(kWh\)\s*\n\s*([\d\.,]+)/i);
+  if (consumoFPMatch) dados.consumo_fora_ponta_kwh = parseFloat(consumoFPMatch[1].replace(/\./g, "").replace(",", "."));
+  else {
+    // Fallback: procura "Consumo Fora Ponta (kWh): 5.974,50" (formato alternativo)
+    const consumoFPAlt = texto.match(/Consumo Fora Ponta \(kWh\):\s*([\d\.,]+)/i);
+    if (consumoFPAlt) dados.consumo_fora_ponta_kwh = parseFloat(consumoFPAlt[1].replace(/\./g, "").replace(",", "."));
+  }
 
-  // Reativo excedente (kVArh)
-  const reactFP = texto.match(/Consumo Reativo Excedente FP \(kVAr\)\s*([\d\.,]+)/i);
-  if (reactFP) dados.reativo_fora_ponta_kvarh = parseFloat(reactFP[1].replace(/\./g, "").replace(",", "."));
-  const reactP = texto.match(/Consumo Reativo Excedente NP \(kVAr\)\s*([\d\.,]+)/i);
-  if (reactP) dados.reativo_ponta_kvarh = parseFloat(reactP[1].replace(/\./g, "").replace(",", "."));
+  const consumoPMatch = texto.match(/TUSD Energia Ponta\s*\(kWh\)\s*\n\s*([\d\.,]+)/i);
+  if (consumoPMatch) dados.consumo_ponta_kwh = parseFloat(consumoPMatch[1].replace(/\./g, "").replace(",", "."));
+  else {
+    const consumoPAlt = texto.match(/Consumo Ponta \(kWh\):\s*([\d\.,]+)/i);
+    if (consumoPAlt) dados.consumo_ponta_kwh = parseFloat(consumoPAlt[1].replace(/\./g, "").replace(",", "."));
+  }
 
-  // Demanda máxima (kW)
+  // 3. Reativo excedente (kVArh)
+  const reactFPMatch = texto.match(/Consumo Reativo Excedente FP\s*\(kVAr\)\s*\n\s*([\d\.,]+)/i);
+  if (reactFPMatch) dados.reativo_fora_ponta_kvarh = parseFloat(reactFPMatch[1].replace(/\./g, "").replace(",", "."));
+  else {
+    const reactFPAlt = texto.match(/Reativo Excedente Fora Ponta \(kVArh\):\s*([\d\.,]+)/i);
+    if (reactFPAlt) dados.reativo_fora_ponta_kvarh = parseFloat(reactFPAlt[1].replace(/\./g, "").replace(",", "."));
+  }
+
+  const reactPMatch = texto.match(/Consumo Reativo Excedente NP\s*\(kVAr\)\s*\n\s*([\d\.,]+)/i);
+  if (reactPMatch) dados.reativo_ponta_kvarh = parseFloat(reactPMatch[1].replace(/\./g, "").replace(",", "."));
+  else {
+    const reactPAlt = texto.match(/Reativo Excedente Ponta \(kVArh\):\s*([\d\.,]+)/i);
+    if (reactPAlt) dados.reativo_ponta_kvarh = parseFloat(reactPAlt[1].replace(/\./g, "").replace(",", "."));
+  }
+
+  // 4. Demanda (kW) – campos "Dem. Máx. F. Ponta (kW):" e "Dem. Máx. Ponta (kW):"
   const demFP = texto.match(/Dem\.\s*Máx\.\s*F\.\s*Ponta\s*\(kW\):\s*([\d\.,]+)/i);
   if (demFP) dados.demanda_fora_ponta_kw = parseFloat(demFP[1].replace(",", "."));
   const demP = texto.match(/Dem\.\s*Máx\.\s*Ponta\s*\(kW\):\s*([\d\.,]+)/i);
   if (demP) dados.demanda_ponta_kw = parseFloat(demP[1].replace(",", "."));
 
-  // Fator de potência
+  // 5. Fator de potência
   const fpMatch = texto.match(/FATOR DE POTÊNCIA:\s*([\d\.,]+)/i);
   if (fpMatch) {
     let fp = parseFloat(fpMatch[1].replace(",", "."));
     if (fp > 0 && fp < 1) dados.fp_calculado = fp;
   }
 
-  // Valor total a pagar
+  // 6. Valor total
   let valorMatch = texto.match(/Total a Pagar\s*R\$\s*([\d\.]+,\d{2})/i);
   if (!valorMatch) valorMatch = texto.match(/Valor cobrado \(R\$\):\s*([\d\.]+,\d{2})/i);
   if (valorMatch) dados.total_pagar = parseFloat(valorMatch[1].replace(/\./g, "").replace(",", "."));
 
-  // Dias do ciclo
+  // 7. Dias do ciclo
   const diasMatch = texto.match(/Nº de Dias\s*(\d+)/i);
   if (diasMatch) dados.dias_ciclo = parseInt(diasMatch[1]);
 
+  console.log("📊 Dados extraídos do Markdown (corrigido):", {
+    mes: dados.mes_referencia,
+    consumoFP: dados.consumo_fora_ponta_kwh,
+    consumoP: dados.consumo_ponta_kwh,
+    reativoFP: dados.reativo_fora_ponta_kvarh,
+    reativoP: dados.reativo_ponta_kvarh,
+    demandaFP: dados.demanda_fora_ponta_kw,
+    demandaP: dados.demanda_ponta_kw,
+    fp: dados.fp_calculado,
+    valor: dados.total_pagar,
+  });
+
+  // Se os consumos e reativos estiverem zerados mas o FP foi lido e a demanda existe, estima os reativos
+  if (dados.consumo_fora_ponta_kwh === 0 && dados.demanda_fora_ponta_kw > 0 && dados.fp_calculado) {
+    // Estima o consumo ativo baseado na demanda (considera 200 horas de operação)
+    const horasEstimadas = 200;
+    dados.consumo_fora_ponta_kwh = dados.demanda_fora_ponta_kw * horasEstimadas;
+    dados.consumo_ponta_kwh = dados.demanda_ponta_kw * horasEstimadas * 0.5; // ponta é menor
+    // Reativo total a partir do FP: Q = P * tan(acos(FP))
+    const tanPhi = Math.tan(Math.acos(dados.fp_calculado));
+    const reativoTotal = dados.consumo_fora_ponta_kwh * tanPhi;
+    dados.reativo_fora_ponta_kvarh = reativoTotal * 0.9; // distribuição
+    dados.reativo_ponta_kvarh = reativoTotal * 0.1;
+    console.log("⚠️ Estimativa de consumo e reativo usada (dados faltantes).");
+  }
+
   return dados;
 }
-
 // Fallback para PDF (usado apenas quando o arquivo não é Markdown)
 function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: string } {
   const dados: any = {
@@ -683,7 +723,49 @@ function DimensionarContent() {
     const precoPorKvar = kvarAutomatico > 0 ? investimentoTotal / kvarAutomatico : 0;
     const distribuicaoPorTrafo = distribuirKvarPorTrafo(transformadores, estagios, kvarAutomatico);
     const tensaoCapacitores = transformadores[0]?.tensao_v === 380 ? CONFIG_CAPACITORES.tensao_padrao_380v : CONFIG_CAPACITORES.tensao_padrao_220v;
-    const mediaFpPorMes = faturasProcessadas.map((f) => ({ mes: f.mes_referencia, fp: f.fp * 100, multa: f.multa })).sort((a, b) => a.fp - b.fp);
+const faturasProcessadas = faturas.map((f) => {
+  // Valores originais (podem estar zerados)
+  let ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
+  let reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
+
+  // Demanda real (kW)
+  const demandaRealKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
+
+  // 1. Se temos FP lido (campo fp_calculado) e ele é válido
+  let fp;
+  if (f.fp_calculado && f.fp_calculado > 0.3 && f.fp_calculado < 1) {
+    fp = f.fp_calculado;
+
+    // Se ativoTotal estiver zerado, estimamos com base na demanda (considerando 200 horas/mês)
+    if (ativoTotal === 0 && demandaRealKw > 0) {
+      const horasEstimadas = 200; // média para perfil industrial/comercial
+      ativoTotal = demandaRealKw * horasEstimadas;
+      console.log(`⚠️ Fatura ${f.mes_referencia}: ativo estimado (${ativoTotal.toFixed(0)} kWh) a partir da demanda.`);
+    }
+
+    // Se reativoTotal estiver zerado, calculamos a partir do FP e ativo
+    if (reativoTotal === 0 && ativoTotal > 0) {
+      const tanPhi = Math.tan(Math.acos(fp));
+      reativoTotal = ativoTotal * tanPhi;
+      console.log(`⚠️ Fatura ${f.mes_referencia}: reativo estimado (${reativoTotal.toFixed(0)} kVArh) a partir do FP.`);
+    }
+  } 
+  // 2. Se não temos FP lido, mas temos ativo e reativo, calcula o FP
+  else if (ativoTotal > 0 && reativoTotal > 0) {
+    fp = calcularFatorPotencia(ativoTotal, reativoTotal);
+  } 
+  // 3. Fallback: usa FP padrão (não deve ocorrer para as faturas com FP lido)
+  else {
+    fp = 0.92;
+    alertas.push(`⚠️ Fatura ${f.mes_referencia} sem dados suficientes. FP assumido 0,92.`);
+  }
+
+  // Cálculo da multa usando o reativo (real ou estimado)
+  const tarifa = TARIFAS_REATIVO[f.concessionaria] ?? TARIFAS_REATIVO.DEFAULT;
+  const multa = reativoTotal * tarifa;
+
+  return { ...f, ativoTotal, reativoTotal, fp, multa, demandaMaxKw: demandaRealKw };
+});
     const grupoTarifario = potenciaTotalTransformadores >= 75 ? "A" : "B";
 
     setResult({
