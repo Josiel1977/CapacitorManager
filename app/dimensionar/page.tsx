@@ -246,46 +246,85 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
     fp_calculado: undefined,
   };
 
-  // Identifica a concessionária (apenas Equatorial Pará neste exemplo)
+  // Log do início do texto para depuração (primeiros 1000 caracteres)
+  console.log("🔍 INÍCIO DO TEXTO EXTRAÍDO:\n", texto.substring(0, 1000));
+
   if (!texto.includes("Equatorial Pará")) {
     dados.concessionaria = "DESCONHECIDA";
     return dados;
   }
 
-  // Mês/Ano (prioriza "Conta Mês" ou "Competência")
+  // Mês/Ano
   let mesMatch = texto.match(/(?:Conta Mês|Competência)\s*[:\-\s\n|]*(\d{2}\/\d{4})/i);
   if (!mesMatch) mesMatch = texto.match(/\b(\d{2}\/\d{4})\b/);
   if (mesMatch) dados.mes_referencia = mesMatch[1];
 
-  // Consumo ativo (kWh) – ex: "TUSD Energia Fora Ponta (kWh) | 5.974,50"
+  // --- TENTATIVA 1: Busca pelos campos exatos (formato "TUSD Energia Fora Ponta (kWh) | 5.974,50") ---
   const activeFP = texto.match(/TUSD Energia Fora Ponta\s*\(?kWh\)?\s*\|\s*([\d\.,]+)/i);
   if (activeFP) dados.consumo_fora_ponta_kwh = parseFloat(activeFP[1].replace(/\./g, "").replace(",", "."));
   
   const activeP = texto.match(/TUSD Energia Ponta\s*\(?kWh\)?\s*\|\s*([\d\.,]+)/i);
   if (activeP) dados.consumo_ponta_kwh = parseFloat(activeP[1].replace(/\./g, "").replace(",", "."));
 
-  // Reativo excedente (kVArh) – ex: "Consumo Reativo Excedente FP (kVAr) | 8.932,83"
   const reactFP = texto.match(/Consumo Reativo Excedente FP\s*\(?kVAr\)?\s*\|\s*([\d\.,]+)/i);
   if (reactFP) dados.reativo_fora_ponta_kvarh = parseFloat(reactFP[1].replace(/\./g, "").replace(",", "."));
   
   const reactP = texto.match(/Consumo Reativo Excedente NP\s*\(?kVAr\)?\s*\|\s*([\d\.,]+)/i);
   if (reactP) dados.reativo_ponta_kvarh = parseFloat(reactP[1].replace(/\./g, "").replace(",", "."));
 
-  // Demanda (kW) – campos "Dem. Máx. F. Ponta (kW): 39,98"
-  const demFP = texto.match(/Dem\.\s*Máx\.\s*F\.\s*Ponta\s*\(kW\):\s*(\d+[\.,]?\d*)/i);
+  // --- TENTATIVA 2: Fallback genérico, mas filtrando números pequenos (ignorar leituras do medidor) ---
+  if (dados.consumo_fora_ponta_kwh === 0 || dados.consumo_ponta_kwh === 0) {
+    const kWhNumbers: number[] = [];
+    // Procura por padrão: número com ponto de milhar e vírgula decimal, seguido de "kWh"
+    const kWhRegex = /(\d{1,3}(?:\.\d{3})*,\d+)\s*kWh/gi;
+    let match;
+    while ((match = kWhRegex.exec(texto)) !== null) {
+      let num = parseFloat(match[1].replace(/\./g, "").replace(",", "."));
+      // Ignora números muito grandes (> 500.000) porque são leituras de medidor, não consumo
+      if (num < 500000) kWhNumbers.push(num);
+    }
+    kWhNumbers.sort((a, b) => b - a); // decrescente
+    if (kWhNumbers.length >= 2) {
+      dados.consumo_fora_ponta_kwh = kWhNumbers[0]; // maior é fora ponta
+      dados.consumo_ponta_kwh = kWhNumbers[1];     // segundo maior é ponta
+    } else if (kWhNumbers.length === 1) {
+      dados.consumo_fora_ponta_kwh = kWhNumbers[0];
+    }
+  }
+
+  if (dados.reativo_fora_ponta_kvarh === 0 || dados.reativo_ponta_kvarh === 0) {
+    const reativoNumbers: number[] = [];
+    const reativoRegex = /(\d{1,3}(?:\.\d{3})*,\d+)\s*kVArh?/gi;
+    let match;
+    while ((match = reativoRegex.exec(texto)) !== null) {
+      let num = parseFloat(match[1].replace(/\./g, "").replace(",", "."));
+      if (num < 500000) reativoNumbers.push(num);
+    }
+    reativoNumbers.sort((a, b) => b - a);
+    if (reativoNumbers.length >= 2) {
+      dados.reativo_fora_ponta_kvarh = reativoNumbers[0];
+      dados.reativo_ponta_kvarh = reativoNumbers[1];
+    } else if (reativoNumbers.length === 1) {
+      dados.reativo_fora_ponta_kvarh = reativoNumbers[0];
+    }
+  }
+
+  // Demanda (kW)
+  let demFP = texto.match(/Dem\.\s*Máx\.\s*F\.\s*Ponta\s*\(kW\):\s*(\d+[\.,]?\d*)/i);
+  if (!demFP) demFP = texto.match(/Demanda Distribui[çc][ãa]o\s*\(kW\):\s*(\d+[\.,]?\d*)/i);
   if (demFP) dados.demanda_fora_ponta_kw = parseFloat(demFP[1].replace(",", "."));
   
-  const demP = texto.match(/Dem\.\s*Máx\.\s*Ponta\s*\(kW\):\s*(\d+[\.,]?\d*)/i);
+  let demP = texto.match(/Dem\.\s*Máx\.\s*Ponta\s*\(kW\):\s*(\d+[\.,]?\d*)/i);
   if (demP) dados.demanda_ponta_kw = parseFloat(demP[1].replace(",", "."));
 
-  // Fator de potência (se disponível) – "FATOR DE POTÊNCIA: 0,36776590"
+  // Fator de potência
   const fpMatch = texto.match(/FATOR\s*DE\s*POT[ÊE]NCIA:\s*(\d+[\.,]?\d*)/i);
   if (fpMatch) {
     let fp = parseFloat(fpMatch[1].replace(",", "."));
     if (fp > 0 && fp < 1) dados.fp_calculado = fp;
   }
 
-  // Valor total a pagar
+  // Valor total
   let valorMatch = texto.match(/Valor cobrado\s*\(R\$\):\s*([\d\.]+,\d{2})/i);
   if (!valorMatch) valorMatch = texto.match(/Total a Pagar\s*R\$\s*([\d\.]+,\d{2})/i);
   if (valorMatch) dados.total_pagar = parseFloat(valorMatch[1].replace(/\./g, "").replace(",", "."));
@@ -294,17 +333,21 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
   const diasMatch = texto.match(/Nº de Dias\s*(\d+)/i);
   if (diasMatch) dados.dias_ciclo = parseInt(diasMatch[1]);
 
-  // Log de depuração
-  console.log(`📄 Fatura ${dados.mes_referencia}`);
-  console.log(`   Consumo FP: ${dados.consumo_fora_ponta_kwh} | Ponta: ${dados.consumo_ponta_kwh}`);
-  console.log(`   Reativo FP: ${dados.reativo_fora_ponta_kvarh} | Ponta: ${dados.reativo_ponta_kvarh}`);
-  console.log(`   Demanda FP: ${dados.demanda_fora_ponta_kw} | Ponta: ${dados.demanda_ponta_kw}`);
-  console.log(`   FP lido: ${dados.fp_calculado || "não"}`);
-  console.log(`   Valor: ${dados.total_pagar}`);
+  // Log final para depuração
+  console.log("📊 Dados extraídos (final):", {
+    mes: dados.mes_referencia,
+    consumoFP: dados.consumo_fora_ponta_kwh,
+    consumoP: dados.consumo_ponta_kwh,
+    reativoFP: dados.reativo_fora_ponta_kvarh,
+    reativoP: dados.reativo_ponta_kvarh,
+    demandaFP: dados.demanda_fora_ponta_kw,
+    demandaP: dados.demanda_ponta_kw,
+    fp: dados.fp_calculado,
+    valor: dados.total_pagar,
+  });
 
   return dados;
 }
-
 // ==================== COMPONENTE PRINCIPAL ====================
 export default function DimensionarPage() {
   return (
