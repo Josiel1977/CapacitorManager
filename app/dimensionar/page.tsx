@@ -79,6 +79,7 @@ interface Fatura {
   concessionaria: string;
   tenant_id?: string;
   fp_calculado?: number;
+  multa_reativa?: number;    // multa real extraída da fatura (opcional)
 }
 
 interface DistribuicaoTrafo {
@@ -231,7 +232,7 @@ async function extrairTextoDoPDF(file: File): Promise<string> {
   return textoCompleto;
 }
 
-// Parser otimizado para arquivos Markdown (.md) das faturas da Equatorial Pará
+// Parser otimizado para faturas em Markdown (Equatorial Pará)
 function parseFaturaFromMarkdown(texto: string): Partial<Fatura> & { concessionaria: string } {
   const dados: any = {
     concessionaria: "EQUATORIAL_PARA",
@@ -245,9 +246,10 @@ function parseFaturaFromMarkdown(texto: string): Partial<Fatura> & { concessiona
     total_pagar: 0,
     dias_ciclo: 30,
     fp_calculado: undefined,
+    multa_reativa: 0,
   };
 
-  // Mês/Ano (prioriza "Conta Mês" ou "Competência")
+  // Mês/Ano
   let mesMatch = texto.match(/(?:Conta Mês|Competência)\s*(\d{2}\/\d{4})/i);
   if (!mesMatch) mesMatch = texto.match(/\b(\d{2}\/\d{4})\b/);
   if (mesMatch) dados.mes_referencia = mesMatch[1];
@@ -255,32 +257,14 @@ function parseFaturaFromMarkdown(texto: string): Partial<Fatura> & { concessiona
   // Consumos ativos (kWh)
   const consumoFPMatch = texto.match(/TUSD Energia Fora Ponta\s*\(kWh\)\s*\n\s*([\d\.,]+)/i);
   if (consumoFPMatch) dados.consumo_fora_ponta_kwh = parseFloat(consumoFPMatch[1].replace(/\./g, "").replace(",", "."));
-  else {
-    const consumoFPAlt = texto.match(/Consumo Fora Ponta \(kWh\):\s*([\d\.,]+)/i);
-    if (consumoFPAlt) dados.consumo_fora_ponta_kwh = parseFloat(consumoFPAlt[1].replace(/\./g, "").replace(",", "."));
-  }
-
   const consumoPMatch = texto.match(/TUSD Energia Ponta\s*\(kWh\)\s*\n\s*([\d\.,]+)/i);
   if (consumoPMatch) dados.consumo_ponta_kwh = parseFloat(consumoPMatch[1].replace(/\./g, "").replace(",", "."));
-  else {
-    const consumoPAlt = texto.match(/Consumo Ponta \(kWh\):\s*([\d\.,]+)/i);
-    if (consumoPAlt) dados.consumo_ponta_kwh = parseFloat(consumoPAlt[1].replace(/\./g, "").replace(",", "."));
-  }
 
   // Reativo excedente (kVArh)
   const reactFPMatch = texto.match(/Consumo Reativo Excedente FP\s*\(kVAr\)\s*\n\s*([\d\.,]+)/i);
   if (reactFPMatch) dados.reativo_fora_ponta_kvarh = parseFloat(reactFPMatch[1].replace(/\./g, "").replace(",", "."));
-  else {
-    const reactFPAlt = texto.match(/Reativo Excedente Fora Ponta \(kVArh\):\s*([\d\.,]+)/i);
-    if (reactFPAlt) dados.reativo_fora_ponta_kvarh = parseFloat(reactFPAlt[1].replace(/\./g, "").replace(",", "."));
-  }
-
   const reactPMatch = texto.match(/Consumo Reativo Excedente NP\s*\(kVAr\)\s*\n\s*([\d\.,]+)/i);
   if (reactPMatch) dados.reativo_ponta_kvarh = parseFloat(reactPMatch[1].replace(/\./g, "").replace(",", "."));
-  else {
-    const reactPAlt = texto.match(/Reativo Excedente Ponta \(kVArh\):\s*([\d\.,]+)/i);
-    if (reactPAlt) dados.reativo_ponta_kvarh = parseFloat(reactPAlt[1].replace(/\./g, "").replace(",", "."));
-  }
 
   // Demanda (kW)
   const demFP = texto.match(/Dem\.\s*Máx\.\s*F\.\s*Ponta\s*\(kW\):\s*([\d\.,]+)/i);
@@ -295,7 +279,7 @@ function parseFaturaFromMarkdown(texto: string): Partial<Fatura> & { concessiona
     if (fp > 0 && fp < 1) dados.fp_calculado = fp;
   }
 
-  // Valor total
+  // Valor total da fatura
   let valorMatch = texto.match(/Total a Pagar\s*R\$\s*([\d\.]+,\d{2})/i);
   if (!valorMatch) valorMatch = texto.match(/Valor cobrado \(R\$\):\s*([\d\.]+,\d{2})/i);
   if (valorMatch) dados.total_pagar = parseFloat(valorMatch[1].replace(/\./g, "").replace(",", "."));
@@ -304,8 +288,21 @@ function parseFaturaFromMarkdown(texto: string): Partial<Fatura> & { concessiona
   const diasMatch = texto.match(/Nº de Dias\s*(\d+)/i);
   if (diasMatch) dados.dias_ciclo = parseInt(diasMatch[1]);
 
-  // Log para depuração
-  console.log("📊 Dados extraídos do Markdown:", {
+  // ========== EXTRAÇÃO DA MULTA REATIVA (custo financeiro) ==========
+  // Exemplo: "Consumo Reativo Excedente FP (kVAr)   ...   3.370,21"
+  const custoReativoFP = texto.match(/Consumo Reativo Excedente FP.*?[\n\r]+\s*([\d\.,]+)\s*$/im);
+  if (custoReativoFP) {
+    const multaFP = parseFloat(custoReativoFP[1].replace(/\./g, "").replace(",", "."));
+    dados.multa_reativa += multaFP;
+  }
+  const custoReativoP = texto.match(/Consumo Reativo Excedente NP.*?[\n\r]+\s*([\d\.,]+)\s*$/im);
+  if (custoReativoP) {
+    const multaP = parseFloat(custoReativoP[1].replace(/\./g, "").replace(",", "."));
+    dados.multa_reativa += multaP;
+  }
+
+  // Log detalhado
+  console.log("📊 Dados extraídos do Markdown (com multa):", {
     mes: dados.mes_referencia,
     consumoFP: dados.consumo_fora_ponta_kwh,
     consumoP: dados.consumo_ponta_kwh,
@@ -314,25 +311,18 @@ function parseFaturaFromMarkdown(texto: string): Partial<Fatura> & { concessiona
     demandaFP: dados.demanda_fora_ponta_kw,
     demandaP: dados.demanda_ponta_kw,
     fp: dados.fp_calculado,
-    valor: dados.total_pagar,
+    totalFatura: dados.total_pagar,
+    multaReativa: dados.multa_reativa,
   });
 
-  // Se os consumos e reativos estiverem zerados mas o FP foi lido e a demanda existe, estima os reativos
-  if (dados.consumo_fora_ponta_kwh === 0 && dados.demanda_fora_ponta_kw > 0 && dados.fp_calculado) {
-    const horasEstimadas = 200;
-    dados.consumo_fora_ponta_kwh = dados.demanda_fora_ponta_kw * horasEstimadas;
-    dados.consumo_ponta_kwh = dados.demanda_ponta_kw * horasEstimadas * 0.5;
-    const tanPhi = Math.tan(Math.acos(dados.fp_calculado));
-    const reativoTotal = dados.consumo_fora_ponta_kwh * tanPhi;
-    dados.reativo_fora_ponta_kvarh = reativoTotal * 0.9;
-    dados.reativo_ponta_kvarh = reativoTotal * 0.1;
-    console.log("⚠️ Estimativa de consumo e reativo usada (dados faltantes).");
+  if (dados.reativo_fora_ponta_kvarh === 0 && dados.reativo_ponta_kvarh === 0) {
+    console.warn("⚠️ Valores de reativo excedente não encontrados. Multa não calculada corretamente.");
   }
 
   return dados;
 }
 
-// Fallback para PDF (usado apenas quando o arquivo não é Markdown)
+// Fallback para PDF (caso o arquivo não seja Markdown)
 function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: string } {
   const dados: any = {
     concessionaria: "EQUATORIAL_PARA",
@@ -346,6 +336,7 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
     total_pagar: 0,
     dias_ciclo: 30,
     fp_calculado: undefined,
+    multa_reativa: 0,
   };
 
   if (!texto.includes("Equatorial Pará")) {
@@ -417,7 +408,7 @@ function DimensionarContent() {
   const [empresaNome, setEmpresaNome] = useState("Sua Empresa");
   const [importandoPDF, setImportandoPDF] = useState(false);
 
-  // Autenticação e carregamento de dados (original, mantido)
+  // Autenticação e carregamento de dados (mantido do código original)
   useEffect(() => {
     let mounted = true;
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -524,6 +515,7 @@ function DimensionarContent() {
       concessionaria: currentFatura.concessionaria || "EQUATORIAL_PARA",
       tenant_id: tenantId,
       fp_calculado: currentFatura.fp_calculado ? parseFloat(currentFatura.fp_calculado) : undefined,
+      multa_reativa: currentFatura.multa_reativa ? parseFloat(currentFatura.multa_reativa) : undefined,
     };
     const { error } = await supabase.from("faturas").upsert(novaFatura, { onConflict: "id" });
     if (error) return Swal.fire("Erro", "Não foi possível salvar.", "error");
@@ -558,6 +550,9 @@ function DimensionarContent() {
       }
       const dadosExtraidos = isMarkdown ? parseFaturaFromMarkdown(texto) : parseFaturaFromPDF(texto);
       if (!dadosExtraidos.mes_referencia) throw new Error("Não foi possível identificar o mês/ano da fatura.");
+      
+      const multaExtraida = dadosExtraidos.multa_reativa ? formatMoney(dadosExtraidos.multa_reativa) : 'não identificada';
+      
       const confirm = await Swal.fire({
         title: "Dados extraídos do arquivo",
         html: `<div class="text-left text-sm">
@@ -571,6 +566,7 @@ function DimensionarContent() {
           <p><strong>Valor Total:</strong> ${formatMoney(dadosExtraidos.total_pagar || 0)}</p>
           <p><strong>Concessionária:</strong> ${dadosExtraidos.concessionaria}</p>
           <p><strong>Fator de Potência:</strong> ${dadosExtraidos.fp_calculado ? (dadosExtraidos.fp_calculado * 100).toFixed(1) + '%' : 'não identificado'}</p>
+          <p><strong>Multa por Reativo Excedente:</strong> ${multaExtraida}</p>
         </div>`,
         icon: "info",
         showCancelButton: true,
@@ -592,6 +588,7 @@ function DimensionarContent() {
         concessionaria: dadosExtraidos.concessionaria || "EQUATORIAL_PARA",
         tenant_id: tenantId,
         fp_calculado: dadosExtraidos.fp_calculado,
+        multa_reativa: dadosExtraidos.multa_reativa,
       };
       const { error } = await supabase.from("faturas").insert(novaFatura);
       if (error) throw error;
@@ -619,22 +616,21 @@ function DimensionarContent() {
       const concessionarias = [...new Set(faturas.map((f) => f.concessionaria))];
       if (concessionarias.length > 1) alertas.push(`⚠️ Faturas de diferentes concessionárias: ${concessionarias.join(", ")}`);
 
-      // Processa as faturas: calcula ativo, reativo, FP (prioriza lido) e demanda máxima
+      // Processa as faturas
       const faturasProcessadas = faturas.map((f) => {
         let ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
         let reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
         const demandaMaxKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
-
         let fp;
         if (f.fp_calculado && f.fp_calculado > 0.3 && f.fp_calculado < 1) {
           fp = f.fp_calculado;
-          // Se ativoTotal estiver zerado, estimamos com base na demanda (200h/mês)
+          // Se ativoTotal estiver zerado, estima com base na demanda
           if (ativoTotal === 0 && demandaMaxKw > 0) {
             const horasEstimadas = 200;
             ativoTotal = demandaMaxKw * horasEstimadas;
             console.log(`⚠️ Fatura ${f.mes_referencia}: ativo estimado (${ativoTotal.toFixed(0)} kWh) a partir da demanda.`);
           }
-          // Se reativoTotal estiver zerado, calculamos a partir do FP e ativo
+          // Se reativoTotal estiver zerado, calcula a partir do FP e ativo
           if (reativoTotal === 0 && ativoTotal > 0) {
             const tanPhi = Math.tan(Math.acos(fp));
             reativoTotal = ativoTotal * tanPhi;
@@ -646,28 +642,24 @@ function DimensionarContent() {
           fp = 0.92;
           alertas.push(`⚠️ Fatura ${f.mes_referencia} sem dados suficientes. FP assumido 0,92.`);
         }
-
-        const tarifa = TARIFAS_REATIVO[f.concessionaria] ?? TARIFAS_REATIVO.DEFAULT;
-        const multa = reativoTotal * tarifa;
-
+        const multa = calcularMultaDaFatura(f); // usa os valores de reativo (reais ou estimados)
         return { ...f, ativoTotal, reativoTotal, fp, multa, demandaMaxKw };
       });
 
-      // Encontra o pior FP (menor valor)
+      // Pior mês (menor FP)
       const piorMes = faturasProcessadas.reduce((prev, curr) => (curr.fp < prev.fp ? curr : prev), faturasProcessadas[0]);
       let fpAtual = piorMes.fp;
       if (fpAtual >= 0.99 || fpAtual <= 0.3) {
         const totalAtivo = faturasProcessadas.reduce((s, f) => s + f.ativoTotal, 0);
         const totalReativo = faturasProcessadas.reduce((s, f) => s + f.reativoTotal, 0);
         fpAtual = calcularFatorPotencia(totalAtivo, totalReativo);
-        alertas.push(`⚠️ FP do pior mês inválido. Recalculado (média geral): ${(fpAtual * 100).toFixed(1)}%`);
+        alertas.push(`⚠️ FP do pior mês inválido. Recalculado: ${(fpAtual * 100).toFixed(1)}%`);
       }
 
-      // 🔥 CORREÇÃO: usar a demanda do mês com pior FP
+      // Demanda do pior mês (a que causa a maior penalidade)
       let demandaReal = piorMes.demandaMaxKw;
-      console.log(`📈 Demanda real do pior mês (${piorMes.mes_referencia}): ${demandaReal} kW | Pior FP: ${fpAtual}`);
+      console.log(`📈 Demanda do pior mês (${piorMes.mes_referencia}): ${demandaReal} kW | FP: ${fpAtual}`);
 
-      // Se a demanda for zero, tenta a maior entre todas (fallback final)
       if (demandaReal < 1) {
         demandaReal = Math.max(...faturasProcessadas.map((f) => f.demandaMaxKw), 0);
         alertas.push(`⚠️ Demanda do pior mês não identificada. Utilizada a maior demanda entre todas: ${demandaReal.toFixed(1)} kW.`);
@@ -684,15 +676,11 @@ function DimensionarContent() {
         const phi1 = Math.acos(Math.min(0.99, Math.max(0.3, fpAtual)));
         const phi2 = Math.acos(FP_MINIMO_REGULAMENTAR);
         const kvarTeorico = potenciaAtivaFinal * (Math.tan(phi1) - Math.tan(phi2));
-
-        // Arredondamento comercial igual ao Python
         let baseStep = 2.5;
         if (kvarTeorico >= 60) baseStep = 12.5;
         else if (kvarTeorico >= 20) baseStep = 5;
         let kvarComercial = Math.ceil(kvarTeorico / baseStep) * baseStep;
         kvarComercial = Math.max(kvarComercial, CONFIG_CAPACITORES.minimo_kvar_grupo_a);
-
-        // Distribuição de estágios: um fixo (menor) e os restantes automáticos (múltiplos de 2×baseStep)
         let fixedStep = baseStep;
         if (kvarComercial <= fixedStep) fixedStep = kvarComercial;
         let autoCapacity = kvarComercial - fixedStep;
@@ -703,7 +691,6 @@ function DimensionarContent() {
         for (let i = 0; i < numMajor; i++) stepsList.push(majorStep);
         let remainder = autoCapacity % majorStep;
         if (remainder > 0) stepsList.push(remainder);
-
         estagios = stepsList.sort((a, b) => a - b);
         kvarAutomatico = kvarComercial;
         const mediaMulta = faturasProcessadas.reduce((acc, f) => acc + f.multa, 0) / faturasProcessadas.length;
@@ -819,7 +806,7 @@ function DimensionarContent() {
     return <div className="w-full bg-slate-200 rounded-full h-2"><div className={`${cor} h-2 rounded-full`} style={{ width: `${percentual}%` }} /></div>;
   };
 
-  // ==================== RENDER ====================
+  // ==================== RENDER (mantido similar ao original) ====================
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
       <header className="text-center">
@@ -831,7 +818,7 @@ function DimensionarContent() {
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* COLUNA ESQUERDA – Configurações e Faturas (mesmo código original, adaptado) */}
+        {/* COLUNA ESQUERDA – Configurações e Faturas (código original, simplificado aqui) */}
         <div className="lg:col-span-5 space-y-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-primary flex gap-2"><Package size={20} /> Transformadores</h2><button onClick={salvarTransformadores} className="text-xs bg-primary text-white px-3 py-1 rounded-lg"><Save size={12} /> Salvar</button></div>
@@ -861,7 +848,7 @@ function DimensionarContent() {
                 const multa = calcularMultaDaFatura(fat);
                 return (
                   <div key={fat.id} className="p-3 rounded-lg bg-slate-50">
-                    <div className="flex justify-between"><span className="font-bold">{fat.mes_referencia}</span><div><button onClick={() => { setCurrentFatura({ id: fat.id, mes_referencia: fat.mes_referencia, concessionaria: fat.concessionaria, dias_ciclo: fat.dias_ciclo, consumo_ponta_str: fat.consumo_ponta_kwh.toString(), consumo_fora_str: fat.consumo_fora_ponta_kwh.toString(), demanda_ponta_str: fat.demanda_ponta_kw.toString(), demanda_fora_str: fat.demanda_fora_ponta_kw.toString(), reativo_ponta_str: fat.reativo_ponta_kvarh.toString(), reativo_fora_str: fat.reativo_fora_ponta_kvarh.toString(), total_pagar_str: fat.total_pagar.toString(), fp_calculado: fat.fp_calculado }); setEditandoFaturaId(fat.id); setShowFaturaModal(true); }} className="text-blue-500"><Edit3 size={14} /></button><button onClick={() => removerFatura(fat.id)} className="text-red-500"><Trash2 size={14} /></button></div></div>
+                    <div className="flex justify-between"><span className="font-bold">{fat.mes_referencia}</span><div><button onClick={() => { setCurrentFatura({ id: fat.id, mes_referencia: fat.mes_referencia, concessionaria: fat.concessionaria, dias_ciclo: fat.dias_ciclo, consumo_ponta_str: fat.consumo_ponta_kwh.toString(), consumo_fora_str: fat.consumo_fora_ponta_kwh.toString(), demanda_ponta_str: fat.demanda_ponta_kw.toString(), demanda_fora_str: fat.demanda_fora_ponta_kw.toString(), reativo_ponta_str: fat.reativo_ponta_kvarh.toString(), reativo_fora_str: fat.reativo_fora_ponta_kvarh.toString(), total_pagar_str: fat.total_pagar.toString(), fp_calculado: fat.fp_calculado, multa_reativa: fat.multa_reativa }); setEditandoFaturaId(fat.id); setShowFaturaModal(true); }} className="text-blue-500"><Edit3 size={14} /></button><button onClick={() => removerFatura(fat.id)} className="text-red-500"><Trash2 size={14} /></button></div></div>
                     <div className="grid grid-cols-2 gap-1 text-xs mt-2">
                       <div>Consumo Ponta: {formatNumber(fat.consumo_ponta_kwh, 2)} kWh</div>
                       <div>Consumo F/Ponta: {formatNumber(fat.consumo_fora_ponta_kwh, 2)} kWh</div>
@@ -947,6 +934,7 @@ function DimensionarContent() {
                 <div className="grid grid-cols-2 gap-2"><div><label className="text-xs font-medium text-red-600">Reativo Ponta (kVArh) *</label><input type="text" placeholder="Ex: 493.76" value={currentFatura.reativo_ponta_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, reativo_ponta_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1 border-red-200" /></div><div><label className="text-xs font-medium text-red-600">Reativo F/Ponta (kVArh) *</label><input type="text" placeholder="Ex: 4696.54" value={currentFatura.reativo_fora_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, reativo_fora_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1 border-red-200" /></div></div>
                 <div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Dias do ciclo</label><input type="text" placeholder="30" value={currentFatura.dias_ciclo ?? "30"} onChange={(e) => setCurrentFatura({ ...currentFatura, dias_ciclo: e.target.value === "" ? 30 : parseInt(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Total a Pagar (R$)</label><input type="text" placeholder="Ex: 12617.50" value={currentFatura.total_pagar_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, total_pagar_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div></div>
                 <div><label className="text-xs">Fator de Potência (opcional)</label><input type="text" step="0.0001" value={currentFatura.fp_calculado ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, fp_calculado: parseFloat(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" placeholder="Ex: 0.3678" /></div>
+                <div><label className="text-xs">Multa Reativa (R$) – opcional</label><input type="text" step="0.01" value={currentFatura.multa_reativa ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, multa_reativa: parseFloat(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" placeholder="Ex: 3796.72" /></div>
               </div>
               <div className="flex gap-3 mt-6">
                 <button onClick={() => { setCurrentFatura({ mes_referencia: "05/2025", concessionaria: "RORAIMA_ENERGIA", consumo_ponta_str: "8132", consumo_fora_str: "59050", demanda_ponta_str: "430", demanda_fora_str: "447", reativo_ponta_str: "824", reativo_fora_str: "4511", total_pagar_str: "55970.04", dias_ciclo: 30, fp_calculado: 0.85 }); }} className="flex-1 py-2 border rounded-lg text-sm hover:bg-slate-50">Exemplo Roraima</button>
