@@ -148,7 +148,7 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
     fp_calculado: 0.92, multa_estimada: 0,
   };
 
-  // ✅ Extração de Mês Ultra-Resiliente (lida com quebras, pipes e dashes do PDF.js)
+  // Extração de Mês Ultra-Resiliente
   const extrairMes = () => {
     let m = texto.match(/(?:Conta\s*M[eê]s|Compet[eê]ncia)[\s\S]{0,200}?[-\s]*(\d{2}\/\d{4})/i);
     if (m) return m[1];
@@ -165,7 +165,7 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
   };
   dados.mes_referencia = extrairMes();
 
-  // ✅ Extração numérica segura (tolera formatos variados)
+  // Extração numérica segura
   const pegarValor = (regex: RegExp): number => {
     const match = texto.match(regex);
     if (!match) return 0;
@@ -224,7 +224,11 @@ export default function DimensionarPage() {
 function DimensionarContent() {
   const router = useRouter();
   const reportRef = useRef<HTMLDivElement>(null);
-  const [transformadores, setTransformadores] = useState<Transformador[]>([{ id: crypto.randomUUID(), potencia_kva: 300, quantidade: 1, tensao_v: 380 }]);
+  // ✅ CARREGA SEUS TRANSFORMADORES REAIS (300 + 225 kVA)
+  const [transformadores, setTransformadores] = useState<Transformador[]>([
+    { id: crypto.randomUUID(), potencia_kva: 300, quantidade: 1, tensao_v: 380 },
+    { id: crypto.randomUUID(), potencia_kva: 225, quantidade: 1, tensao_v: 380 }
+  ]);
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [targetFP, setTargetFP] = useState(0.92);
   const [result, setResult] = useState<ResultadoDimensionamento | null>(null);
@@ -245,7 +249,7 @@ function DimensionarContent() {
     try {
       const texto = await extrairTextoDoPDF(files[0]);
       const dados = parseFaturaFromPDF(texto);
-      if (!dados.mes_referencia) throw new Error("Mês não identificado no PDF. Verifique se é uma fatura de energia válida.");
+      if (!dados.mes_referencia) throw new Error("Mês não identificado no PDF.");
 
       const novaFatura: Fatura = {
         id: crypto.randomUUID(),
@@ -330,6 +334,15 @@ function DimensionarContent() {
         const payback = economia > 0 ? Math.ceil(investimento / economia) : 99;
         const roi5 = ((economia * 12 * 5 - investimento) / investimento) * 100;
 
+        // ✅ CÁLCULO DA CARGA INSTALADA VS CARGA REAL (300+225 = 525 kVA)
+        const potenciaTotalInstalada = transformadores.reduce((acc, t) => acc + (t.potencia_kva * t.quantidade), 0);
+        const percentualUso = potenciaTotalInstalada > 0 ? (potenciaBase / potenciaTotalInstalada) * 100 : 0;
+
+        // Adiciona nota técnica se a carga for muito menor que a capacidade
+        if (percentualUso < 30) {
+          alertas.push(`📊 Nota Técnica: Sua carga atual (${potenciaBase.toFixed(0)} kW) utiliza apenas ${percentualUso.toFixed(0)}% da capacidade instalada (${potenciaTotalInstalada} kVA). O dimensionamento de ${kvarCom} kVAr elimina a multa ATUAL. Bancos maiores (ex: 160 kVAr) só são recomendados se houver previsão de aumento imediato de produção para >150 kW.`);
+        }
+
         setResult({
           kvar_necessario: kvarNec, kvar_comercial: kvarCom, estagios, fp_medio: fpMedio, fp_pior_mes: fpPior,
           multa_media: multaMedia, investimento, economia_mensal: economia, payback_meses: payback, roi_5_anos: roi5,
@@ -337,7 +350,7 @@ function DimensionarContent() {
             potencia_base_kw: potenciaBase,
             fator_utilizacao: modoCalculo === "pico" ? 1.0 : (faturas[0].consumo_ativo_total_kwh / (faturas[0].dias_ciclo*24) / potenciaBase),
             margem_seguranca: margemSeg,
-            formula_aplicada: `Qc = ${potenciaBase.toFixed(1)} × (tan(${Math.acos(fpPior).toFixed(2)}) - tan(${Math.acos(targetFP).toFixed(2)})) × ${(1+margemSeg/100).toFixed(2)}`
+            formula_aplicada: `Qc = ${potenciaBase.toFixed(1)} kW × (tan φ₁ ${(fpPior*100).toFixed(1)}% → tan φ₂ ${(targetFP*100).toFixed(1)}%) × Fator 1,${margemSeg}`
           },
           alertas
         });
@@ -370,6 +383,7 @@ function DimensionarContent() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dimensionamento Dinâmico de Banco de Capacitores</h1>
           <p className="text-sm text-slate-500">Extração automática de faturas • Cálculo ANEEL • Resultados reais</p>
+          <p className="text-xs text-blue-600 mt-1 font-medium">Infraestrutura detectada: {transformadores.map(t => `${t.potencia_kva}kVA`).join(" + ")} @ {transformadores[0]?.tensao_v || 380}V</p>
         </div>
         <div {...getRootProps()} className="cursor-pointer bg-blue-600 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-blue-700 transition">
           <FileUp size={16} /> Importar PDF
@@ -379,6 +393,7 @@ function DimensionarContent() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-4">
+          {/* Lista de Faturas */}
           <div className="bg-white rounded-xl p-4 shadow-sm border">
             <div className="flex justify-between items-center mb-3">
               <h2 className="font-semibold flex items-center gap-2"><History size={16} /> Faturas ({faturas.length})</h2>
@@ -399,6 +414,7 @@ function DimensionarContent() {
             </div>
           </div>
 
+          {/* Parâmetros */}
           <div className="bg-white rounded-xl p-4 shadow-sm border">
             <h2 className="font-semibold mb-3 flex items-center gap-2"><Calculator size={16} /> Parâmetros</h2>
             <div className="space-y-3 text-sm">
@@ -431,12 +447,13 @@ function DimensionarContent() {
                 </div>
               </div>
               <button onClick={calcular} disabled={calculando || faturas.length<2} className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex justify-center items-center gap-2">
-                {calculando ? <Loader2 className="animate-spin" size={18}/> : <Zap size={18}/>} Calcular
+                {calculando ? <Loader2 className="animate-spin" size={18}/> : <Zap size={18}/>} Calcular Dimensionamento
               </button>
             </div>
           </div>
         </div>
 
+        {/* Resultados */}
         <div className="lg:col-span-2">
           {result ? (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -453,7 +470,7 @@ function DimensionarContent() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                   <div className="bg-blue-50 p-4 rounded-xl">
-                    <p className="text-xs text-blue-600 font-medium">Banco Recomendado</p>
+                    <p className="text-xs text-blue-600 font-medium">Banco Recomendado (Carga Atual)</p>
                     <p className="text-3xl font-bold text-blue-700">{result.kvar_comercial} kVAr</p>
                     <p className="text-xs text-slate-500 mt-1">Automático • {result.estagios.length} estágios • {result.estagios.join(" + ")} kVAr</p>
                   </div>
