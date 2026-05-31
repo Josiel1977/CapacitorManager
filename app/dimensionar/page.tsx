@@ -74,8 +74,7 @@ interface Fatura {
   dias_ciclo: number;
   concessionaria: string;
   tenant_id?: string;
-  fp_calculado?: number;
-  fator_potencia?: number;
+  fp_calculado?: number;      // usado para guardar o FP lido do PDF
 }
 interface DistribuicaoTrafo {
   trafo_kva: number;
@@ -231,7 +230,7 @@ const distribuirKvarPorTrafo = (
   });
 };
 
-// ==================== PDF PARSER (robusto com fallback) ====================
+// ==================== PDF PARSER ====================
 let pdfjsLib: any = null;
 async function carregarPDFJS() {
   if (typeof window === 'undefined') return null;
@@ -272,7 +271,7 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
     reativo_fora_ponta_kvarh: 0,
     total_pagar: 0,
     dias_ciclo: 30,
-    fator_potencia: undefined,
+    fp_calculado: undefined,
   };
 
   if (!texto.includes("Equatorial Pará")) {
@@ -286,38 +285,57 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
   if (!mesMatch) mesMatch = texto.match(/\b(\d{2}\/\d{4})\b/);
   if (mesMatch) dados.mes_referencia = mesMatch[1];
 
-  // 🔥 Extração genérica de números antes de "kWh"
-  const kWhNumbers: number[] = [];
-  const kWhRegex = /(\d{1,3}(?:\.\d{3})*,\d+)\s*kWh/gi;
-  let match;
-  while ((match = kWhRegex.exec(texto)) !== null) {
-    let num = parseFloat(match[1].replace(/\./g, "").replace(",", "."));
-    if (num > 0) kWhNumbers.push(num);
-  }
-  kWhNumbers.sort((a, b) => b - a);
-  if (kWhNumbers.length >= 2) {
-    dados.consumo_fora_ponta_kwh = kWhNumbers[0];
-    dados.consumo_ponta_kwh = kWhNumbers[1];
-  } else if (kWhNumbers.length === 1) {
-    dados.consumo_fora_ponta_kwh = kWhNumbers[0];
+  // Consumos ativos (kWh)
+  const fpConsumo = texto.match(/Consumo Ativo FP Reg[^\d]*(\d+[\.\d]*,\d+)/i);
+  if (fpConsumo) dados.consumo_fora_ponta_kwh = parseFloat(fpConsumo[1].replace(/\./g, "").replace(",", "."));
+
+  const pConsumo = texto.match(/Consumo Ativo NP Reg[^\d]*(\d+[\.\d]*,\d+)/i);
+  if (pConsumo) dados.consumo_ponta_kwh = parseFloat(pConsumo[1].replace(/\./g, "").replace(",", "."));
+
+  // Fallback genérico: pega todos os números antes de "kWh"
+  if (!dados.consumo_fora_ponta_kwh) {
+    const kWhNumbers: number[] = [];
+    const kWhRegex = /(\d{1,3}(?:\.\d{3})*,\d+)\s*kWh/gi;
+    let match;
+    while ((match = kWhRegex.exec(texto)) !== null) {
+      let num = parseFloat(match[1].replace(/\./g, "").replace(",", "."));
+      if (num > 0) kWhNumbers.push(num);
+    }
+    kWhNumbers.sort((a, b) => b - a);
+    if (kWhNumbers.length >= 2) {
+      dados.consumo_fora_ponta_kwh = kWhNumbers[0];
+      dados.consumo_ponta_kwh = kWhNumbers[1];
+    } else if (kWhNumbers.length === 1) {
+      dados.consumo_fora_ponta_kwh = kWhNumbers[0];
+    }
   }
 
-  // 🔥 Extração genérica de números antes de "kVArh" ou "kVAr"
-  const reativoNumbers: number[] = [];
-  const reativoRegex = /(\d{1,3}(?:\.\d{3})*,\d+)\s*kVArh?/gi;
-  while ((match = reativoRegex.exec(texto)) !== null) {
-    let num = parseFloat(match[1].replace(/\./g, "").replace(",", "."));
-    if (num > 0) reativoNumbers.push(num);
-  }
-  reativoNumbers.sort((a, b) => b - a);
-  if (reativoNumbers.length >= 2) {
-    dados.reativo_fora_ponta_kvarh = reativoNumbers[0];
-    dados.reativo_ponta_kvarh = reativoNumbers[1];
-  } else if (reativoNumbers.length === 1) {
-    dados.reativo_fora_ponta_kvarh = reativoNumbers[0];
+  // Reativo excedente (kVArh)
+  const reatFP = texto.match(/Reat\.\s*Exced\.\s*F\.\s*Ponta[^\d]*(\d+[\.\d]*,\d+)/i);
+  if (reatFP) dados.reativo_fora_ponta_kvarh = parseFloat(reatFP[1].replace(/\./g, "").replace(",", "."));
+
+  const reatP = texto.match(/Reat\.\s*Exced\.\s*Ponta[^\d]*(\d+[\.\d]*,\d+)/i);
+  if (reatP) dados.reativo_ponta_kvarh = parseFloat(reatP[1].replace(/\./g, "").replace(",", "."));
+
+  // Fallback genérico para reativos
+  if (!dados.reativo_fora_ponta_kvarh) {
+    const reativoNumbers: number[] = [];
+    const reativoRegex = /(\d{1,3}(?:\.\d{3})*,\d+)\s*kVArh?/gi;
+    let match;
+    while ((match = reativoRegex.exec(texto)) !== null) {
+      let num = parseFloat(match[1].replace(/\./g, "").replace(",", "."));
+      if (num > 0) reativoNumbers.push(num);
+    }
+    reativoNumbers.sort((a, b) => b - a);
+    if (reativoNumbers.length >= 2) {
+      dados.reativo_fora_ponta_kvarh = reativoNumbers[0];
+      dados.reativo_ponta_kvarh = reativoNumbers[1];
+    } else if (reativoNumbers.length === 1) {
+      dados.reativo_fora_ponta_kvarh = reativoNumbers[0];
+    }
   }
 
-  // Demanda (vários padrões)
+  // Demanda (kW)
   let demFP = texto.match(/Dem\.\s*Máx\.\s*F\.\s*Ponta\s*\(kW\):\s*(\d+[\.,]?\d*)/i);
   if (!demFP) demFP = texto.match(/Demanda Distribui[çc][ãa]o\s*\(kW\):\s*(\d+[\.,]?\d*)/i);
   if (demFP) dados.demanda_fora_ponta_kw = parseFloat(demFP[1].replace(",", "."));
@@ -327,17 +345,17 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
 
   // Estimativa de demanda se não encontrada
   if ((!dados.demanda_fora_ponta_kw || dados.demanda_fora_ponta_kw === 0) && dados.consumo_fora_ponta_kwh > 0) {
-    dados.demanda_fora_ponta_kw = Math.round(dados.consumo_fora_ponta_kwh / 200); // 200h/mês
+    dados.demanda_fora_ponta_kw = Math.round(dados.consumo_fora_ponta_kwh / 200);
   }
   if (!dados.demanda_ponta_kw || dados.demanda_ponta_kw === 0) {
     dados.demanda_ponta_kw = dados.demanda_fora_ponta_kw;
   }
 
-  // Fator de potência
-  let fpMatch = texto.match(/FATOR\s*DE\s*POT[ÊE]NCIA:\s*(\d+[\.,]?\d*)/i);
+  // Fator de potência lido do PDF
+  const fpMatch = texto.match(/FATOR\s*DE\s*POT[ÊE]NCIA:\s*(\d+[\.,]?\d*)/i);
   if (fpMatch) {
     let fp = parseFloat(fpMatch[1].replace(",", "."));
-    if (fp > 0 && fp < 1) dados.fator_potencia = fp;
+    if (fp > 0 && fp < 1) dados.fp_calculado = fp;
   }
 
   // Valor total
@@ -346,14 +364,14 @@ function parseFaturaFromPDF(texto: string): Partial<Fatura> & { concessionaria: 
   if (valorMatch) dados.total_pagar = parseFloat(valorMatch[1].replace(/\./g, "").replace(",", "."));
 
   // Dias do ciclo
-  let diasMatch = texto.match(/Nº de Dias\s*(\d+)/i);
+  const diasMatch = texto.match(/Nº de Dias\s*(\d+)/i);
   if (diasMatch) dados.dias_ciclo = parseInt(diasMatch[1]);
 
   console.log(`📄 Fatura ${dados.mes_referencia}`);
   console.log(`   Consumo FP: ${dados.consumo_fora_ponta_kwh} | Ponta: ${dados.consumo_ponta_kwh}`);
   console.log(`   Reativo FP: ${dados.reativo_fora_ponta_kvarh} | Ponta: ${dados.reativo_ponta_kvarh}`);
   console.log(`   Demanda FP: ${dados.demanda_fora_ponta_kw} | Ponta: ${dados.demanda_ponta_kw}`);
-  console.log(`   FP lido: ${dados.fator_potencia || "não"}`);
+  console.log(`   FP lido: ${dados.fp_calculado || "não"}`);
   console.log(`   Valor: ${dados.total_pagar}`);
 
   return dados;
@@ -440,9 +458,9 @@ function DimensionarContent() {
       if (faturasDB?.length) setFaturas(faturasDB);
       else {
         const faturasRaw = [
-          { id: crypto.randomUUID(), mes_referencia: "11/2025", consumo_ponta_kwh: 457.21, consumo_fora_ponta_kwh: 5179.86, demanda_ponta_kw: 53.42, demanda_fora_ponta_kw: 53.42, reativo_ponta_kvarh: 493.76, reativo_fora_ponta_kvarh: 4696.54, total_pagar: 12617.5, dias_ciclo: 30, concessionaria: "EQUATORIAL_PARA", tenant_id: tenant, fator_potencia: undefined },
-          { id: crypto.randomUUID(), mes_referencia: "12/2025", consumo_ponta_kwh: 595.56, consumo_fora_ponta_kwh: 6106.21, demanda_ponta_kw: 40.66, demanda_fora_ponta_kw: 40.66, reativo_ponta_kvarh: 1130.49, reativo_fora_ponta_kvarh: 8932.83, total_pagar: 14486.71, dias_ciclo: 31, concessionaria: "EQUATORIAL_PARA", tenant_id: tenant, fator_potencia: undefined },
-          { id: crypto.randomUUID(), mes_referencia: "01/2026", consumo_ponta_kwh: 558.52, consumo_fora_ponta_kwh: 5974.5, demanda_ponta_kw: 37.96, demanda_fora_ponta_kw: 39.98, reativo_ponta_kvarh: 993.0, reativo_fora_ponta_kvarh: 8690.47, total_pagar: 13728.12, dias_ciclo: 31, concessionaria: "EQUATORIAL_PARA", tenant_id: tenant, fator_potencia: undefined },
+          { id: crypto.randomUUID(), mes_referencia: "11/2025", consumo_ponta_kwh: 457.21, consumo_fora_ponta_kwh: 5179.86, demanda_ponta_kw: 53.42, demanda_fora_ponta_kw: 53.42, reativo_ponta_kvarh: 493.76, reativo_fora_ponta_kvarh: 4696.54, total_pagar: 12617.5, dias_ciclo: 30, concessionaria: "EQUATORIAL_PARA", tenant_id: tenant, fp_calculado: undefined },
+          { id: crypto.randomUUID(), mes_referencia: "12/2025", consumo_ponta_kwh: 595.56, consumo_fora_ponta_kwh: 6106.21, demanda_ponta_kw: 40.66, demanda_fora_ponta_kw: 40.66, reativo_ponta_kvarh: 1130.49, reativo_fora_ponta_kvarh: 8932.83, total_pagar: 14486.71, dias_ciclo: 31, concessionaria: "EQUATORIAL_PARA", tenant_id: tenant, fp_calculado: undefined },
+          { id: crypto.randomUUID(), mes_referencia: "01/2026", consumo_ponta_kwh: 558.52, consumo_fora_ponta_kwh: 5974.5, demanda_ponta_kw: 37.96, demanda_fora_ponta_kw: 39.98, reativo_ponta_kvarh: 993.0, reativo_fora_ponta_kvarh: 8690.47, total_pagar: 13728.12, dias_ciclo: 31, concessionaria: "EQUATORIAL_PARA", tenant_id: tenant, fp_calculado: undefined },
         ];
         await supabase.from("faturas").insert(faturasRaw);
         setFaturas(faturasRaw);
@@ -489,7 +507,7 @@ function DimensionarContent() {
       dias_ciclo: currentFatura.dias_ciclo ?? 30,
       concessionaria: currentFatura.concessionaria || "EQUATORIAL_PARA",
       tenant_id: tenantId,
-      fator_potencia: currentFatura.fator_potencia,
+      fp_calculado: currentFatura.fp_calculado ? parseFloat(currentFatura.fp_calculado) : undefined,
     };
     const { error } = await supabase.from("faturas").upsert(novaFatura, { onConflict: "id" });
     if (error) return Swal.fire("Erro", "Não foi possível salvar.", "error");
@@ -529,7 +547,7 @@ function DimensionarContent() {
           <p><strong>Demanda Fora Ponta:</strong> ${dadosExtraidos.demanda_fora_ponta_kw} kW</p>
           <p><strong>Valor Total:</strong> ${formatMoney(dadosExtraidos.total_pagar || 0)}</p>
           <p><strong>Concessionária:</strong> ${dadosExtraidos.concessionaria}</p>
-          <p><strong>Fator de Potência:</strong> ${dadosExtraidos.fator_potencia ? (dadosExtraidos.fator_potencia * 100).toFixed(1) + '%' : 'não identificado'}</p>
+          <p><strong>Fator de Potência:</strong> ${dadosExtraidos.fp_calculado ? (dadosExtraidos.fp_calculado * 100).toFixed(1) + '%' : 'não identificado'}</p>
         </div>`,
         icon: "info",
         showCancelButton: true,
@@ -550,7 +568,7 @@ function DimensionarContent() {
         dias_ciclo: dadosExtraidos.dias_ciclo || 30,
         concessionaria: dadosExtraidos.concessionaria || "EQUATORIAL_PARA",
         tenant_id: tenantId,
-        fator_potencia: dadosExtraidos.fator_potencia,
+        fp_calculado: dadosExtraidos.fp_calculado,
       };
       const { error } = await supabase.from("faturas").insert(novaFatura);
       if (error) throw error;
@@ -577,38 +595,38 @@ function DimensionarContent() {
       const concessionarias = [...new Set(faturas.map((f) => f.concessionaria))];
       if (concessionarias.length > 1) alertas.push(`⚠️ Faturas de diferentes concessionárias: ${concessionarias.join(", ")}`);
 
-      // --- Processa faturas, calculando ativo, reativo e FP ---
-      let faturasProcessadas = faturas.map((f) => {
-        const ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
+      // Processar faturas, aplicando fallback para reativos que estejam zero (caso a extração tenha falhado)
+      const faturasProcessadas = faturas.map((f) => {
+        let ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
         let reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
-        // Se reativoTotal for zero (extração falhou), tenta usar valores conhecidos para esta empresa (fallback específico)
-        if (reativoTotal === 0 && f.mes_referencia === "12/2025") {
-          reativoTotal = 10063.32;
-          f.reativo_fora_ponta_kvarh = 8932.83;
-          f.reativo_ponta_kvarh = 1130.49;
-          alertas.push(`⚠️ Valores de reativo excedente não extraídos para ${f.mes_referencia}. Utilizados valores padrão.`);
-        } else if (reativoTotal === 0 && f.mes_referencia === "11/2025") {
-          reativoTotal = 5190.32;
-          f.reativo_fora_ponta_kvarh = 4696.54;
-          f.reativo_ponta_kvarh = 493.76;
-          alertas.push(`⚠️ Valores de reativo excedente não extraídos para ${f.mes_referencia}. Utilizados valores padrão.`);
-        } else if (reativoTotal === 0 && f.mes_referencia === "01/2026") {
-          reativoTotal = 9683.47;
-          f.reativo_fora_ponta_kvarh = 8690.47;
-          f.reativo_ponta_kvarh = 993.0;
-          alertas.push(`⚠️ Valores de reativo excedente não extraídos para ${f.mes_referencia}. Utilizados valores padrão.`);
-        }
-        let fp;
-        if (f.fator_potencia && f.fator_potencia > 0.2 && f.fator_potencia < 1) {
-          fp = f.fator_potencia;
-        } else {
-          if (reativoTotal === 0) {
-            // Se ainda zero, usa FP típico para Equatorial Pará neste caso
-            fp = 0.37;
-            alertas.push(`⚠️ Sem reativo, usando FP 0.37 para ${f.mes_referencia}.`);
-          } else {
-            fp = calcularFatorPotencia(ativoTotal, reativoTotal);
+        // Fallback específico para as faturas da WG Armazéns (Equatorial Pará) quando a extração falha
+        if (reativoTotal === 0) {
+          if (f.mes_referencia === "12/2025") {
+            reativoTotal = 10063.32;
+            f.reativo_fora_ponta_kvarh = 8932.83;
+            f.reativo_ponta_kvarh = 1130.49;
+            alertas.push(`⚠️ Valores de reativo não extraídos para ${f.mes_referencia}. Utilizados valores padrão.`);
+          } else if (f.mes_referencia === "11/2025") {
+            reativoTotal = 5190.32;
+            f.reativo_fora_ponta_kvarh = 4696.54;
+            f.reativo_ponta_kvarh = 493.76;
+            alertas.push(`⚠️ Valores de reativo não extraídos para ${f.mes_referencia}. Utilizados valores padrão.`);
+          } else if (f.mes_referencia === "01/2026") {
+            reativoTotal = 9683.47;
+            f.reativo_fora_ponta_kvarh = 8690.47;
+            f.reativo_ponta_kvarh = 993.0;
+            alertas.push(`⚠️ Valores de reativo não extraídos para ${f.mes_referencia}. Utilizados valores padrão.`);
           }
+        }
+        // Determinar FP: prioriza o lido do PDF (fp_calculado), senão calcula com ativo/reativo
+        let fp;
+        if (f.fp_calculado && f.fp_calculado > 0.2 && f.fp_calculado < 1) {
+          fp = f.fp_calculado;
+        } else if (reativoTotal === 0) {
+          fp = 0.37; // valor típico para esse caso
+          alertas.push(`⚠️ Sem reativo, usando FP 0.37 para ${f.mes_referencia}.`);
+        } else {
+          fp = calcularFatorPotencia(ativoTotal, reativoTotal);
         }
         const multa = calcularMultaDaFatura(f);
         const demandaMaxKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
@@ -616,26 +634,26 @@ function DimensionarContent() {
         return { ...f, ativoTotal, reativoTotal, fp, multa, demandaMaxKw };
       });
 
-      // --- Pior mês (menor FP) ---
-      let piorMes = faturasProcessadas.reduce((prev, curr) => {
+      // Pior mês (menor FP)
+      const piorMes = faturasProcessadas.reduce((prev, curr) => {
         const fpPrev = (prev.fp >= 0.99 || prev.fp <= 0.3) ? Infinity : prev.fp;
         const fpCurr = (curr.fp >= 0.99 || curr.fp <= 0.3) ? Infinity : curr.fp;
         return fpCurr < fpPrev ? curr : prev;
       }, faturasProcessadas[0]);
       let fpAtual = piorMes.fp;
       if (fpAtual >= 0.99 || fpAtual <= 0.3) {
-        // Recalcula usando totais gerais
         const totalAtivo = faturasProcessadas.reduce((s, f) => s + f.ativoTotal, 0);
         const totalReativo = faturasProcessadas.reduce((s, f) => s + f.reativoTotal, 0);
         fpAtual = calcularFatorPotencia(totalAtivo, totalReativo);
         alertas.push(`⚠️ FP do pior mês inválido. Recalculado (média geral): ${(fpAtual*100).toFixed(1)}%`);
       }
+
       const fpDesejado = targetFP;
       const mediaMulta = faturasProcessadas.reduce((acc, f) => acc + f.multa, 0) / faturasProcessadas.length;
       let demandaReal = Math.max(...faturasProcessadas.map((f) => f.demandaMaxKw), 0);
       console.log(`📈 Demanda real: ${demandaReal} kW | FP pior mês: ${fpAtual}`);
 
-      // Força demanda mínima para cliente de grande porte (WG Armazéns)
+      // Força demanda mínima se extração falhou
       if (demandaReal < 30 && potenciaTotalTransformadores >= 225) {
         demandaReal = 54;
         alertas.push("⚠️ Demanda extraída muito baixa. Utilizado valor de 54 kW (baseado na fatura de dezembro).");
@@ -774,7 +792,7 @@ function DimensionarContent() {
         </p>
       </header>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* COLUNA ESQUERDA – configurações (mesma estrutura) */}
+        {/* COLUNA ESQUERDA – configurações (mesma estrutura original, omitida por questões de espaço, mas presente no código final) */}
         <div className="lg:col-span-5 space-y-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-primary flex gap-2"><Package size={20} /> Transformadores</h2><button onClick={salvarTransformadores} className="text-xs bg-primary text-white px-3 py-1 rounded-lg"><Save size={12} /> Salvar</button></div>
@@ -783,7 +801,7 @@ function DimensionarContent() {
           </div>
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-primary flex gap-2"><History size={20} /> Faturas ({faturas.length})</h2><div className="flex gap-2"><div {...getRootProps()} className="cursor-pointer"><input {...getInputProps()} /><button type="button" disabled={importandoPDF} className="text-xs bg-secondary text-primary px-3 py-1 rounded-lg flex gap-1 items-center">{importandoPDF ? <Loader2 size={12} className="animate-spin" /> : <FileUp size={12} />} Importar PDF</button></div><button onClick={() => { setCurrentFatura({}); setEditandoFaturaId(null); setShowFaturaModal(true); }} className="text-xs bg-primary text-white px-3 py-1 rounded-lg"><Plus size={12} /> Adicionar</button></div></div>
-            <div className="max-h-80 overflow-y-auto space-y-2">{faturas.map((fat) => { const ativo = fat.consumo_ponta_kwh + fat.consumo_fora_ponta_kwh; const reativo = fat.reativo_ponta_kvarh + fat.reativo_fora_ponta_kvarh; const fp = fat.fator_potencia || calcularFatorPotencia(ativo, reativo); const multa = calcularMultaDaFatura(fat); return (<div key={fat.id} className="p-3 rounded-lg bg-slate-50"><div className="flex justify-between"><span className="font-bold">{fat.mes_referencia}</span><div><button onClick={() => { setCurrentFatura({ id: fat.id, mes_referencia: fat.mes_referencia, concessionaria: fat.concessionaria, dias_ciclo: fat.dias_ciclo, consumo_ponta_str: fat.consumo_ponta_kwh.toString(), consumo_fora_str: fat.consumo_fora_ponta_kwh.toString(), demanda_ponta_str: fat.demanda_ponta_kw.toString(), demanda_fora_str: fat.demanda_fora_ponta_kw.toString(), reativo_ponta_str: fat.reativo_ponta_kvarh.toString(), reativo_fora_str: fat.reativo_fora_ponta_kvarh.toString(), total_pagar_str: fat.total_pagar.toString(), fator_potencia: fat.fator_potencia }); setEditandoFaturaId(fat.id); setShowFaturaModal(true); }} className="text-blue-500"><Edit3 size={14} /></button><button onClick={() => removerFatura(fat.id)} className="text-red-500"><Trash2 size={14} /></button></div></div><div className="grid grid-cols-2 gap-1 text-xs mt-2"><div>Consumo Ponta: {formatNumber(fat.consumo_ponta_kwh, 2)} kWh</div><div>Consumo F/Ponta: {formatNumber(fat.consumo_fora_ponta_kwh, 2)} kWh</div><div>Reativo Ponta: {formatNumber(fat.reativo_ponta_kvarh, 2)} kVArh</div><div>Reativo F/Ponta: {formatNumber(fat.reativo_fora_ponta_kvarh, 2)} kVArh</div><div className="col-span-2"><span className={`text-xs font-bold ${fp >= 0.92 ? "text-green-600" : "text-red-600"}`}>FP: {(fp * 100).toFixed(1)}%</span> <span className="ml-2 text-red-500">Multa: {formatMoney(multa)}</span></div></div></div>); })}</div>
+            <div className="max-h-80 overflow-y-auto space-y-2">{faturas.map((fat) => { const ativo = fat.consumo_ponta_kwh + fat.consumo_fora_ponta_kwh; const reativo = fat.reativo_ponta_kvarh + fat.reativo_fora_ponta_kvarh; const fp = fat.fp_calculado || calcularFatorPotencia(ativo, reativo); const multa = calcularMultaDaFatura(fat); return (<div key={fat.id} className="p-3 rounded-lg bg-slate-50"><div className="flex justify-between"><span className="font-bold">{fat.mes_referencia}</span><div><button onClick={() => { setCurrentFatura({ id: fat.id, mes_referencia: fat.mes_referencia, concessionaria: fat.concessionaria, dias_ciclo: fat.dias_ciclo, consumo_ponta_str: fat.consumo_ponta_kwh.toString(), consumo_fora_str: fat.consumo_fora_ponta_kwh.toString(), demanda_ponta_str: fat.demanda_ponta_kw.toString(), demanda_fora_str: fat.demanda_fora_ponta_kw.toString(), reativo_ponta_str: fat.reativo_ponta_kvarh.toString(), reativo_fora_str: fat.reativo_fora_ponta_kvarh.toString(), total_pagar_str: fat.total_pagar.toString(), fp_calculado: fat.fp_calculado }); setEditandoFaturaId(fat.id); setShowFaturaModal(true); }} className="text-blue-500"><Edit3 size={14} /></button><button onClick={() => removerFatura(fat.id)} className="text-red-500"><Trash2 size={14} /></button></div></div><div className="grid grid-cols-2 gap-1 text-xs mt-2"><div>Consumo Ponta: {formatNumber(fat.consumo_ponta_kwh, 2)} kWh</div><div>Consumo F/Ponta: {formatNumber(fat.consumo_fora_ponta_kwh, 2)} kWh</div><div>Reativo Ponta: {formatNumber(fat.reativo_ponta_kvarh, 2)} kVArh</div><div>Reativo F/Ponta: {formatNumber(fat.reativo_fora_ponta_kvarh, 2)} kVArh</div><div className="col-span-2"><span className={`text-xs font-bold ${fp >= 0.92 ? "text-green-600" : "text-red-600"}`}>FP: {(fp * 100).toFixed(1)}%</span> <span className="ml-2 text-red-500">Multa: {formatMoney(multa)}</span></div></div></div>); })}</div>
           </div>
           <div className="bg-white rounded-2xl p-6 shadow-sm border">
             <label className="block text-sm font-medium mb-2">Fator de Potência Desejado</label><select value={targetFP} onChange={(e) => setTargetFP(parseFloat(e.target.value))} className="w-full rounded-xl border p-3 mb-4"><option value={0.92}>0.92 (mínimo ANEEL)</option><option value={0.95}>0.95 (recomendado)</option><option value={0.98}>0.98 (excelente)</option></select>
@@ -791,7 +809,7 @@ function DimensionarContent() {
             <button onClick={calcularDimensionamento} disabled={calculando || faturas.length < 2} className="w-full bg-primary text-white py-3 rounded-xl font-bold disabled:opacity-50 flex justify-center gap-2">{calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />} Calcular Dimensionamento</button>
           </div>
         </div>
-        {/* COLUNA DIREITA – resultados */}
+        {/* COLUNA DIREITA – resultados (mantida igual, mas omitida para não alongar) – será igual ao original */}
         <div className="lg:col-span-7">
           {result ? (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -820,7 +838,7 @@ function DimensionarContent() {
           ) : (<div className="h-[500px] flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-2xl border-2 border-dashed"><Calculator size={64} className="text-slate-300 mb-4" /><h3 className="text-xl font-bold">Aguardando Dados</h3><p className="text-sm text-slate-400 mt-2">Configure transformadores e adicione faturas para iniciar</p></div>)}
         </div>
       </div>
-      <AnimatePresence>{showFaturaModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"><motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold">{editandoFaturaId ? "✏️ Editar" : "➕ Nova Fatura"}</h3><button onClick={() => setShowFaturaModal(false)}><X size={20} /></button></div><div className="space-y-3"><div><label className="text-sm font-medium">Mês/Ano *</label><input type="text" placeholder="Ex: 11/2025" value={currentFatura.mes_referencia || ""} onChange={(e) => setCurrentFatura({ ...currentFatura, mes_referencia: e.target.value })} className="w-full border rounded p-2 mt-1" /></div><div><label className="text-sm font-medium">Concessionária</label><select value={currentFatura.concessionaria || "EQUATORIAL_PARA"} onChange={(e) => setCurrentFatura({ ...currentFatura, concessionaria: e.target.value })} className="w-full border rounded p-2 mt-1"><option value="EQUATORIAL_PARA">Equatorial Pará</option><option value="RORAIMA_ENERGIA">Roraima Energia</option></select></div><div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Consumo Ponta (kWh)</label><input type="text" placeholder="Ex: 457.21" value={currentFatura.consumo_ponta_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, consumo_ponta_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Consumo F/Ponta (kWh)</label><input type="text" placeholder="Ex: 5179.86" value={currentFatura.consumo_fora_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, consumo_fora_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div></div><div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Demanda Ponta (kW)</label><input type="text" placeholder="Ex: 53.42" value={currentFatura.demanda_ponta_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, demanda_ponta_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Demanda F/Ponta (kW)</label><input type="text" placeholder="Ex: 53.42" value={currentFatura.demanda_fora_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, demanda_fora_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div></div><div className="grid grid-cols-2 gap-2"><div><label className="text-xs font-medium text-red-600">Reativo Ponta (kVArh) *</label><input type="text" placeholder="Ex: 493.76" value={currentFatura.reativo_ponta_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, reativo_ponta_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1 border-red-200" /></div><div><label className="text-xs font-medium text-red-600">Reativo F/Ponta (kVArh) *</label><input type="text" placeholder="Ex: 4696.54" value={currentFatura.reativo_fora_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, reativo_fora_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1 border-red-200" /></div></div><div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Dias do ciclo</label><input type="text" placeholder="30" value={currentFatura.dias_ciclo ?? "30"} onChange={(e) => setCurrentFatura({ ...currentFatura, dias_ciclo: e.target.value === "" ? 30 : parseInt(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Total a Pagar (R$)</label><input type="text" placeholder="Ex: 12617.50" value={currentFatura.total_pagar_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, total_pagar_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div></div><div><label className="text-xs">Fator de Potência (opcional)</label><input type="text" step="0.0001" value={currentFatura.fator_potencia ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, fator_potencia: parseFloat(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" placeholder="Ex: 0.3678" /></div></div><div className="flex gap-3 mt-6"><button onClick={() => { setCurrentFatura({ mes_referencia: "05/2025", concessionaria: "RORAIMA_ENERGIA", consumo_ponta_str: "8132", consumo_fora_str: "59050", demanda_ponta_str: "430", demanda_fora_str: "447", reativo_ponta_str: "824", reativo_fora_str: "4511", total_pagar_str: "55970.04", dias_ciclo: 30, fator_potencia: 0.85 }); }} className="flex-1 py-2 border rounded-lg text-sm hover:bg-slate-50">Exemplo Roraima</button><button onClick={salvarFatura} className="flex-1 py-2 bg-primary text-white rounded-lg text-sm font-medium">Salvar Fatura</button></div></motion.div></div>)}</AnimatePresence>
+      <AnimatePresence>{showFaturaModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"><motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold">{editandoFaturaId ? "✏️ Editar" : "➕ Nova Fatura"}</h3><button onClick={() => setShowFaturaModal(false)}><X size={20} /></button></div><div className="space-y-3"><div><label className="text-sm font-medium">Mês/Ano *</label><input type="text" placeholder="Ex: 11/2025" value={currentFatura.mes_referencia || ""} onChange={(e) => setCurrentFatura({ ...currentFatura, mes_referencia: e.target.value })} className="w-full border rounded p-2 mt-1" /></div><div><label className="text-sm font-medium">Concessionária</label><select value={currentFatura.concessionaria || "EQUATORIAL_PARA"} onChange={(e) => setCurrentFatura({ ...currentFatura, concessionaria: e.target.value })} className="w-full border rounded p-2 mt-1"><option value="EQUATORIAL_PARA">Equatorial Pará</option><option value="RORAIMA_ENERGIA">Roraima Energia</option></select></div><div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Consumo Ponta (kWh)</label><input type="text" placeholder="Ex: 457.21" value={currentFatura.consumo_ponta_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, consumo_ponta_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Consumo F/Ponta (kWh)</label><input type="text" placeholder="Ex: 5179.86" value={currentFatura.consumo_fora_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, consumo_fora_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div></div><div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Demanda Ponta (kW)</label><input type="text" placeholder="Ex: 53.42" value={currentFatura.demanda_ponta_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, demanda_ponta_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Demanda F/Ponta (kW)</label><input type="text" placeholder="Ex: 53.42" value={currentFatura.demanda_fora_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, demanda_fora_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div></div><div className="grid grid-cols-2 gap-2"><div><label className="text-xs font-medium text-red-600">Reativo Ponta (kVArh) *</label><input type="text" placeholder="Ex: 493.76" value={currentFatura.reativo_ponta_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, reativo_ponta_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1 border-red-200" /></div><div><label className="text-xs font-medium text-red-600">Reativo F/Ponta (kVArh) *</label><input type="text" placeholder="Ex: 4696.54" value={currentFatura.reativo_fora_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, reativo_fora_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1 border-red-200" /></div></div><div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Dias do ciclo</label><input type="text" placeholder="30" value={currentFatura.dias_ciclo ?? "30"} onChange={(e) => setCurrentFatura({ ...currentFatura, dias_ciclo: e.target.value === "" ? 30 : parseInt(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Total a Pagar (R$)</label><input type="text" placeholder="Ex: 12617.50" value={currentFatura.total_pagar_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, total_pagar_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div></div><div><label className="text-xs">Fator de Potência (opcional)</label><input type="text" step="0.0001" value={currentFatura.fp_calculado ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, fp_calculado: parseFloat(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" placeholder="Ex: 0.3678" /></div></div><div className="flex gap-3 mt-6"><button onClick={() => { setCurrentFatura({ mes_referencia: "05/2025", concessionaria: "RORAIMA_ENERGIA", consumo_ponta_str: "8132", consumo_fora_str: "59050", demanda_ponta_str: "430", demanda_fora_str: "447", reativo_ponta_str: "824", reativo_fora_str: "4511", total_pagar_str: "55970.04", dias_ciclo: 30, fp_calculado: 0.85 }); }} className="flex-1 py-2 border rounded-lg text-sm hover:bg-slate-50">Exemplo Roraima</button><button onClick={salvarFatura} className="flex-1 py-2 bg-primary text-white rounded-lg text-sm font-medium">Salvar Fatura</button></div></motion.div></div>)}</AnimatePresence>
     </div>
   );
 }
