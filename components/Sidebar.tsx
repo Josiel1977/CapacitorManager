@@ -27,7 +27,7 @@ const publicMenuItems = [
 
 // Itens privados (só aparecem quando logado E com assinatura ativa OU for admin)
 const privateMenuItems = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Dashboard', href: '/dashboard-real', icon: LayoutDashboard },
   { name: 'Clientes', href: '/clientes', icon: Users },
   { name: 'Bancos', href: '/bancos', icon: Database },
   { name: 'Capacitores', href: '/capacitores', icon: Zap },
