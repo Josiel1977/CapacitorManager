@@ -334,6 +334,7 @@ export default function GraficosPage() {
           pointHoverRadius: 8,
           pointBackgroundColor: history.map(h => {
             const d = h.desvio_percentual;
+            if (d === null) return '#94a3b8'; // cinza para valores nulos (não deve ocorrer)
             if (d >= -5 && d <= 10) return '#2ecc71';
             if (d < -5 || d > 15) return '#e74c3c';
             return '#f39c12';
@@ -423,10 +424,12 @@ export default function GraficosPage() {
     };
   }, [comparacaoCapacitores]);
 
-  // Cálculos de degradação
+  // Cálculos de degradação (garantindo que desvio_percentual não é null)
   const firstMed = history[0];
   const lastMed = history[history.length - 1];
-  const degradation = lastMed && firstMed ? lastMed.desvio_percentual - firstMed.desvio_percentual : 0;
+  const degradation = lastMed && firstMed && lastMed.desvio_percentual !== null && firstMed.desvio_percentual !== null
+    ? lastMed.desvio_percentual - firstMed.desvio_percentual
+    : 0;
   const mesesEntre = lastMed && firstMed ? 
     (new Date(lastMed.created_at).getTime() - new Date(firstMed.created_at).getTime()) / (1000 * 3600 * 24 * 30) : 0;
   const degradacaoMensal = mesesEntre > 0 ? degradation / mesesEntre : 0;
