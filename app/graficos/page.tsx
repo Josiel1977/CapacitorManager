@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
-import { BarChart3, TrendingUp, AlertCircle, Zap, Download, Calendar, TrendingDown, Activity, FileText, Filter, ChevronDown } from 'lucide-react';
+import { BarChart3, TrendingUp, AlertCircle, Zap, Download, Calendar, FileText } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { toPng } from 'html-to-image';
 import {
@@ -69,6 +69,7 @@ interface Medicao {
   desvio_percentual: number | null;
 }
 
+// Para a comparação: estende Capacitor e adiciona os campos de último desvio/data
 interface CapacitorComparacao extends Capacitor {
   ultimoDesvio: number;
   ultimaData: string | null;
@@ -265,7 +266,7 @@ export default function GraficosPage() {
           // Buscar todos os capacitores do banco
           const { data: outrosCapacitores, error: outrosError } = await supabase
             .from('capacitores')
-            .select('id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v')
+            .select('id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v, banco_id')
             .eq('banco_id', selection.banco_id)
             .eq('ativo', true);
           if (outrosError) throw outrosError;
@@ -290,18 +291,12 @@ export default function GraficosPage() {
               }
             }
             
-            // Montar array de comparação
+            // Montar array de comparação - espalhando todas as propriedades do capacitor original
             const comparacao: CapacitorComparacao[] = outrosCapacitores.map(cap => {
               const ultima = ultimaPorCapacitor.get(cap.id);
-              let desvioFinal = ultima?.desvio ?? 0;
-              // Se não houver medição, calcular desvio zero (ou poderia ser null)
-              if (!ultima) {
-                // Para capacitores sem medição, o desvio teórico é zero
-                desvioFinal = 0;
-              }
               return {
-                ...cap,
-                ultimoDesvio: desvioFinal,
+                ...cap,  // mantém id, banco_id, codigo_identificacao, etc.
+                ultimoDesvio: ultima?.desvio ?? 0,
                 ultimaData: ultima?.data || null
               };
             });
@@ -366,7 +361,7 @@ export default function GraficosPage() {
     };
   }, [history]);
 
-  // Memoiza previsão (depende do histórico e do capacitor selecionado)
+  // Memoiza previsão
   const previsao = useMemo(() => {
     if (!selectedCapacitor || history.length < 2) return null;
     return calcularPrevisao(history, selectedCapacitor);
@@ -436,7 +431,6 @@ export default function GraficosPage() {
     (new Date(lastMed.created_at).getTime() - new Date(firstMed.created_at).getTime()) / (1000 * 3600 * 24 * 30) : 0;
   const degradacaoMensal = mesesEntre > 0 ? degradation / mesesEntre : 0;
 
-  // Opções dos gráficos
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -490,7 +484,6 @@ export default function GraficosPage() {
     try {
       Swal.fire({ title: 'Gerando PDF...', text: 'Por favor, aguarde.', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
       
-      // Mostrar header e footer temporariamente
       const header = reportRef.current.querySelector('.pdf-header') as HTMLElement;
       const footer = reportRef.current.querySelector('.pdf-footer') as HTMLElement;
       if (header) header.style.display = 'flex';
