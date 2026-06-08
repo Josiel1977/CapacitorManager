@@ -59,7 +59,9 @@ function parseNumber(value: string): number {
   if (!value) return 0;
   const str = value.replace(',', '.');
   const num = parseFloat(str);
-  return isNaN(num) ? 0 : num;
+  if (isNaN(num)) return 0;
+  // Não permite valores negativos em medições
+  return Math.max(0, num);
 }
 
 // ============================================================================
@@ -111,9 +113,11 @@ function ValidarCapacitoresContent() {
           .select('*')
           .eq('id', 'global')
           .single();
+        if (error) throw error;
         if (data) setConfig(data);
       } catch (err) {
         console.error('Erro ao carregar config:', err);
+        // Mantém configuração padrão
       }
     }
     fetchConfig();
@@ -190,6 +194,13 @@ function ValidarCapacitoresContent() {
 
     fetchClientes();
   }, [isAdmin, userTenantId, user, authLoading]);
+
+  // PRÉ-SELEÇÃO AUTOMÁTICA: se usuário comum tem apenas um cliente, já seleciona
+  useEffect(() => {
+    if (!isAdmin && clientes.length === 1 && !selection.cliente_id) {
+      setSelection(prev => ({ ...prev, cliente_id: clientes[0].id }));
+    }
+  }, [clientes, isAdmin, selection.cliente_id]);
 
   // Funções para buscar bancos e capacitores
   async function fetchBancos(clienteId: string) {
@@ -389,7 +400,7 @@ function ValidarCapacitoresContent() {
         tipo_teste: selection.tipo_teste,
         desvio_percentual: resultado.desvioOriginal,
         status_validacao: resultado.status,
-        created_at: new Date().toISOString(),
+        // created_at será preenchido automaticamente pelo Supabase (default now())
       };
 
       if (selection.tipo_teste === 'corrente') {
@@ -602,6 +613,7 @@ function ValidarCapacitoresContent() {
                     <input
                       type="number"
                       step="0.01"
+                      min="0"
                       placeholder="Ex: 220"
                       className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                       value={medicao.tensao_medida_v}
@@ -620,6 +632,7 @@ function ValidarCapacitoresContent() {
                     <input
                       type="number"
                       step="0.01"
+                      min="0"
                       placeholder="Ex: 6.56"
                       className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                       value={medicao.corrente_medida_a}
@@ -640,6 +653,7 @@ function ValidarCapacitoresContent() {
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
                     placeholder="Ex: 68.55"
                     className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                     value={medicao.capacitancia_medida_uf}
