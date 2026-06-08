@@ -337,8 +337,8 @@ export default function Dashboard() {
           </p>
           <p className="text-xs text-slate-500 mt-2">
             {stats.reprovados > 0 
-              ? `IA sugere trocar ${stats.reprovados} capacitores para evitar multas.` 
-              : 'IA analisando 24/7 para manter o fator de potência ideal.'}
+              ? `Sistema sugere trocar ${stats.reprovados} capacitores para evitar multas.` 
+              : 'Sistema analisando 24/7 para manter o fator de potência ideal.'}
           </p>
         </motion.div>
 
