@@ -11,7 +11,7 @@ export default function DemoBanner() {
     <div className="bg-gradient-to-r from-primary/10 to-secondary/10 rounded-xl p-4 mb-6 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div className="flex items-center gap-3">
         <div className="p-2 bg-secondary/20 rounded-lg">
-          <span className="text-2xl">🚀</span>
+          <span className="text-2xl"></span>
         </div>
         <div>
           <p className="text-sm font-medium text-primary">Versão Demo</p>
