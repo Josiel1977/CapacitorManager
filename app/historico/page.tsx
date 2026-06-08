@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Search, Trash2, CheckCircle2, AlertTriangle, XCircle, TrendingUp, TrendingDown, BarChart3, Activity } from 'lucide-react';
+import { FileText, Download, Search, Zap, CheckCircle2, AlertTriangle, XCircle, TrendingUp, TrendingDown, Activity } from 'lucide-react';
+import jsPDF from 'jspdf';
+import { toPng } from 'html-to-image';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 
@@ -24,7 +26,7 @@ function getStatusValidacao(desvio: number): string {
 }
 
 // Função para calcular tendência de degradação
-function calcularTendencia(medicoes: any[]) {
+function calcularTendenciaCapacitor(medicoes: any[]) {
     if (medicoes.length < 2) return null;
     
     const primeira = medicoes[medicoes.length - 1];
@@ -44,6 +46,8 @@ function calcularTendencia(medicoes: any[]) {
     }
     
     return {
+        nome: primeira.capacitores?.codigo_identificacao,
+        banco: primeira.bancos_capacitores?.nome_banco,
         variacao: variacao.toFixed(2),
         degradacaoPorMes: degradacaoPorMes.toFixed(2),
         tendencia: variacao > 0 ? 'piorando' : variacao < 0 ? 'melhorando' : 'estavel',
@@ -55,440 +59,540 @@ function calcularTendencia(medicoes: any[]) {
     };
 }
 
-export default function HistoricoPage() {
-  const [medicoes, setMedicoes] = useState<any[]>([]);
+export default function RelatoriosPage() {
   const [clientes, setClientes] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({
-    cliente_id: '',
-    tipo_teste: '',
-    status: '',
-    search: '',
-    periodo: 'todos'
-  });
+  const [selectedCliente, setSelectedCliente] = useState('');
+  const [reportData, setReportData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [tendencias, setTendencias] = useState<any[]>([]);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetchData();
+    fetchClientes();
   }, []);
 
-  async function fetchData() {
-    try {
-      setLoading(true);
-      const { data: medData, error: medError } = await supabase
-        .from('medicoes')
-        .select(`
-          *,
-          clientes(id, nome),
-          bancos_capacitores(id, nome_banco),
-          capacitores(id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v)
-        `)
-        .order('created_at', { ascending: false });
-      
-      const { data: cliData } = await supabase
-        .from('clientes')
-        .select('id, nome')
-        .eq('ativo', true)
-        .order('nome');
+  async function fetchClientes() {
+    const { data } = await supabase.from('clientes').select('id, nome').eq('ativo', true).order('nome');
+    setClientes(data || []);
+  }
 
-      if (medError) throw medError;
-      
-      const processedData = medData?.map(med => {
-        let desvio = med.desvio_percentual;
-        let status = med.status_validacao;
-        let teoricoLabel = '---';
-        let tensaoExibicao = null;
-        
-        if (med.capacitores) {
-          const tensaoNominal = med.capacitores.tensao_nominal_v;
-          tensaoExibicao = tensaoNominal;
+  async function fetchAndRecalculateMedicoes(clienteId: string) {
+    const { data: medicoes } = await supabase
+      .from('medicoes')
+      .select(`
+        *,
+        bancos_capacitores(id, nome_banco),
+        capacitores(id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v)
+      `)
+      .eq('cliente_id', clienteId)
+      .order('created_at', { ascending: false });
+
+    if (!medicoes) return [];
+
+    const correctedMedicoes = medicoes.map(med => {
+      let desvio = med.desvio_percentual;
+      let status = med.status_validacao;
+      let correnteTeorica = med.corrente_teorica_a;
+      let capacitanciaTeorica = med.capacitancia_teorica_uf;
+      let teoricoLabel = '---';
+      let tensaoExibicao = null;
+
+      if (med.capacitores) {
+        const tensaoNominal = med.capacitores.tensao_nominal_v;
+        tensaoExibicao = tensaoNominal;
+
+        if (med.tipo_teste === 'corrente' && med.corrente_medida_a) {
+          correnteTeorica = calcularCorrenteTeorica(med.capacitores.potencia_kvar, tensaoNominal);
+          teoricoLabel = `${correnteTeorica.toFixed(2)} A @ ${tensaoNominal}V`;
           
-          if (med.tipo_teste === 'corrente') {
-            const correnteTeorica = calcularCorrenteTeorica(med.capacitores.potencia_kvar, tensaoNominal);
-            teoricoLabel = `${correnteTeorica.toFixed(2)} A @ ${tensaoNominal}V`;
-            
-            if (med.corrente_medida_a && correnteTeorica > 0) {
-              desvio = ((med.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
-              status = getStatusValidacao(desvio);
-            }
-          } else if (med.tipo_teste === 'capacitancia') {
-            const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
-            teoricoLabel = `${capacitanciaTeorica.toFixed(2)} µF (Δ) @ ${tensaoNominal}V`;
-            
-            if (med.capacitancia_medida_uf && capacitanciaTeorica > 0) {
-              desvio = ((med.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
-              status = getStatusValidacao(desvio);
-            }
+          if (correnteTeorica > 0) {
+            desvio = ((med.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
+            status = getStatusValidacao(desvio);
+          }
+        } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf) {
+          capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
+          teoricoLabel = `${capacitanciaTeorica.toFixed(2)} µF (Δ) @ ${tensaoNominal}V`;
+          
+          if (capacitanciaTeorica > 0) {
+            desvio = ((med.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
+            status = getStatusValidacao(desvio);
           }
         }
+      }
+
+      return {
+        ...med,
+        desvio_percentual: desvio,
+        status_validacao: status,
+        corrente_teorica_a: correnteTeorica,
+        capacitancia_teorica_uf: capacitanciaTeorica,
+        teoricoLabel,
+        tensaoNominal: tensaoExibicao
+      };
+    });
+
+    return correctedMedicoes;
+  }
+
+  // Agrupar medições por capacitor para análise de tendência
+  function agruparPorCapacitor(medicoes: any[]) {
+    const grupos: any = {};
+    medicoes.forEach(med => {
+      const key = med.capacitores?.id;
+      if (!key) return;
+      if (!grupos[key]) {
+        grupos[key] = [];
+      }
+      grupos[key].push(med);
+    });
+    
+    Object.keys(grupos).forEach(key => {
+      grupos[key].sort((a: any, b: any) => 
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+    });
+    
+    return grupos;
+  }
+
+  async function generatePreview() {
+    if (!selectedCliente) return;
+    
+    setLoading(true);
+    try {
+      const { data: cliente } = await supabase.from('clientes').select('*').eq('id', selectedCliente).single();
+      const medicoesCorrigidas = await fetchAndRecalculateMedicoes(selectedCliente);
+
+      // CORREÇÃO AQUI: Agrupar por capacitor e pegar apenas a última medição de cada
+      const ultimasPorCapacitor = new Map();
+      (medicoesCorrigidas || []).forEach(med => {
+        const capacitorId = med.capacitores?.id;
+        if (!capacitorId) return;
         
-        return { 
-          ...med, 
-          desvio_percentual: desvio,
-          status_validacao: status,
-          teoricoLabel,
-          tensaoNominal: tensaoExibicao
-        };
-      }) || [];
+        const existente = ultimasPorCapacitor.get(capacitorId);
+        if (!existente || new Date(med.created_at) > new Date(existente.created_at)) {
+          ultimasPorCapacitor.set(capacitorId, med);
+        }
+      });
       
-      setMedicoes(processedData);
-      setClientes(cliData || []);
+      // Contar status apenas das últimas medições
+      const stats = { aprovado: 0, atencao: 0, reprovado: 0 };
+      for (const med of ultimasPorCapacitor.values()) {
+        const status = med.status_validacao;
+        if (status === 'aprovado') stats.aprovado++;
+        else if (status === 'atencao') stats.atencao++;
+        else if (status === 'reprovado') stats.reprovado++;
+      }
+
+      const grupos = agruparPorCapacitor(medicoesCorrigidas);
+      const tendenciasCalculadas = Object.values(grupos)
+        .map((meds: any) => calcularTendenciaCapacitor(meds))
+        .filter(t => t !== null);
+      
+      setTendencias(tendenciasCalculadas);
+
+      setReportData({
+        cliente,
+        medicoes: medicoesCorrigidas || [],
+        stats,  // agora stats representa a situação ATUAL dos capacitores
+        date: new Date().toLocaleDateString('pt-BR'),
+        time: new Date().toLocaleTimeString('pt-BR')
+      });
     } catch (error) {
       console.error('Error:', error);
+      Swal.fire('Erro', 'Não foi possível gerar o relatório', 'error');
     } finally {
       setLoading(false);
     }
   }
 
-  const getDataLimite = () => {
-    const hoje = new Date();
-    switch (filters.periodo) {
-      case '30dias': return new Date(hoje.setDate(hoje.getDate() - 30));
-      case '60dias': return new Date(hoje.setDate(hoje.getDate() - 60));
-      case '90dias': return new Date(hoje.setDate(hoje.getDate() - 90));
-      default: return null;
-    }
-  };
+  async function downloadPDF() {
+    if (!reportRef.current) return;
 
-  const filteredMedicoes = medicoes.filter(m => {
-    const matchCliente = !filters.cliente_id || m.cliente_id === filters.cliente_id;
-    const matchTipo = !filters.tipo_teste || m.tipo_teste === filters.tipo_teste;
-    const matchStatus = !filters.status || m.status_validacao === filters.status;
-    const matchSearch = !filters.search || 
-      m.capacitores?.codigo_identificacao?.toLowerCase().includes(filters.search.toLowerCase()) ||
-      m.bancos_capacitores?.nome_banco?.toLowerCase().includes(filters.search.toLowerCase());
-    
-    const dataLimite = getDataLimite();
-    const matchPeriodo = !dataLimite || new Date(m.created_at) >= dataLimite;
-    
-    return matchCliente && matchTipo && matchStatus && matchSearch && matchPeriodo;
-  });
+    try {
+      Swal.fire({
+        title: 'Gerando PDF...',
+        text: 'Por favor, aguarde.',
+        allowOutsideClick: false,
+        didOpen: () => {
+          Swal.showLoading();
+        }
+      });
 
-  const medicoesPorCapacitor = filteredMedicoes.reduce((acc: any, med) => {
-    const key = `${med.capacitores?.codigo_identificacao}_${med.capacitores?.id}`;
-    if (!acc[key]) {
-      acc[key] = {
-        nome: med.capacitores?.codigo_identificacao,
-        id: med.capacitores?.id,
-        medicoes: []
-      };
-    }
-    acc[key].medicoes.push(med);
-    return acc;
-  }, {});
+      const dataUrl = await toPng(reportRef.current, {
+        quality: 1.0,
+        backgroundColor: '#ffffff',
+        pixelRatio: 3,
+        style: {
+          width: '794px',
+          maxWidth: '794px',
+          padding: '48px',
+          margin: '0',
+          boxShadow: 'none'
+        }
+      });
+      
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise((resolve) => {
+        img.onload = resolve;
+      });
 
-  Object.keys(medicoesPorCapacitor).forEach(key => {
-    medicoesPorCapacitor[key].medicoes.sort((a: any, b: any) => 
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    );
-  });
+      const imgWidth = img.width;
+      const imgHeight = img.height;
+      const contentHeight = (imgHeight * pdfWidth) / imgWidth;
+      
+      let heightLeft = contentHeight;
+      let position = 0;
 
-  function handleAnalisarCapacitor(capacitorNome: string, capacitorMedicoes: any[]) {
-    if (capacitorMedicoes.length < 2) {
-        Swal.fire('Atenção', 'São necessárias pelo menos 2 medições para análise de tendência', 'info');
-        return;
+      // Add first page
+      pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, contentHeight);
+      heightLeft -= pdfHeight;
+
+      // Add subsequent pages if content is longer than one page
+      while (heightLeft >= 0) {
+        position = heightLeft - contentHeight;
+        pdf.addPage();
+        pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, contentHeight);
+        heightLeft -= pdfHeight;
+      }
+
+      pdf.save(`Relatorio_Tecnico_${reportData.cliente.nome.replace(/\s+/g, '_')}.pdf`);
+      
+      Swal.close();
+      Swal.fire('Sucesso', 'Relatório exportado com sucesso!', 'success');
+    } catch (error) {
+      console.error('PDF Error:', error);
+      Swal.close();
+      Swal.fire('Erro', 'Falha ao gerar o PDF.', 'error');
     }
-    
-    const tendencia = calcularTendencia(capacitorMedicoes);
-    
-    // 🔧 VERIFICAÇÃO IMPORTANTE: se tendencia for null, não prossegue
-    if (!tendencia) {
-        Swal.fire('Erro', 'Não foi possível calcular a tendência', 'error');
-        return;
-    }
-    
-    Swal.fire({
-        title: ` Análise de Tendência - ${capacitorNome}`,
-        html: `
-            <div style="text-align: left;">
-                <p><strong> Período analisado:</strong> ${tendencia.primeiraData} a ${tendencia.ultimaData}</p>
-                <p><strong> Desvio inicial:</strong> ${tendencia.primeiraDesvio}%</p>
-                <p><strong> Desvio atual:</strong> ${tendencia.ultimaDesvio}%</p>
-                <p><strong> Variação total:</strong> <span style="color: ${parseFloat(tendencia.variacao) > 0 ? '#e74c3c' : '#2ecc71'}; font-weight: bold;">${parseFloat(tendencia.variacao) > 0 ? '+' : ''}${tendencia.variacao}%</span></p>
-                <p><strong> Tendência:</strong> ${tendencia.tendencia === 'piorando' ? '⚠️ Degradação detectada' : tendencia.tendencia === 'melhorando' ? '✅ Melhorando' : '➡️ Estável'}</p>
-                <p><strong> Degradação por mês:</strong> ${tendencia.degradacaoPorMes}%</p>
-                ${tendencia.previsao ? `
-                    <hr style="margin: 15px 0;">
-                    <p><strong>🔮 PREVISÃO:</strong></p>
-                    <p>⚠️ Previsão de substituição em aproximadamente <strong>${tendencia.previsao.meses} meses</strong></p>
-                    <p>📅 Data estimada: <strong>${tendencia.previsao.data}</strong></p>
-                ` : '<p>✅ Capacitor dentro da faixa normal de operação</p>'}
-            </div>
-        `,
-        icon: tendencia.tendencia === 'piorando' ? 'warning' : 'success',
-        confirmButtonText: 'Fechar'
-    });
   }
 
-  async function handleDelete(id: string) {
-    const result = await Swal.fire({
-      title: 'Excluir medição?',
-      text: "Esta ação não pode ser desfeita.",
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#e74c3c',
-      cancelButtonColor: '#0a2b3c',
-      confirmButtonText: 'Sim, excluir!',
-      cancelButtonText: 'Cancelar'
-    });
+  function formatDesvio(desvio: number): string {
+    if (desvio === null || desvio === undefined) return '---';
+    return `${desvio > 0 ? '+' : ''}${desvio.toFixed(2)}%`;
+  }
 
-    if (result.isConfirmed) {
-      try {
-        const { error } = await supabase.from('medicoes').delete().eq('id', id);
-        if (error) throw error;
-        Swal.fire('Excluído!', 'Medição removida com sucesso.', 'success');
-        fetchData();
-      } catch (error: any) {
-        Swal.fire('Erro', error.message, 'error');
-      }
+  function getValorTeorico(med: any): string {
+    if (med.tipo_teste === 'corrente') {
+      return med.corrente_teorica_a ? `${med.corrente_teorica_a.toFixed(2)} A` : '---';
+    } else {
+      return med.capacitancia_teorica_uf ? `${med.capacitancia_teorica_uf.toFixed(2)} µF` : '---';
     }
+  }
+
+  function getValorMedido(med: any): string {
+    if (med.tipo_teste === 'corrente') {
+      return med.corrente_medida_a ? `${med.corrente_medida_a.toFixed(2)} A` : '---';
+    } else {
+      return med.capacitancia_medida_uf ? `${med.capacitancia_medida_uf.toFixed(2)} µF` : '---';
+    }
+  }
+
+  function getTendenciaIcon(tendencia: string) {
+    if (tendencia === 'piorando') return <TrendingUp size={14} className="text-red-600" />;
+    if (tendencia === 'melhorando') return <TrendingDown size={14} className="text-green-600" />;
+    return <Activity size={14} className="text-slate-400" />;
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <header>
-        <h1 className="text-3xl font-bold text-primary">Histórico de Medições</h1>
-        <p className="text-slate-500">Consulte, compare e analise a evolução dos capacitores</p>
+        <h1 className="text-3xl font-bold text-slate-800">Relatórios Técnicos</h1>
+        <p className="text-slate-500">Gere relatórios profissionais com análise de tendência</p>
       </header>
 
-      <div className="rounded-xl bg-white p-6 shadow-sm">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
-          <div>
-            <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Cliente</label>
+      <div className="rounded-xl bg-white p-4 sm:p-6 shadow-sm border border-slate-200">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+          <div className="flex-1">
+            <label className="mb-1 block text-sm font-medium text-slate-700">Selecione o Cliente</label>
             <select 
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
-              value={filters.cliente_id}
-              onChange={(e) => setFilters({...filters, cliente_id: e.target.value})}
+              className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-slate-400"
+              value={selectedCliente}
+              onChange={(e) => setSelectedCliente(e.target.value)}
             >
-              <option value="">Todos os Clientes</option>
+              <option value="">Selecione um cliente...</option>
               {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
             </select>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Tipo</label>
-            <select 
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
-              value={filters.tipo_teste}
-              onChange={(e) => setFilters({...filters, tipo_teste: e.target.value})}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button 
+              onClick={generatePreview}
+              disabled={!selectedCliente || loading}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-800 px-6 py-2 text-white hover:bg-slate-700 disabled:opacity-50 transition-colors"
             >
-              <option value="">Todos</option>
-              <option value="corrente"> Corrente</option>
-              <option value="capacitancia"> Capacitância</option>
-            </select>
+              <Search size={20} />
+              Gerar Prévia
+            </button>
+            {reportData && (
+              <button 
+                onClick={downloadPDF}
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-600 px-6 py-2 font-bold text-white hover:bg-slate-500 transition-colors"
+              >
+                <Download size={20} />
+                Exportar PDF
+              </button>
+            )}
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Status</label>
-            <select 
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
-              value={filters.status}
-              onChange={(e) => setFilters({...filters, status: e.target.value})}
-            >
-              <option value="">Todos</option>
-              <option value="aprovado">✅ Aprovado</option>
-              <option value="atencao">⚠️ Atenção</option>
-              <option value="reprovado">❌ Reprovado</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Período</label>
-            <select 
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
-              value={filters.periodo}
-              onChange={(e) => setFilters({...filters, periodo: e.target.value})}
-            >
-              <option value="todos">📅 Todos</option>
-              <option value="30dias">📆 30 dias</option>
-              <option value="60dias">📆 60 dias</option>
-              <option value="90dias">📆 90 dias</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Buscar</label>
-            <div className="relative">
-              <Search className="absolute top-1/2 left-3 -translate-y-1/2 text-slate-400" size={16} />
-              <input 
-                type="text" 
-                placeholder="Cód. Capacitor..."
-                className="w-full rounded-lg border border-slate-200 pl-10 pr-3 py-2 text-sm outline-none focus:border-primary"
-                value={filters.search}
-                onChange={(e) => setFilters({...filters, search: e.target.value})}
-              />
+        </div>
+      </div>
+
+      {reportData ? (
+        <div className="flex justify-center overflow-x-auto pb-8">
+          <div 
+            id="report-container"
+            ref={reportRef}
+            className="bg-white p-12 shadow-2xl"
+            style={{ width: '794px', minHeight: '1122px' }}
+          >
+            {/* Header - Dark & Yellow Theme */}
+            <div className="mb-12 flex flex-row items-center justify-between border-b-4 pb-8 gap-4" style={{ borderColor: '#EAB308', backgroundColor: '#0f172a', margin: '-48px -48px 48px -48px', padding: '48px' }}>
+              <div className="flex items-center gap-4">
+                <div className="rounded-2xl p-3 text-primary" style={{ backgroundColor: '#EAB308' }}>
+                  <Zap size={40} className="text-slate-900" />
+                </div>
+                <div>
+                  <h2 className="text-3xl sm:text-4xl font-black tracking-tighter uppercase" style={{ color: '#ffffff' }}>
+                    CAPACITOR<span style={{ color: '#EAB308' }}>MANAGER</span>
+                  </h2>
+                  <p className="text-xs sm:text-sm font-bold uppercase tracking-widest text-slate-400">Relatório Técnico de Manutenção Especializada</p>
+                </div>
+              </div>
+              <div className="text-left sm:text-right">
+                <p className="text-[10px] sm:text-sm font-bold text-slate-500">DATA DE EMISSÃO</p>
+                <p className="text-base sm:text-lg font-bold text-white">{reportData.date}</p>
+                <p className="text-[10px] sm:text-xs text-[#EAB308]">{reportData.time}</p>
+              </div>
+            </div>
+
+            {/* Client Info - Cores mais profissionais */}
+            <div className="mb-8 sm:mb-12 grid grid-cols-1 md:grid-cols-2 gap-8 rounded-xl p-4 sm:p-8" style={{ backgroundColor: '#f8fafc' }}>
+              <div>
+                <h3 className="mb-4 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">DADOS DO CLIENTE</h3>
+                <p className="text-lg sm:text-xl font-bold" style={{ color: '#1e293b' }}>{reportData.cliente.nome}</p>
+                <p className="text-sm text-slate-600">{reportData.cliente.cnpj_cpf || 'CNPJ não informado'}</p>
+                <p className="text-sm text-slate-600">{reportData.cliente.contato_responsavel || ''}</p>
+                <p className="text-sm text-slate-600">{reportData.cliente.telefone || ''}</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                <div className="text-center">
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">APROVADOS</p>
+                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#059669' }}>{reportData.stats.aprovado}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">ATENÇÃO</p>
+                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#d97706' }}>{reportData.stats.atencao}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">REPROVADOS</p>
+                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#dc2626' }}>{reportData.stats.reprovado}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Análise de Tendência por Capacitor */}
+            {tendencias.length > 0 && (
+              <div className="mb-8 sm:mb-12">
+                <h3 className="mb-6 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">📊 ANÁLISE DE TENDÊNCIA POR CAPACITOR</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left min-w-[600px]">
+                    <thead>
+                      <tr className="border-b-2 border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        <th className="pb-4">CAPACITOR</th>
+                        <th className="pb-4">BANCO</th>
+                        <th className="pb-4">1ª MEDIÇÃO</th>
+                        <th className="pb-4">ÚLTIMA</th>
+                        <th className="pb-4">VARIAÇÃO</th>
+                        <th className="pb-4">TENDÊNCIA</th>
+                        <th className="pb-4">PREVISÃO</th>
+                       </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {tendencias.map((t, idx) => (
+                        <tr key={idx} className="text-[10px] sm:text-xs">
+                          <td className="py-4 font-bold text-slate-800">{t.nome}</td>
+                          <td className="py-4 text-slate-600">{t.banco}</td>
+                          <td className="py-4 text-slate-500">{t.primeiraDesvio}%<br/><span className="text-slate-400">{t.primeiraData}</span></td>
+                          <td className="py-4 text-slate-500">{t.ultimaDesvio}%<br/><span className="text-slate-400">{t.ultimaData}</span></td>
+                          <td className="py-4 font-bold" style={{ color: parseFloat(t.variacao) > 0 ? '#dc2626' : parseFloat(t.variacao) < 0 ? '#10b981' : '#64748b' }}>
+                            {parseFloat(t.variacao) > 0 ? '+' : ''}{t.variacao}%
+                          </td>
+                          <td className="py-4">
+                            <div className="flex items-center gap-1">
+                              {getTendenciaIcon(t.tendencia)}
+                              <span className={t.tendencia === 'piorando' ? 'text-red-600' : t.tendencia === 'melhorando' ? 'text-green-600' : 'text-slate-500'}>
+                                {t.tendencia === 'piorando' ? 'Degradando' : t.tendencia === 'melhorando' ? 'Melhorando' : 'Estável'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-4">
+                            {t.previsao ? (
+                              <span className="text-amber-600 font-medium">
+                                ~{t.previsao.meses} meses<br/>
+                                <span className="text-slate-400 text-[8px]">{t.previsao.data}</span>
+                              </span>
+                            ) : (
+                              <span className="text-green-600">OK</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Measurements Table */}
+            <div className="mb-8 sm:mb-12">
+              <h3 className="mb-6 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">DETALHAMENTO DAS MEDIÇÕES</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left min-w-[700px]">
+                  <thead>
+                    <tr className="border-b-2 border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                      <th className="pb-4">DATA</th>
+                      <th className="pb-4">BANCO</th>
+                      <th className="pb-4">CAPACITOR</th>
+                      <th className="pb-4">TENSÃO</th>
+                      <th className="pb-4">TIPO</th>
+                      <th className="pb-4">TEÓRICO</th>
+                      <th className="pb-4">MEDIDO</th>
+                      <th className="pb-4">DESVIO</th>
+                      <th className="pb-4">STATUS</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {reportData.medicoes.map((med: any) => (
+                      <tr key={med.id} className="text-[10px] sm:text-xs">
+                        <td className="py-4 text-slate-600">{new Date(med.created_at).toLocaleDateString()}</td>
+                        <td className="py-4 font-bold text-slate-700">{med.bancos_capacitores?.nome_banco || '-'}</td>
+                        <td className="py-4 font-medium text-slate-700">{med.capacitores?.codigo_identificacao || '-'}</td>
+                        <td className="py-4">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${med.tensaoNominal === 220 ? 'bg-blue-50 text-blue-700' : med.tensaoNominal === 380 ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                            ⚡ {med.tensaoNominal}V
+                          </span>
+                        </td>
+                        <td className="py-4 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? 'Corrente' : 'Capacitância'}</td>
+                        <td className="py-4 text-slate-500">{getValorTeorico(med)}</td>
+                        <td className="py-4 font-medium text-slate-700">{getValorMedido(med)}</td>
+                        <td className="py-4 font-bold" style={{ color: med.desvio_percentual > 0 ? '#dc2626' : med.desvio_percentual < 0 ? '#d97706' : '#64748b' }}>
+                          {formatDesvio(med.desvio_percentual)}
+                        </td>
+                        <td className="py-4">
+                          <StatusBadge status={med.status_validacao} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Summary - Cores mais profissionais */}
+            <div className="mb-8 rounded-lg bg-slate-50 p-4 sm:p-6">
+              <h3 className="mb-4 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">RESUMO EXECUTIVO</h3>
+              <div className="grid grid-cols-2 gap-4 text-xs sm:text-sm mb-4">
+                <div>
+                  <p className="text-slate-500">Total de Medições:</p>
+                  <p className="text-xl sm:text-2xl font-bold text-slate-800">{reportData.medicoes.length}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Taxa de Aprovação (última medição):</p>
+                  <p className="text-xl sm:text-2xl font-bold text-emerald-600">
+                    {(() => {
+                      const totalCapacitores = reportData.stats.aprovado + reportData.stats.atencao + reportData.stats.reprovado;
+                      return totalCapacitores > 0 ? ((reportData.stats.aprovado / totalCapacitores) * 100).toFixed(1) : 0;
+                    })()}%
+                  </p>
+                </div>
+              </div>
+              
+              {/* Capacitores Críticos */}
+              {tendencias.filter(t => t.tendencia === 'piorando' && parseFloat(t.variacao) > 5).length > 0 && (
+                <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
+                  <p className="text-xs font-bold text-red-700 mb-2">⚠️ CAPACITORES QUE NECESSITAM ATENÇÃO:</p>
+                  <ul className="text-xs text-red-600 space-y-1">
+                    {tendencias.filter(t => t.tendencia === 'piorando' && parseFloat(t.variacao) > 5).map((t, idx) => (
+                      <li key={idx}>• {t.nome} - Variação de {t.variacao}% (previsão de substituição em {t.previsao?.meses || 'breve'} meses)</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            {/* Footer - Highlighted */}
+            <div className="mt-auto border-t-4 pt-12 text-center" style={{ borderColor: '#EAB308', backgroundColor: '#f8fafc', margin: '64px -48px -48px -48px', padding: '48px' }}>
+              <div className="grid grid-cols-2 gap-12 mb-12">
+                <div className="text-center">
+                  <div className="mx-auto h-px w-48 bg-slate-400 mb-2"></div>
+                  <p className="text-[10px] font-bold text-slate-700 uppercase tracking-widest">Responsável Técnico</p>
+                  <p className="text-[8px] text-slate-500">Assinatura / Carimbo</p>
+                </div>
+                <div className="text-center">
+                  <div className="mx-auto h-px w-48 bg-slate-400 mb-2"></div>
+                  <p className="text-[10px] font-bold text-slate-700 uppercase tracking-widest">Cliente / Recebedor</p>
+                  <p className="text-[8px] text-slate-500">Assinatura / Data</p>
+                </div>
+              </div>
+              
+              <div className="pt-8 border-t border-slate-200">
+                <p className="text-xs font-bold text-slate-700">Este relatório é um documento técnico oficial gerado pelo sistema CapacitorManager.</p>
+                <p className="text-[10px] text-slate-600 mt-4 font-medium">JM ELETRO SERVICE | contato@jmeletroservice.com.br | (91) 98231-9448</p>
+                <div className="mt-4 flex justify-center gap-2">
+                  <div className="h-1 w-12 bg-[#EAB308]"></div>
+                  <div className="h-1 w-12 bg-slate-900"></div>
+                  <div className="h-1 w-12 bg-[#EAB308]"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-
-      <div className="rounded-xl bg-white p-6 shadow-sm">
-        <div className="flex items-center gap-2 mb-4">
-          <BarChart3 size={20} className="text-secondary" />
-          <h2 className="text-lg font-bold text-primary">Análise por Capacitor</h2>
-          <span className="text-xs text-slate-400">Clique em &quot;Analisar&quot; para ver tendência e previsão</span>
+      ) : (
+        <div className="flex flex-col items-center justify-center rounded-xl bg-white py-24 shadow-sm text-slate-400">
+          <FileText size={64} className="mb-4 opacity-10" />
+          <p className="text-lg">Selecione um cliente para gerar o relatório</p>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50 text-sm font-medium text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Capacitor</th>
-                <th className="px-4 py-3">Banco</th>
-                <th className="px-4 py-3">Medições</th>
-                <th className="px-4 py-3">1ª Medição</th>
-                <th className="px-4 py-3">Última</th>
-                <th className="px-4 py-3">Variação</th>
-                <th className="px-4 py-3 text-center">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {Object.entries(medicoesPorCapacitor).map(([key, data]: [string, any]) => {
-                const medicoes = data.medicoes;
-                const primeira = medicoes[medicoes.length - 1];
-                const ultima = medicoes[0];
-                const variacao = ultima.desvio_percentual - primeira.desvio_percentual;
-                
-                return (
-                  <tr key={key} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-bold text-primary">{data.nome}</td>
-                    <td className="px-4 py-3 text-slate-600">{ultima.bancos_capacitores?.nome_banco || '-'}</td>
-                    <td className="px-4 py-3">
-                      <span className="bg-primary/10 text-primary px-2 py-1 rounded-full text-xs font-medium">
-                        {medicoes.length} medições
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-500">
-                      {new Date(primeira.created_at).toLocaleDateString('pt-BR')}<br/>
-                      <span className="font-medium">{primeira.desvio_percentual?.toFixed(2)}%</span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-500">
-                      {new Date(ultima.created_at).toLocaleDateString('pt-BR')}<br/>
-                      <span className="font-medium">{ultima.desvio_percentual?.toFixed(2)}%</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        {variacao > 0 ? <TrendingUp size={14} className="text-red-500" /> : variacao < 0 ? <TrendingDown size={14} className="text-green-500" /> : <Activity size={14} className="text-slate-400" />}
-                        <span className={variacao > 0 ? 'text-red-600' : variacao < 0 ? 'text-green-600' : 'text-slate-600'}>
-                          {variacao > 0 ? '+' : ''}{variacao.toFixed(2)}%
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <button 
-                        onClick={() => handleAnalisarCapacitor(data.nome, medicoes)}
-                        className="bg-secondary/10 text-secondary hover:bg-secondary/20 px-3 py-1 rounded-full text-xs font-medium transition-colors"
-                      >
-                         Analisar
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50 text-sm font-medium text-slate-500">
-              <tr>
-                <th className="px-6 py-4">Data/Hora</th>
-                <th className="px-6 py-4">Cliente / Banco</th>
-                <th className="px-6 py-4">Capacitor</th>
-                <th className="px-6 py-4">Tipo</th>
-                <th className="px-6 py-4">Teórico</th>
-                <th className="px-6 py-4">Medido</th>
-                <th className="px-6 py-4">Desvio</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredMedicoes.map((med) => (
-                <tr key={med.id} className="hover:bg-slate-50 transition-colors text-sm">
-                  <td className="px-6 py-4 text-slate-600">
-                    {new Date(med.created_at).toLocaleString('pt-BR')}
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="font-medium text-primary">{med.clientes?.nome}</div>
-                    <div className="text-xs text-slate-500">{med.bancos_capacitores?.nome_banco}</div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="font-bold text-primary">{med.capacitores?.codigo_identificacao}</div>
-                    {med.tensaoNominal && (
-                      <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full mt-1 inline-block">
-                        ⚡ {med.tensaoNominal}V
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-slate-600">
-                    {med.tipo_teste === 'corrente' ? ' Corrente' : ' Capacitância'}
-                  </td>
-                  <td className="px-6 py-4 text-slate-500 text-xs">
-                    {med.teoricoLabel}
-                  </td>
-                  <td className="px-6 py-4 font-medium text-slate-700">
-                    {med.tipo_teste === 'corrente' 
-                      ? `${med.corrente_medida_a?.toFixed(2)} A` 
-                      : `${med.capacitancia_medida_uf?.toFixed(2)} µF`}
-                  </td>
-                  <td className="px-6 py-4 font-medium">
-                    <span className={cn(
-                      med.desvio_percentual && med.desvio_percentual > 0 ? "text-red-600 font-bold" : 
-                      med.desvio_percentual && med.desvio_percentual < 0 ? "text-amber-600" : "text-slate-700"
-                    )}>
-                      {med.desvio_percentual !== null && med.desvio_percentual !== undefined
-                        ? `${med.desvio_percentual > 0 ? '+' : ''}${med.desvio_percentual.toFixed(2)}%` 
-                        : '---'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <StatusBadge status={med.status_validacao} />
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button 
-                      onClick={() => handleDelete(med.id)}
-                      className="rounded p-1.5 text-red-500 hover:bg-red-50 transition-colors"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {filteredMedicoes.length === 0 && !loading && (
-                <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center text-slate-400">
-                    Nenhuma medição encontrada
-                  </td>
-                </tr>
-              )}
-              {loading && (
-                <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center text-slate-400">
-                    Carregando medições...
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
   const configs: any = {
-    aprovado: { icon: CheckCircle2, color: 'bg-green-50 text-green-700', label: '✅ Aprovado' },
-    atencao: { icon: AlertTriangle, color: 'bg-amber-50 text-amber-700', label: '⚠️ Atenção' },
-    reprovado: { icon: XCircle, color: 'bg-red-50 text-red-700', label: '❌ Reprovado' },
+    aprovado: { 
+      icon: CheckCircle2, 
+      color: '#059669', // emerald-600
+      bg: '#ecfdf5',    // emerald-50
+      label: 'APROVADO' 
+    },
+    atencao: { 
+      icon: AlertTriangle, 
+      color: '#d97706', // amber-600
+      bg: '#fffbeb',    // amber-50
+      label: 'ATENÇÃO' 
+    },
+    reprovado: { 
+      icon: XCircle, 
+      color: '#dc2626', // red-600
+      bg: '#fef2f2',    // red-50
+      label: 'REPROVADO' 
+    },
   };
 
-  const config = configs[status?.toLowerCase()] || configs.atencao;
+  const config = configs[status] || configs.atencao;
   const Icon = config.icon;
 
   return (
-    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium", config.color)}>
-      <Icon size={14} />
+    <span 
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold"
+      style={{ backgroundColor: config.bg, color: config.color }}
+    >
+      <Icon size={12} />
       {config.label}
     </span>
   );
 }
-
