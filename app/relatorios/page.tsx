@@ -163,10 +163,26 @@ export default function RelatoriosPage() {
       const { data: cliente } = await supabase.from('clientes').select('*').eq('id', selectedCliente).single();
       const medicoesCorrigidas = await fetchAndRecalculateMedicoes(selectedCliente);
 
-      const stats = (medicoesCorrigidas || []).reduce((acc: any, curr: any) => {
-        acc[curr.status_validacao] = (acc[curr.status_validacao] || 0) + 1;
-        return acc;
-      }, { aprovado: 0, atencao: 0, reprovado: 0 });
+      // CORREÇÃO AQUI: Agrupar por capacitor e pegar apenas a última medição de cada
+      const ultimasPorCapacitor = new Map();
+      (medicoesCorrigidas || []).forEach(med => {
+        const capacitorId = med.capacitores?.id;
+        if (!capacitorId) return;
+        
+        const existente = ultimasPorCapacitor.get(capacitorId);
+        if (!existente || new Date(med.created_at) > new Date(existente.created_at)) {
+          ultimasPorCapacitor.set(capacitorId, med);
+        }
+      });
+      
+      // Contar status apenas das últimas medições
+      const stats = { aprovado: 0, atencao: 0, reprovado: 0 };
+      for (const med of ultimasPorCapacitor.values()) {
+        const status = med.status_validacao;
+        if (status === 'aprovado') stats.aprovado++;
+        else if (status === 'atencao') stats.atencao++;
+        else if (status === 'reprovado') stats.reprovado++;
+      }
 
       const grupos = agruparPorCapacitor(medicoesCorrigidas);
       const tendenciasCalculadas = Object.values(grupos)
@@ -178,7 +194,7 @@ export default function RelatoriosPage() {
       setReportData({
         cliente,
         medicoes: medicoesCorrigidas || [],
-        stats,
+        stats,  // agora stats representa a situação ATUAL dos capacitores
         date: new Date().toLocaleDateString('pt-BR'),
         time: new Date().toLocaleTimeString('pt-BR')
       });
@@ -393,7 +409,7 @@ export default function RelatoriosPage() {
                         <th className="pb-4">VARIAÇÃO</th>
                         <th className="pb-4">TENDÊNCIA</th>
                         <th className="pb-4">PREVISÃO</th>
-                      </tr>
+                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {tendencias.map((t, idx) => (
@@ -485,11 +501,12 @@ export default function RelatoriosPage() {
                   <p className="text-xl sm:text-2xl font-bold text-slate-800">{reportData.medicoes.length}</p>
                 </div>
                 <div>
-                  <p className="text-slate-500">Taxa de Aprovação:</p>
+                  <p className="text-slate-500">Taxa de Aprovação (última medição):</p>
                   <p className="text-xl sm:text-2xl font-bold text-emerald-600">
-                    {reportData.medicoes.length > 0 
-                      ? ((reportData.stats.aprovado / reportData.medicoes.length) * 100).toFixed(1) 
-                      : 0}%
+                    {(() => {
+                      const totalCapacitores = reportData.stats.aprovado + reportData.stats.atencao + reportData.stats.reprovado;
+                      return totalCapacitores > 0 ? ((reportData.stats.aprovado / totalCapacitores) * 100).toFixed(1) : 0;
+                    })()}%
                   </p>
                 </div>
               </div>
@@ -579,4 +596,3 @@ function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
-
