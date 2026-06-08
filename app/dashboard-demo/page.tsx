@@ -124,7 +124,7 @@ export default function DashboardDemo() {
           <div className="flex items-center justify-between mb-4"><div className="rounded-xl bg-blue-50 p-3 text-blue-600"><Cpu size={24} /></div><div className="flex items-center gap-1.5"><div className="h-2 w-2 animate-ping rounded-full bg-blue-500" /><span className="text-xs font-bold text-blue-600">ATIVO</span></div></div>
           <h3 className="text-sm font-medium text-slate-500 mb-1">Status do Cérebro</h3>
           <p className="text-xl font-bold text-slate-900">{MOCK_STATS.reprovados > 0 ? 'Manutenção Necessária' : 'Otimização de Custos'}</p>
-          <p className="text-xs text-slate-500 mt-2">{MOCK_STATS.reprovados > 0 ? `Sistema sugere trocar ${MOCK_STATS.reprovados} capacitores para evitar multas.` : 'Sistema analisando 24/7 para manter o fator de potência ideal.'}</p>
+          <p className="text-xs text-slate-500 mt-2">{MOCK_STATS.reprovados > 0 ? `IA sugere trocar ${MOCK_STATS.reprovados} capacitores para evitar multas.` : 'IA analisando 24/7 para manter o fator de potência ideal.'}</p>
         </div>
         <div className="rounded-2xl bg-primary p-6 shadow-lg text-white">
           <div className="flex items-center justify-between mb-4"><div className="rounded-xl bg-white/10 p-3"><Zap size={24} /></div><span className="text-xs font-bold bg-white/10 px-2 py-1 rounded-md">SISTEMA</span></div>
