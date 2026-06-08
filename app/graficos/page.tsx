@@ -33,271 +33,410 @@ ChartJS.register(
   Filler
 );
 
-// Funções de cálculo
+// ==============================
+// TIPAGENS
+// ==============================
+interface Cliente {
+  id: string;
+  nome: string;
+}
+
+interface Banco {
+  id: string;
+  nome_banco: string;
+}
+
+interface Capacitor {
+  id: string;
+  codigo_identificacao: string;
+  potencia_kvar: number;
+  capacitancia_nominal_uf: number;
+  tensao_nominal_v: number;
+  banco_id: string;
+  bancos_capacitores?: {
+    nome_banco: string;
+    cliente_id: string;
+  };
+}
+
+interface Medicao {
+  id: string;
+  capacitor_id: string;
+  created_at: string;
+  tipo_teste: 'corrente' | 'capacitancia';
+  corrente_medida_a?: number;
+  capacitancia_medida_uf?: number;
+  desvio_percentual: number | null;
+}
+
+interface CapacitorComparacao extends Capacitor {
+  ultimoDesvio: number;
+  ultimaData: string | null;
+}
+
+// ==============================
+// FUNÇÕES DE CÁLCULO (utilitários)
+// ==============================
 function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
-    return capacitanciaNominalFase * 1.5;
+  return capacitanciaNominalFase * 1.5;
 }
 
 function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
-    if (!tensaoNominal || tensaoNominal === 0) return 0;
-    return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
+  if (!tensaoNominal || tensaoNominal === 0) return 0;
+  return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
 }
 
+function recalcularDesvio(medicao: Medicao, capacitor: Capacitor): number {
+  if (medicao.tipo_teste === 'corrente' && medicao.corrente_medida_a) {
+    const teorico = calcularCorrenteTeorica(capacitor.potencia_kvar, capacitor.tensao_nominal_v);
+    if (teorico === 0) return 0;
+    return ((medicao.corrente_medida_a - teorico) / teorico) * 100;
+  }
+  if (medicao.tipo_teste === 'capacitancia' && medicao.capacitancia_medida_uf) {
+    const teorico = calcularCapacitanciaTeoricaDelta(capacitor.capacitancia_nominal_uf);
+    if (teorico === 0) return 0;
+    return ((medicao.capacitancia_medida_uf - teorico) / teorico) * 100;
+  }
+  return medicao.desvio_percentual ?? 0;
+}
+
+// Previsão linear baseada em tempo real (dias)
+function calcularPrevisao(history: Medicao[], capacitor: Capacitor): {
+  slope: number;
+  intercept: number;
+  proximos: number[];
+  atingir15: number | null;
+  tendencia: 'alta' | 'moderada' | 'estavel';
+} | null {
+  if (history.length < 2) return null;
+  
+  // Converte datas para dias desde a primeira medição
+  const primeiraData = new Date(history[0].created_at).getTime();
+  const dias = history.map(h => (new Date(h.created_at).getTime() - primeiraData) / (1000 * 3600 * 24));
+  const desvios = history.map(h => recalcularDesvio(h, capacitor));
+  
+  const n = dias.length;
+  const sumX = dias.reduce((a, b) => a + b, 0);
+  const sumY = desvios.reduce((a, b) => a + b, 0);
+  const sumXY = dias.reduce((a, b, i) => a + b * desvios[i], 0);
+  const sumX2 = dias.reduce((a, b) => a + b * b, 0);
+  
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+  
+  // Projetar para os próximos 90, 180, 270 dias (3 medições trimestrais)
+  const ultimoDia = dias[dias.length - 1];
+  const proximosDias = [ultimoDia + 90, ultimoDia + 180, ultimoDia + 270];
+  const proximos = proximosDias.map(d => slope * d + intercept);
+  
+  // Quando atinge 15%?
+  const atingir15 = slope > 0 ? (15 - intercept) / slope : null;
+  const mesesPara15 = atingir15 ? Math.round((atingir15 - ultimoDia) / 30) : null;
+  
+  let tendencia: 'alta' | 'moderada' | 'estavel' = 'estavel';
+  if (slope > 0.02) tendencia = 'alta';      // degradação > 0.02% ao dia (~0.6%/mês)
+  else if (slope > 0.005) tendencia = 'moderada';
+  
+  return {
+    slope,
+    intercept,
+    proximos,
+    atingir15: mesesPara15 && mesesPara15 > 0 ? mesesPara15 : null,
+    tendencia
+  };
+}
+
+// ==============================
+// COMPONENTE PRINCIPAL
+// ==============================
 export default function GraficosPage() {
-  const [clientes, setClientes] = useState<any[]>([]);
-  const [bancos, setBancos] = useState<any[]>([]);
-  const [capacitores, setCapacitores] = useState<any[]>([]);
-  const [selectedCapacitor, setSelectedCapacitor] = useState('');
-  const [selectedCapacitorData, setSelectedCapacitorData] = useState<any>(null);
-  const [history, setHistory] = useState<any[]>([]);
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [bancos, setBancos] = useState<Banco[]>([]);
+  const [capacitores, setCapacitores] = useState<Capacitor[]>([]);
+  const [selectedCapacitorId, setSelectedCapacitorId] = useState('');
+  const [selectedCapacitor, setSelectedCapacitor] = useState<Capacitor | null>(null);
+  const [history, setHistory] = useState<Medicao[]>([]);
+  const [comparacaoCapacitores, setComparacaoCapacitores] = useState<CapacitorComparacao[]>([]);
   const [loading, setLoading] = useState(false);
-  const [comparacaoCapacitores, setComparacaoCapacitores] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  
   const chartRef = useRef<any>(null);
   const reportRef = useRef<HTMLDivElement>(null);
-
+  
   const [selection, setSelection] = useState({
     cliente_id: '',
     banco_id: '',
   });
 
+  // Carrega clientes
   useEffect(() => {
     const loadClientes = async () => {
-      const { data } = await supabase.from('clientes').select('id, nome').eq('ativo', true).order('nome');
-      setClientes(data || []);
+      const { data, error } = await supabase
+        .from('clientes')
+        .select('id, nome')
+        .eq('ativo', true)
+        .order('nome');
+      if (error) console.error(error);
+      else setClientes(data || []);
     };
     loadClientes();
   }, []);
 
+  // Carrega bancos ao mudar cliente
   useEffect(() => {
     const loadBancos = async () => {
-      if (selection.cliente_id) {
-        const { data } = await supabase
-          .from('bancos_capacitores')
-          .select('id, nome_banco')
-          .eq('cliente_id', selection.cliente_id)
-          .eq('ativo', true)
-          .order('nome_banco');
-        setBancos(data || []);
-      } else {
+      if (!selection.cliente_id) {
         setBancos([]);
         setSelection(s => ({ ...s, banco_id: '' }));
-        setSelectedCapacitor('');
-        setCapacitores([]);
+        return;
       }
+      const { data, error } = await supabase
+        .from('bancos_capacitores')
+        .select('id, nome_banco')
+        .eq('cliente_id', selection.cliente_id)
+        .eq('ativo', true)
+        .order('nome_banco');
+      if (error) console.error(error);
+      else setBancos(data || []);
     };
     loadBancos();
   }, [selection.cliente_id]);
 
+  // Carrega capacitores ao mudar banco
   useEffect(() => {
     const loadCapacitores = async () => {
-      if (selection.banco_id) {
-        const { data } = await supabase
-          .from('capacitores')
-          .select('*, bancos_capacitores(nome_banco, cliente_id)')
-          .eq('banco_id', selection.banco_id)
-          .eq('ativo', true)
-          .order('codigo_identificacao');
-        setCapacitores(data || []);
-      } else {
+      if (!selection.banco_id) {
         setCapacitores([]);
-        setSelectedCapacitor('');
+        setSelectedCapacitorId('');
+        return;
       }
+      const { data, error } = await supabase
+        .from('capacitores')
+        .select('*, bancos_capacitores(nome_banco, cliente_id)')
+        .eq('banco_id', selection.banco_id)
+        .eq('ativo', true)
+        .order('codigo_identificacao');
+      if (error) console.error(error);
+      else setCapacitores(data || []);
     };
     loadCapacitores();
   }, [selection.banco_id]);
 
+  // Carrega histórico e comparação ao selecionar capacitor
   useEffect(() => {
-    const loadHistory = async () => {
-      if (selectedCapacitor) {
-        setLoading(true);
-        
-        // Buscar dados do capacitor
-        const { data: capData } = await supabase
+    const loadHistoryAndComparison = async () => {
+      if (!selectedCapacitorId) {
+        setHistory([]);
+        setSelectedCapacitor(null);
+        setComparacaoCapacitores([]);
+        return;
+      }
+      
+      setLoading(true);
+      setError(null);
+      
+      try {
+        // 1. Buscar dados do capacitor
+        const { data: capData, error: capError } = await supabase
           .from('capacitores')
           .select('*, bancos_capacitores(nome_banco, cliente_id)')
-          .eq('id', selectedCapacitor)
+          .eq('id', selectedCapacitorId)
           .single();
-        setSelectedCapacitorData(capData);
+        if (capError) throw capError;
+        setSelectedCapacitor(capData);
         
-        // Buscar medições
-        const { data } = await supabase
+        // 2. Buscar medições do capacitor
+        const { data: medicoes, error: medError } = await supabase
           .from('medicoes')
           .select('*')
-          .eq('capacitor_id', selectedCapacitor)
+          .eq('capacitor_id', selectedCapacitorId)
           .order('created_at', { ascending: true });
+        if (medError) throw medError;
         
         // Recalcular desvios com base na tensão nominal
-        const processedData = data?.map(med => {
-          let desvio = med.desvio_percentual;
-          
-          if (capData && med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf) {
-            const teorico = calcularCapacitanciaTeoricaDelta(capData.capacitancia_nominal_uf);
-            desvio = ((med.capacitancia_medida_uf - teorico) / teorico) * 100;
-          } else if (capData && med.tipo_teste === 'corrente' && med.corrente_medida_a) {
-            const tensao = capData.tensao_nominal_v;
-            const teorico = calcularCorrenteTeorica(capData.potencia_kvar, tensao);
-            desvio = ((med.corrente_medida_a - teorico) / teorico) * 100;
-          }
-          
-          return { ...med, desvio_percentual: desvio };
-        });
+        const processedHistory = (medicoes || []).map(med => ({
+          ...med,
+          desvio_percentual: recalcularDesvio(med as Medicao, capData)
+        }));
+        setHistory(processedHistory);
         
-        setHistory(processedData || []);
-        
-        // Carregar comparação com outros capacitores do mesmo banco
+        // 3. Comparação com outros capacitores do mesmo banco (UMA ÚNICA CONSULTA)
         if (capData && selection.banco_id) {
-          const { data: outrosCapacitores } = await supabase
+          // Buscar todos os capacitores do banco
+          const { data: outrosCapacitores, error: outrosError } = await supabase
             .from('capacitores')
             .select('id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v')
             .eq('banco_id', selection.banco_id)
             .eq('ativo', true);
+          if (outrosError) throw outrosError;
           
-          const comparacao = await Promise.all(
-            (outrosCapacitores || []).map(async (cap) => {
-              const { data: ultimaMed } = await supabase
-                .from('medicoes')
-                .select('desvio_percentual, created_at')
-                .eq('capacitor_id', cap.id)
-                .order('created_at', { ascending: false })
-                .limit(1);
-              
-              let desvioFinal = ultimaMed?.[0]?.desvio_percentual;
-              if (desvioFinal === null || desvioFinal === undefined) {
-                if (cap.capacitancia_nominal_uf) {
-                  const teorico = calcularCapacitanciaTeoricaDelta(cap.capacitancia_nominal_uf);
-                  desvioFinal = 0;
-                }
+          if (outrosCapacitores && outrosCapacitores.length > 0) {
+            // Buscar a última medição de cada capacitor de uma só vez
+            const { data: ultimasMedicoes, error: ultimasError } = await supabase
+              .from('medicoes')
+              .select('capacitor_id, desvio_percentual, created_at')
+              .in('capacitor_id', outrosCapacitores.map(c => c.id))
+              .order('created_at', { ascending: false });
+            if (ultimasError) throw ultimasError;
+            
+            // Mapear a última medição por capacitor_id
+            const ultimaPorCapacitor = new Map<string, { desvio: number; data: string }>();
+            for (const med of ultimasMedicoes || []) {
+              if (!ultimaPorCapacitor.has(med.capacitor_id)) {
+                ultimaPorCapacitor.set(med.capacitor_id, {
+                  desvio: med.desvio_percentual ?? 0,
+                  data: med.created_at
+                });
               }
-              
+            }
+            
+            // Montar array de comparação
+            const comparacao: CapacitorComparacao[] = outrosCapacitores.map(cap => {
+              const ultima = ultimaPorCapacitor.get(cap.id);
+              let desvioFinal = ultima?.desvio ?? 0;
+              // Se não houver medição, calcular desvio zero (ou poderia ser null)
+              if (!ultima) {
+                // Para capacitores sem medição, o desvio teórico é zero
+                desvioFinal = 0;
+              }
               return {
                 ...cap,
-                ultimoDesvio: desvioFinal || 0,
-                ultimaData: ultimaMed?.[0]?.created_at
+                ultimoDesvio: desvioFinal,
+                ultimaData: ultima?.data || null
               };
-            })
-          );
-          
-          setComparacaoCapacitores(comparacao);
+            });
+            setComparacaoCapacitores(comparacao);
+          } else {
+            setComparacaoCapacitores([]);
+          }
         }
-        
+      } catch (err: any) {
+        console.error(err);
+        setError(err.message || 'Erro ao carregar dados');
+        Swal.fire('Erro', 'Falha ao carregar os dados do capacitor', 'error');
+      } finally {
         setLoading(false);
-      } else {
-        setHistory([]);
-        setSelectedCapacitorData(null);
-        setComparacaoCapacitores([]);
       }
     };
-    loadHistory();
-  }, [selectedCapacitor, selection.banco_id]);
+    
+    loadHistoryAndComparison();
+  }, [selectedCapacitorId, selection.banco_id]);
 
-  // Previsão linear simples
-  const getPrevisao = () => {
-    if (history.length < 3) return null;
-    
-    const valores = history.map(h => h.desvio_percentual);
-    const indices = valores.map((_, i) => i);
-    const n = valores.length;
-    
-    const sumX = indices.reduce((a, b) => a + b, 0);
-    const sumY = valores.reduce((a, b) => a + b, 0);
-    const sumXY = indices.reduce((a, b, i) => a + b * valores[i], 0);
-    const sumX2 = indices.reduce((a, b) => a + b * b, 0);
-    
-    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-    const intercept = (sumY - slope * sumX) / n;
-    
-    // Projetar próximas 3 medições
-    const proximos = [];
-    for (let i = n; i < n + 3; i++) {
-      proximos.push(slope * i + intercept);
-    }
-    
-    const atingir15 = slope > 0 ? (15 - intercept) / slope : null;
-    
+  // Memoiza dados do gráfico de evolução
+  const chartData = useMemo(() => {
+    if (!history.length) return null;
     return {
-      slope,
-      intercept,
-      proximos,
-      atingir15: atingir15 ? Math.round(atingir15 - n + 1) : null,
-      tendencia: slope > 0.5 ? 'alta' : slope > 0 ? 'moderada' : 'estavel'
+      labels: history.map(h => new Date(h.created_at).toLocaleDateString('pt-BR')),
+      datasets: [
+        {
+          label: 'Desvio Percentual (%)',
+          data: history.map(h => h.desvio_percentual),
+          borderColor: '#f39c12',
+          backgroundColor: 'rgba(243, 156, 18, 0.1)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 6,
+          pointHoverRadius: 8,
+          pointBackgroundColor: history.map(h => {
+            const d = h.desvio_percentual;
+            if (d >= -5 && d <= 10) return '#2ecc71';
+            if (d < -5 || d > 15) return '#e74c3c';
+            return '#f39c12';
+          }),
+        },
+        {
+          label: 'Limite Superior (+10%)',
+          data: history.map(() => 10),
+          borderColor: '#e74c3c',
+          borderDash: [5, 5],
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: false,
+        },
+        {
+          label: 'Limite Inferior (-5%)',
+          data: history.map(() => -5),
+          borderColor: '#e74c3c',
+          borderDash: [5, 5],
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: false,
+        },
+      ],
     };
-  };
-  
-  const previsao = getPrevisao();
+  }, [history]);
 
-  // Gráfico de evolução do desvio
-  const chartData = {
-    labels: history.map(h => new Date(h.created_at).toLocaleDateString('pt-BR')),
-    datasets: [
-      {
-        label: 'Desvio Percentual (%)',
-        data: history.map(h => h.desvio_percentual),
-        borderColor: '#f39c12',
-        backgroundColor: 'rgba(243, 156, 18, 0.1)',
-        fill: true,
-        tension: 0.4,
-        pointRadius: 6,
-        pointHoverRadius: 8,
-        pointBackgroundColor: history.map(h => 
-          h.desvio_percentual >= -5 && h.desvio_percentual <= 10 ? '#2ecc71' : 
-          h.desvio_percentual < -5 || h.desvio_percentual > 15 ? '#e74c3c' : '#f39c12'
-        ),
-      },
-      {
-        label: 'Limite Superior (+10%)',
-        data: history.map(() => 10),
-        borderColor: '#e74c3c',
-        borderDash: [5, 5],
-        borderWidth: 2,
-        pointRadius: 0,
-        fill: false,
-      },
-      {
-        label: 'Limite Inferior (-5%)',
-        data: history.map(() => -5),
-        borderColor: '#e74c3c',
-        borderDash: [5, 5],
-        borderWidth: 2,
-        pointRadius: 0,
-        fill: false,
-      },
-    ],
-  };
+  // Memoiza previsão (depende do histórico e do capacitor selecionado)
+  const previsao = useMemo(() => {
+    if (!selectedCapacitor || history.length < 2) return null;
+    return calcularPrevisao(history, selectedCapacitor);
+  }, [history, selectedCapacitor]);
 
-  // Previsão futura
-  const chartDataPrevisao = previsao && history.length > 0 ? {
-    labels: [
-      ...history.map(h => new Date(h.created_at).toLocaleDateString('pt-BR')),
-      'Próx 1', 'Próx 2', 'Próx 3'
-    ],
-    datasets: [
-      {
-        label: 'Histórico',
-        data: history.map(h => h.desvio_percentual),
-        borderColor: '#f39c12',
-        backgroundColor: 'rgba(243, 156, 18, 0.1)',
-        tension: 0.4,
-        pointRadius: 5,
-      },
-      {
-        label: 'Projeção',
-        data: [...history.map(() => null), ...previsao.proximos],
-        borderColor: '#3498db',
-        borderDash: [5, 5],
-        pointRadius: 4,
-        pointBackgroundColor: '#3498db',
-      },
-      {
-        label: 'Limite Crítico (15%)',
-        data: [...history.map(() => null), 15, 15, 15],
-        borderColor: '#e74c3c',
-        borderDash: [5, 5],
-        borderWidth: 2,
-        pointRadius: 0,
-      },
-    ],
-  } : null;
+  // Memoiza dados do gráfico de previsão
+  const chartDataPrevisao = useMemo(() => {
+    if (!previsao || !history.length) return null;
+    const labels = history.map(h => new Date(h.created_at).toLocaleDateString('pt-BR'));
+    const labelsFuturos = ['+3 meses', '+6 meses', '+9 meses'];
+    return {
+      labels: [...labels, ...labelsFuturos],
+      datasets: [
+        {
+          label: 'Histórico',
+          data: history.map(h => h.desvio_percentual),
+          borderColor: '#f39c12',
+          backgroundColor: 'rgba(243, 156, 18, 0.1)',
+          tension: 0.4,
+          pointRadius: 5,
+        },
+        {
+          label: 'Projeção',
+          data: [...history.map(() => null), ...previsao.proximos],
+          borderColor: '#3498db',
+          borderDash: [5, 5],
+          pointRadius: 4,
+          pointBackgroundColor: '#3498db',
+        },
+        {
+          label: 'Limite Crítico (15%)',
+          data: [...history.map(() => null), 15, 15, 15],
+          borderColor: '#e74c3c',
+          borderDash: [5, 5],
+          borderWidth: 2,
+          pointRadius: 0,
+        },
+      ],
+    };
+  }, [previsao, history]);
 
+  // Memoiza dados do gráfico de comparação
+  const comparacaoChartData = useMemo(() => {
+    if (!comparacaoCapacitores.length) return null;
+    return {
+      labels: comparacaoCapacitores.map(c => c.codigo_identificacao),
+      datasets: [
+        {
+          label: 'Último Desvio (%)',
+          data: comparacaoCapacitores.map(c => c.ultimoDesvio),
+          backgroundColor: comparacaoCapacitores.map(c => {
+            if (c.ultimoDesvio >= -5 && c.ultimoDesvio <= 10) return '#2ecc71';
+            if (c.ultimoDesvio < -5 || c.ultimoDesvio > 15) return '#e74c3c';
+            return '#f39c12';
+          }),
+          borderRadius: 8,
+        },
+      ],
+    };
+  }, [comparacaoCapacitores]);
+
+  // Cálculos de degradação
+  const firstMed = history[0];
+  const lastMed = history[history.length - 1];
+  const degradation = lastMed && firstMed ? lastMed.desvio_percentual - firstMed.desvio_percentual : 0;
+  const mesesEntre = lastMed && firstMed ? 
+    (new Date(lastMed.created_at).getTime() - new Date(firstMed.created_at).getTime()) / (1000 * 3600 * 24 * 30) : 0;
+  const degradacaoMensal = mesesEntre > 0 ? degradation / mesesEntre : 0;
+
+  // Opções dos gráficos
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -319,22 +458,6 @@ export default function GraficosPage() {
     }
   };
 
-  // Gráfico de comparação entre capacitores
-  const comparacaoChartData = {
-    labels: comparacaoCapacitores.map(c => c.codigo_identificacao),
-    datasets: [
-      {
-        label: 'Último Desvio (%)',
-        data: comparacaoCapacitores.map(c => c.ultimoDesvio),
-        backgroundColor: comparacaoCapacitores.map(c => 
-          c.ultimoDesvio >= -5 && c.ultimoDesvio <= 10 ? '#2ecc71' :
-          c.ultimoDesvio < -5 || c.ultimoDesvio > 15 ? '#e74c3c' : '#f39c12'
-        ),
-        borderRadius: 8,
-      },
-    ],
-  };
-
   const comparacaoOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -345,34 +468,15 @@ export default function GraficosPage() {
     scales: { y: { ticks: { callback: (value: any) => `${value}%` }, title: { display: true, text: 'Desvio (%)' } } }
   };
 
-  const firstMed = history[0];
-  const lastMed = history[history.length - 1];
-  const degradation = lastMed && firstMed ? lastMed.desvio_percentual - firstMed.desvio_percentual : 0;
-  const mesesEntre = lastMed && firstMed ? 
-    (new Date(lastMed.created_at).getTime() - new Date(firstMed.created_at).getTime()) / (1000 * 3600 * 24 * 30) : 0;
-  const degradacaoMensal = mesesEntre > 0 ? degradation / mesesEntre : 0;
-
   async function exportarGrafico() {
     if (!chartRef.current) return;
-    
     try {
       Swal.fire({ title: 'Exportando...', text: 'Aguarde', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-      
-      const header = document.querySelector('.pdf-header') as HTMLElement;
-      const footer = document.querySelector('.pdf-footer') as HTMLElement;
-      if (header) header.style.display = 'flex';
-      if (footer) footer.style.display = 'block';
-
       const canvas = chartRef.current.toBase64Image();
-      
-      if (header) header.style.display = 'none';
-      if (footer) footer.style.display = 'none';
-
       const link = document.createElement('a');
-      link.download = `grafico_${selectedCapacitorData?.codigo_identificacao || 'capacitor'}.png`;
+      link.download = `grafico_${selectedCapacitor?.codigo_identificacao || 'capacitor'}.png`;
       link.href = canvas;
       link.click();
-      
       Swal.close();
       Swal.fire('Sucesso!', 'Gráfico exportado como imagem', 'success');
     } catch (error) {
@@ -383,60 +487,43 @@ export default function GraficosPage() {
 
   async function downloadPDF() {
     if (!reportRef.current) return;
-
     try {
-      Swal.fire({
-        title: 'Gerando PDF...',
-        text: 'Por favor, aguarde.',
-        allowOutsideClick: false,
-        didOpen: () => {
-          Swal.showLoading();
-        }
-      });
-
+      Swal.fire({ title: 'Gerando PDF...', text: 'Por favor, aguarde.', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+      
+      // Mostrar header e footer temporariamente
       const header = reportRef.current.querySelector('.pdf-header') as HTMLElement;
       const footer = reportRef.current.querySelector('.pdf-footer') as HTMLElement;
       if (header) header.style.display = 'flex';
       if (footer) footer.style.display = 'block';
-
+      
       const dataUrl = await toPng(reportRef.current, {
         quality: 1.0,
         backgroundColor: '#ffffff',
         pixelRatio: 3,
-        style: {
-          width: '794px',
-          maxWidth: '794px',
-          padding: '48px',
-          margin: '0',
-          boxShadow: 'none'
-        }
+        style: { width: '794px', maxWidth: '794px', padding: '48px', margin: '0', boxShadow: 'none' }
       });
-
+      
       if (header) header.style.display = 'none';
       if (footer) footer.style.display = 'none';
       
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
-      
       const imgProps = pdf.getImageProperties(dataUrl);
       const contentHeight = (imgProps.height * pdfWidth) / imgProps.width;
       
       let heightLeft = contentHeight;
       let position = 0;
-
       pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, contentHeight);
       heightLeft -= pdfHeight;
-
       while (heightLeft >= 0) {
         position = heightLeft - contentHeight;
         pdf.addPage();
         pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, contentHeight);
         heightLeft -= pdfHeight;
       }
-
-      pdf.save(`Analise_Grafica_${selectedCapacitorData?.codigo_identificacao || 'capacitor'}.pdf`);
       
+      pdf.save(`Analise_Grafica_${selectedCapacitor?.codigo_identificacao || 'capacitor'}.pdf`);
       Swal.close();
       Swal.fire('Sucesso', 'Relatório exportado com sucesso!', 'success');
     } catch (error) {
@@ -464,7 +551,7 @@ export default function GraficosPage() {
         )}
       </header>
 
-      {/* Selectors */}
+      {/* Filtros */}
       <div className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
@@ -472,7 +559,7 @@ export default function GraficosPage() {
             <select 
               className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
               value={selection.cliente_id}
-              onChange={(e) => setSelection({...selection, cliente_id: e.target.value})}
+              onChange={(e) => setSelection({...selection, cliente_id: e.target.value, banco_id: ''})}
             >
               <option value="">Selecione um cliente...</option>
               {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
@@ -495,17 +582,34 @@ export default function GraficosPage() {
             <select 
               disabled={!selection.banco_id}
               className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary disabled:bg-slate-50"
-              value={selectedCapacitor}
-              onChange={(e) => setSelectedCapacitor(e.target.value)}
+              value={selectedCapacitorId}
+              onChange={(e) => setSelectedCapacitorId(e.target.value)}
             >
               <option value="">Selecione um capacitor...</option>
-              {capacitores.map(c => <option key={c.id} value={c.id}>{c.codigo_identificacao} ({c.tensao_nominal_v}V - {c.potencia_kvar}kVAr)</option>)}
+              {capacitores.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.codigo_identificacao} ({c.tensao_nominal_v}V - {c.potencia_kvar}kVAr)
+                </option>
+              ))}
             </select>
           </div>
         </div>
       </div>
 
-      {selectedCapacitor && selectedCapacitorData ? (
+      {loading && (
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-xl bg-red-50 p-6 text-red-600 border border-red-200">
+          <AlertCircle className="inline mr-2" size={20} />
+          {error}
+        </div>
+      )}
+
+      {selectedCapacitor && !loading && !error ? (
         <div className="flex justify-center overflow-x-auto pb-8">
           <div 
             id="graphics-report-container" 
@@ -513,10 +617,10 @@ export default function GraficosPage() {
             className="bg-white p-8 shadow-2xl space-y-8"
             style={{ width: '794px', minHeight: '1122px' }}
           >
-            {/* Header para o PDF */}
+            {/* Header para PDF */}
             <div className="pdf-header hidden mb-8 flex flex-row items-center justify-between border-b-4 pb-8 gap-4" style={{ borderColor: '#EAB308', backgroundColor: '#0f172a', margin: '-24px -24px 24px -24px', padding: '24px' }}>
               <div className="flex items-center gap-4">
-                <div className="rounded-2xl p-3 text-primary" style={{ backgroundColor: '#EAB308' }}>
+                <div className="rounded-2xl p-3" style={{ backgroundColor: '#EAB308' }}>
                   <Zap size={32} className="text-slate-900" />
                 </div>
                 <div>
@@ -536,28 +640,28 @@ export default function GraficosPage() {
             <div className="rounded-xl bg-gradient-to-r from-primary to-primary-light p-6 text-white shadow-sm">
               <div className="flex flex-wrap justify-between items-center gap-4">
                 <div>
-                  <h2 className="text-2xl font-bold">{selectedCapacitorData.codigo_identificacao}</h2>
-                  <p className="text-white/70">{selectedCapacitorData.bancos_capacitores?.nome_banco}</p>
+                  <h2 className="text-2xl font-bold">{selectedCapacitor.codigo_identificacao}</h2>
+                  <p className="text-white/70">{selectedCapacitor.bancos_capacitores?.nome_banco}</p>
                 </div>
                 <div className="flex gap-6">
                   <div className="text-center">
                     <p className="text-xs text-white/50">TENSÃO</p>
-                    <p className="text-xl font-bold">{selectedCapacitorData.tensao_nominal_v}V</p>
+                    <p className="text-xl font-bold">{selectedCapacitor.tensao_nominal_v}V</p>
                   </div>
                   <div className="text-center">
                     <p className="text-xs text-white/50">POTÊNCIA</p>
-                    <p className="text-xl font-bold">{selectedCapacitorData.potencia_kvar} kVAr</p>
+                    <p className="text-xl font-bold">{selectedCapacitor.potencia_kvar} kVAr</p>
                   </div>
                   <div className="text-center">
                     <p className="text-xs text-white/50">CAPACITÂNCIA</p>
-                    <p className="text-xl font-bold">{selectedCapacitorData.capacitancia_nominal_uf} µF</p>
+                    <p className="text-xl font-bold">{selectedCapacitor.capacitancia_nominal_uf} µF</p>
                   </div>
                 </div>
               </div>
             </div>
 
             <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-              {/* Main Chart */}
+              {/* Gráfico principal */}
               <div className="lg:col-span-2 rounded-xl bg-white p-6 shadow-sm border border-slate-100">
                 <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
                   <div>
@@ -573,7 +677,7 @@ export default function GraficosPage() {
                   </button>
                 </div>
                 <div className="h-[400px]">
-                  {history.length > 0 ? (
+                  {chartData ? (
                     <Line ref={chartRef} data={chartData} options={chartOptions} />
                   ) : (
                     <div className="flex h-full items-center justify-center text-slate-400">
@@ -583,7 +687,7 @@ export default function GraficosPage() {
                 </div>
               </div>
 
-              {/* Analysis Sidebar */}
+              {/* Painel lateral de análise */}
               <div className="space-y-6">
                 <section className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
                   <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-primary">
@@ -660,34 +764,34 @@ export default function GraficosPage() {
                     <h3 className="font-bold">Info do Capacitor</h3>
                   </div>
                   <div className="space-y-2 text-sm text-white/70">
-                    <p>• Tensão: {selectedCapacitorData.tensao_nominal_v}V</p>
-                    <p>• Potência: {selectedCapacitorData.potencia_kvar} kVAr</p>
-                    <p>• Capacitância: {selectedCapacitorData.capacitancia_nominal_uf} µF</p>
+                    <p>• Tensão: {selectedCapacitor.tensao_nominal_v}V</p>
+                    <p>• Potência: {selectedCapacitor.potencia_kvar} kVAr</p>
+                    <p>• Capacitância: {selectedCapacitor.capacitancia_nominal_uf} µF</p>
                     <p className="mt-3">Mantenha os testes em dia para garantir a eficiência energética do banco.</p>
                   </div>
                 </section>
               </div>
             </div>
 
-            {/* Previsão Futura */}
-            {previsao && history.length >= 3 && (
+            {/* Gráfico de projeção futura */}
+            {previsao && chartDataPrevisao && history.length >= 3 && (
               <div className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
                 <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-primary">
                   <Calendar size={20} className="text-secondary" />
                   Projeção Futura
                 </h3>
                 <div className="h-[300px]">
-                  <Line data={chartDataPrevisao!} options={chartOptions} />
+                  <Line data={chartDataPrevisao} options={chartOptions} />
                 </div>
                 <p className="mt-4 text-center text-xs text-slate-400">
-                  * Projeção baseada em regressão linear das últimas {history.length} medições. 
-                  {previsao.tendencia === 'alta' ? ' Tendência de degradação acelerada detectada.' : ' Tendência de degradação controlada.'}
+                  * Projeção baseada em regressão linear sobre o tempo real (dias). 
+                  {previsao.tendencia === 'alta' ? ' Tendência de degradação acelerada detectada.' : previsao.tendencia === 'moderada' ? ' Tendência de degradação moderada.' : ' Tendência de degradação controlada.'}
                 </p>
               </div>
             )}
 
-            {/* Comparação com outros capacitores do mesmo banco */}
-            {comparacaoCapacitores.length > 1 && (
+            {/* Gráfico de comparação */}
+            {comparacaoCapacitores.length > 1 && comparacaoChartData && (
               <div className="rounded-xl bg-white p-6 shadow-sm border border-slate-100">
                 <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-primary">
                   <BarChart3 size={20} className="text-secondary" />
@@ -702,7 +806,7 @@ export default function GraficosPage() {
               </div>
             )}
 
-            {/* Footer para o PDF */}
+            {/* Footer para PDF */}
             <div className="pdf-footer hidden mt-auto border-t-4 pt-8 text-center" style={{ borderColor: '#EAB308', backgroundColor: '#f8fafc', margin: '24px -24px -24px -24px', padding: '24px' }}>
               <p className="text-xs font-bold text-slate-700">Este documento é uma análise gráfica técnica oficial gerada pelo sistema CapacitorManager.</p>
               <p className="text-[10px] text-slate-600 mt-2 font-medium">CapacitorManager | Gestão Inteligente de Capacitores</p>
@@ -710,12 +814,13 @@ export default function GraficosPage() {
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center rounded-xl bg-white py-24 shadow-sm border border-slate-100 text-slate-400">
-          <BarChart3 size={64} className="mb-4 opacity-10" />
-          <p className="text-lg">Selecione um capacitor para visualizar os gráficos</p>
-        </div>
+        !loading && !error && (
+          <div className="flex flex-col items-center justify-center rounded-xl bg-white py-24 shadow-sm border border-slate-100 text-slate-400">
+            <BarChart3 size={64} className="mb-4 opacity-10" />
+            <p className="text-lg">Selecione um capacitor para visualizar os gráficos</p>
+          </div>
+        )
       )}
     </div>
   );
 }
-
