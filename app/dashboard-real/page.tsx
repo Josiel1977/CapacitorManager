@@ -42,8 +42,20 @@ ChartJS.register(
 );
 
 // ============================================================
-// CORREÇÃO: Dashboard agora usa os valores SALVOS no banco
+// FUNÇÃO AUXILIAR PARA FORMATAR DATA NO HORÁRIO DE BRASÍLIA
 // ============================================================
+function formatarDataLocal(dataString: string): string {
+  if (!dataString) return "";
+  let date: Date;
+  // Se a string não contém 'Z' nem offset explícito (+/-HH:MM), assume que está em UTC
+  if (!dataString.includes('Z') && !dataString.includes('+') && !dataString.includes('-', 10)) {
+    // Adiciona 'Z' para forçar interpretação como UTC
+    date = new Date(dataString + 'Z');
+  } else {
+    date = new Date(dataString);
+  }
+  return date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+}
 
 export default function DashboardReal() {
   const [stats, setStats] = useState({
@@ -100,7 +112,6 @@ export default function DashboardReal() {
         .from("capacitores")
         .select("*", { count: "exact", head: true });
 
-      // Buscar medições com relacionamentos
       const { data: medicoesData, error } = await supabase
         .from("medicoes")
         .select(
@@ -129,10 +140,7 @@ export default function DashboardReal() {
         return;
       }
 
-      // ============================================================
-      // CORREÇÃO: Para cada capacitor, pegar apenas a medição mais recente
-      // e contar o status SALVO (não recalcular)
-      // ============================================================
+      // Última medição por capacitor (sem recalcular)
       const ultimasMedicoesPorCapacitor = new Map();
       for (const med of medicoesData) {
         const capacitorId = med.capacitor_id;
@@ -145,7 +153,6 @@ export default function DashboardReal() {
 
       const medicoesRecentes = Array.from(ultimasMedicoesPorCapacitor.values());
 
-      // Contar status APENAS das medições mais recentes (usando o status salvo)
       const statusCounts = medicoesRecentes.reduce(
         (acc, curr) => {
           const status = curr.status_validacao?.toLowerCase();
@@ -158,9 +165,13 @@ export default function DashboardReal() {
       );
 
       const totalMedicoesRecentes = medicoesRecentes.length;
-      const percAprovado = totalMedicoesRecentes ? statusCounts.aprovado / totalMedicoesRecentes : 0;
+      const percAprovado = totalMedicoesRecentes
+        ? statusCounts.aprovado / totalMedicoesRecentes
+        : 0;
       const economiaEstimada = maxEconomiaMensal * percAprovado * fatorEficiencia;
-      const eficienciaGeral = totalMedicoesRecentes ? (statusCounts.aprovado / totalMedicoesRecentes) * 100 : 0;
+      const eficienciaGeral = totalMedicoesRecentes
+        ? (statusCounts.aprovado / totalMedicoesRecentes) * 100
+        : 0;
 
       setStats({
         clientes: clientesCount || 0,
@@ -174,7 +185,6 @@ export default function DashboardReal() {
         eficienciaGeral,
       });
 
-      // Para a tabela, podemos manter as últimas 5 medições (todas, não filtradas por capacitor)
       setRecentMedicoes(medicoesData.slice(0, 5));
     } catch (err) {
       console.error("Erro ao carregar estatísticas:", err);
@@ -218,11 +228,12 @@ export default function DashboardReal() {
     visible: { y: 0, opacity: 1 },
   };
 
-  const softwareMessage = stats.reprovados === 1
-    ? "⚠️ ALERTA: 1 capacitor fora do padrão! Substituição urgente recomendada para evitar multas e danos ao sistema."
-    : stats.reprovados > 1
-    ? `⚠️ ALERTA: ${stats.reprovados} capacitores fora do padrão! Substituição urgente recomendada para evitar multas e danos ao sistema.`
-    : "✅ Sistema operando normalmente. Software analisando 24/7 para manter o fator de potência ideal.";
+  const softwareMessage =
+    stats.reprovados === 1
+      ? "⚠️ ALERTA: 1 capacitor fora do padrão! Substituição urgente recomendada para evitar multas e danos ao sistema."
+      : stats.reprovados > 1
+        ? `⚠️ ALERTA: ${stats.reprovados} capacitores fora do padrão! Substituição urgente recomendada para evitar multas e danos ao sistema.`
+        : "✅ Sistema operando normalmente. Software analisando 24/7 para manter o fator de potência ideal.";
 
   return (
     <div className="space-y-8 pb-12">
@@ -309,25 +320,35 @@ export default function DashboardReal() {
             "rounded-2xl p-6 shadow-sm border",
             stats.reprovados > 0
               ? "bg-red-50 border-red-200"
-              : "bg-white border-slate-100"
+              : "bg-white border-slate-100",
           )}
         >
           <div className="flex items-center justify-between mb-4">
-            <div className={cn(
-              "rounded-xl p-3",
-              stats.reprovados > 0 ? "bg-red-100 text-red-700" : "bg-blue-50 text-blue-600"
-            )}>
+            <div
+              className={cn(
+                "rounded-xl p-3",
+                stats.reprovados > 0
+                  ? "bg-red-100 text-red-700"
+                  : "bg-blue-50 text-blue-600",
+              )}
+            >
               <Cpu size={24} />
             </div>
             <div className="flex items-center gap-1.5">
-              <div className={cn(
-                "h-2 w-2 rounded-full",
-                stats.reprovados > 0 ? "bg-red-500 animate-pulse" : "bg-blue-500 animate-ping"
-              )} />
-              <span className={cn(
-                "text-xs font-bold",
-                stats.reprovados > 0 ? "text-red-700" : "text-blue-600"
-              )}>
+              <div
+                className={cn(
+                  "h-2 w-2 rounded-full",
+                  stats.reprovados > 0
+                    ? "bg-red-500 animate-pulse"
+                    : "bg-blue-500 animate-ping",
+                )}
+              />
+              <span
+                className={cn(
+                  "text-xs font-bold",
+                  stats.reprovados > 0 ? "text-red-700" : "text-blue-600",
+                )}
+              >
                 {stats.reprovados > 0 ? "ALERTA" : "ATIVO"}
               </span>
             </div>
@@ -336,12 +357,16 @@ export default function DashboardReal() {
             Status do Sistema
           </h3>
           <p className="text-xl font-bold text-slate-900">
-            {stats.reprovados > 0 ? "Manutenção Necessária - Urgente!" : "Otimização de Custos"}
+            {stats.reprovados > 0
+              ? "Manutenção Necessária - Urgente!"
+              : "Otimização de Custos"}
           </p>
-          <p className={cn(
-            "text-xs mt-2 font-medium",
-            stats.reprovados > 0 ? "text-red-700" : "text-slate-500"
-          )}>
+          <p
+            className={cn(
+              "text-xs mt-2 font-medium",
+              stats.reprovados > 0 ? "text-red-700" : "text-slate-500",
+            )}
+          >
             {softwareMessage}
           </p>
         </motion.div>
@@ -462,9 +487,8 @@ export default function DashboardReal() {
             <tbody className="divide-y divide-slate-50">
               {recentMedicoes.map((med) => (
                 <tr key={med.id} className="text-sm text-slate-700">
-                  {/* CORREÇÃO: Adicionar {} e ajustar fuso horário */}
                   <td className="py-4">
-                    {new Date(med.created_at + 'Z').toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
+                    {formatarDataLocal(med.created_at)}
                   </td>
                   <td className="py-4 font-medium">
                     {med.clientes?.nome || "-"}
@@ -484,11 +508,13 @@ export default function DashboardReal() {
                     <span
                       className={cn(
                         "font-bold",
-                        med.desvio_percentual !== null && med.desvio_percentual > 0
+                        med.desvio_percentual !== null &&
+                          med.desvio_percentual > 0
                           ? "text-red-600"
-                          : med.desvio_percentual !== null && med.desvio_percentual < 0
+                          : med.desvio_percentual !== null &&
+                              med.desvio_percentual < 0
                             ? "text-amber-600"
-                            : "text-slate-600"
+                            : "text-slate-600",
                       )}
                     >
                       {formatDesvio(med.desvio_percentual)}
