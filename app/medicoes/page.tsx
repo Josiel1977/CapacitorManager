@@ -16,11 +16,20 @@ import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
 
 // ============================================================================
-// FUNÇÕES DE CÁLCULO
+// FUNÇÕES DE CÁLCULO COM SUPORTE À FREQUÊNCIA
 // ============================================================================
-function calcularCorrenteTeorica(potenciaKvar: number, tensao: number): number {
-  if (!tensao || tensao === 0) return 0;
-  return (potenciaKvar * 1000) / (Math.sqrt(3) * tensao);
+
+// Corrente teórica considerando ajuste de potência pela frequência
+// Q_medida = Q_nominal * (f_medida / f_nominal)
+function calcularCorrenteTeoricaComFrequencia(
+  potenciaKvarNominal: number,
+  frequenciaNominal: number,
+  tensaoMedida: number,
+  frequenciaMedida: number,
+): number {
+  if (!tensaoMedida || tensaoMedida === 0) return 0;
+  const potenciaAjustada = potenciaKvarNominal * (frequenciaMedida / frequenciaNominal);
+  return (potenciaAjustada * 1000) / (Math.sqrt(3) * tensaoMedida);
 }
 
 function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
@@ -60,7 +69,6 @@ function parseNumber(value: string): number {
   const str = value.replace(',', '.');
   const num = parseFloat(str);
   if (isNaN(num)) return 0;
-  // Não permite valores negativos em medições
   return Math.max(0, num);
 }
 
@@ -96,10 +104,12 @@ function ValidarCapacitoresContent() {
     tipo_teste: 'corrente' as 'corrente' | 'capacitancia',
   });
 
+  // Adicionado campo frequência_medida_hz no estado
   const [medicao, setMedicao] = useState({
     tensao_medida_v: '',
     corrente_medida_a: '',
     capacitancia_medida_uf: '',
+    frequencia_medida_hz: 60, // padrão Brasil
   });
 
   const [resultado, setResultado] = useState<any>(null);
@@ -117,13 +127,12 @@ function ValidarCapacitoresContent() {
         if (data) setConfig(data);
       } catch (err) {
         console.error('Erro ao carregar config:', err);
-        // Mantém configuração padrão
       }
     }
     fetchConfig();
   }, []);
 
-  // Quando o usuário é carregado, define se é admin e busca o tenant_id
+  // Autenticação e tenant
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
@@ -136,7 +145,6 @@ function ValidarCapacitoresContent() {
       'eng.eletrica1977@gmail.com',
     ];
     const isUserAdmin = adminEmails.includes(user.email || '');
-    console.log('🔍 Usuário logado:', user.email, 'isAdmin:', isUserAdmin);
     setIsAdmin(isUserAdmin);
 
     if (!isUserAdmin) {
@@ -158,7 +166,7 @@ function ValidarCapacitoresContent() {
     }
   }, [user, authLoading, router]);
 
-  // Carrega clientes (corrigido com logs e loading)
+  // Carrega clientes
   useEffect(() => {
     if (authLoading) return;
     if (!user) return;
@@ -172,37 +180,26 @@ function ValidarCapacitoresContent() {
           query = query.eq('tenant_id', userTenantId);
         }
         const { data, error } = await query.order('nome');
-        if (error) {
-          console.error('❌ Erro ao buscar clientes:', error);
-          Swal.fire('Erro', 'Não foi possível carregar a lista de clientes.', 'error');
-          setClientes([]);
-        } else {
-          console.log(`✅ Clientes carregados: ${data?.length || 0}`);
-          setClientes(data || []);
-          if (!data || data.length === 0) {
-            Swal.fire('Aviso', 'Nenhum cliente ativo encontrado. Cadastre um cliente primeiro.', 'warning');
-          }
-        }
+        if (error) throw error;
+        setClientes(data || []);
       } catch (err) {
-        console.error('❌ Erro inesperado:', err);
-        Swal.fire('Erro', 'Erro ao carregar clientes.', 'error');
+        console.error(err);
+        Swal.fire('Erro', 'Não foi possível carregar os clientes.', 'error');
         setClientes([]);
       } finally {
         setLoadingClientes(false);
       }
     };
-
     fetchClientes();
   }, [isAdmin, userTenantId, user, authLoading]);
 
-  // PRÉ-SELEÇÃO AUTOMÁTICA: se usuário comum tem apenas um cliente, já seleciona
+  // Pré-seleção único cliente
   useEffect(() => {
     if (!isAdmin && clientes.length === 1 && !selection.cliente_id) {
       setSelection(prev => ({ ...prev, cliente_id: clientes[0].id }));
     }
   }, [clientes, isAdmin, selection.cliente_id]);
 
-  // Funções para buscar bancos e capacitores
   async function fetchBancos(clienteId: string) {
     const { data } = await supabase
       .from('bancos_capacitores')
@@ -230,12 +227,9 @@ function ValidarCapacitoresContent() {
         .select('*, bancos_capacitores(cliente_id)')
         .eq('id', capacitorId)
         .single();
-
       if (error || !cap) throw new Error('Capacitor não encontrado');
-
       const clienteId = cap.bancos_capacitores?.cliente_id;
       const bancoId = cap.banco_id;
-
       if (clienteId) {
         await fetchBancos(clienteId);
         setSelection((prev) => ({
@@ -252,14 +246,12 @@ function ValidarCapacitoresContent() {
     }
   }
 
-  // Pré-seleciona capacitor via parâmetro URL
   useEffect(() => {
     if (capacitorIdParam && !authLoading && user) {
       buscarEPreSelecionarCapacitor(capacitorIdParam);
     }
   }, [capacitorIdParam, authLoading, user]);
 
-  // Efeitos para carregar bancos/capacitores quando seleção mudar
   useEffect(() => {
     if (selection.cliente_id) {
       fetchBancos(selection.cliente_id);
@@ -278,7 +270,6 @@ function ValidarCapacitoresContent() {
     }
   }, [selection.banco_id]);
 
-  // Reset resultado ao mudar seleção ou medição
   useEffect(() => {
     setResultado(null);
   }, [selection, medicao]);
@@ -298,6 +289,7 @@ function ValidarCapacitoresContent() {
     if (selection.tipo_teste === 'corrente') {
       const vMedida = parseNumber(medicao.tensao_medida_v);
       const iMedida = parseNumber(medicao.corrente_medida_a);
+      const freqMedida = medicao.frequencia_medida_hz || 60;
 
       if (vMedida === 0) {
         Swal.fire('Erro', 'Preencha a tensão medida', 'error');
@@ -308,10 +300,20 @@ function ValidarCapacitoresContent() {
         return;
       }
 
-      const correnteTeorica = calcularCorrenteTeorica(cap.potencia_kvar, vMedida);
-      const correnteNominal = calcularCorrenteTeorica(
+      // Frequência nominal do capacitor (se não tiver no banco, assume 60)
+      const freqNominal = cap.frequencia_hz || 60;
+
+      const correnteTeorica = calcularCorrenteTeoricaComFrequencia(
         cap.potencia_kvar,
+        freqNominal,
+        vMedida,
+        freqMedida,
+      );
+      const correnteNominal = calcularCorrenteTeoricaComFrequencia(
+        cap.potencia_kvar,
+        freqNominal,
         cap.tensao_nominal_v,
+        freqNominal,
       );
       const desvio = calcularDesvio(iMedida, correnteTeorica);
       const status = getStatusValidacao(desvio, config);
@@ -325,6 +327,8 @@ function ValidarCapacitoresContent() {
         desvio: Math.round(desvio * 100) / 100,
         desvioOriginal: desvio,
         status,
+        freqNominal,
+        freqMedida,
       });
     } else {
       const cMedida = parseNumber(medicao.capacitancia_medida_uf);
@@ -332,10 +336,7 @@ function ValidarCapacitoresContent() {
         Swal.fire('Erro', 'Preencha a capacitância medida', 'error');
         return;
       }
-
-      const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(
-        cap.capacitancia_nominal_uf,
-      );
+      const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(cap.capacitancia_nominal_uf);
       const desvio = calcularDesvio(cMedida, capacitanciaTeorica);
       const status = getStatusValidacao(desvio, config);
 
@@ -370,17 +371,13 @@ function ValidarCapacitoresContent() {
         .eq('id', selection.cliente_id)
         .single();
       if (errCliente || !cliente?.tenant_id) {
-        Swal.fire('Erro', 'Cliente não possui um tenant associado. Contate o administrador.', 'error');
+        Swal.fire('Erro', 'Cliente não possui um tenant associado.', 'error');
         return;
       }
       tenantIdParaSalvar = cliente.tenant_id;
     } else {
       if (!userTenantId) {
-        Swal.fire('Erro', 'Seu usuário não está associado a um tenant. Contate o administrador.', 'error');
-        return;
-      }
-      if (selection.cliente_id && selection.cliente_id !== userTenantId) {
-        Swal.fire('Erro', 'Você só pode salvar medições para o cliente associado à sua conta.', 'error');
+        Swal.fire('Erro', 'Seu usuário não está associado a um tenant.', 'error');
         return;
       }
       tenantIdParaSalvar = userTenantId;
@@ -400,7 +397,6 @@ function ValidarCapacitoresContent() {
         tipo_teste: selection.tipo_teste,
         desvio_percentual: resultado.desvioOriginal,
         status_validacao: resultado.status,
-        // created_at será preenchido automaticamente pelo Supabase (default now())
       };
 
       if (selection.tipo_teste === 'corrente') {
@@ -421,6 +417,7 @@ function ValidarCapacitoresContent() {
         tensao_medida_v: '',
         corrente_medida_a: '',
         capacitancia_medida_uf: '',
+        frequencia_medida_hz: 60,
       });
       if (!capacitorIdParam && !isAdmin) {
         setSelection((prev) => ({ ...prev, capacitor_id: '' }));
@@ -514,11 +511,6 @@ function ValidarCapacitoresContent() {
                     </option>
                   ))}
                 </select>
-                {!isAdmin && userTenantId && (
-                  <p className="text-xs text-slate-400 mt-1">
-                    Você está vinculado ao cliente ID {userTenantId}
-                  </p>
-                )}
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -614,7 +606,7 @@ function ValidarCapacitoresContent() {
                       type="number"
                       step="0.01"
                       min="0"
-                      placeholder="Ex: 220"
+                      placeholder="Ex: 380"
                       className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                       value={medicao.tensao_medida_v}
                       onChange={(e) =>
@@ -633,7 +625,7 @@ function ValidarCapacitoresContent() {
                       type="number"
                       step="0.01"
                       min="0"
-                      placeholder="Ex: 6.56"
+                      placeholder="Ex: 11.5"
                       className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                       value={medicao.corrente_medida_a}
                       onChange={(e) =>
@@ -643,6 +635,24 @@ function ValidarCapacitoresContent() {
                         })
                       }
                     />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-sm font-medium text-slate-700">
+                      Frequência da rede (Hz)
+                    </label>
+                    <select
+                      className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
+                      value={medicao.frequencia_medida_hz}
+                      onChange={(e) =>
+                        setMedicao({ ...medicao, frequencia_medida_hz: Number(e.target.value) })
+                      }
+                    >
+                      <option value={50}>50 Hz</option>
+                      <option value={60}>60 Hz (padrão Brasil)</option>
+                    </select>
+                    <p className="mt-1 text-xs text-slate-400">
+                      ⚠️ A corrente teórica será corrigida automaticamente conforme a frequência.
+                    </p>
                   </div>
                 </>
               ) : (
@@ -654,7 +664,7 @@ function ValidarCapacitoresContent() {
                     type="number"
                     step="0.01"
                     min="0"
-                    placeholder="Ex: 68.55"
+                    placeholder="Ex: 68.85"
                     className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-primary"
                     value={medicao.capacitancia_medida_uf}
                     onChange={(e) =>
@@ -758,7 +768,7 @@ function ValidarCapacitoresContent() {
                             Corrente Nominal (
                             {capacitores.find((c) => c.id === selection.capacitor_id)
                               ?.tensao_nominal_v || '?'}
-                            V):
+                            V / {resultado.freqNominal}Hz):
                           </span>
                           <span className="font-medium text-primary">
                             {resultado.correnteNominal?.toFixed(2)} A
@@ -766,7 +776,7 @@ function ValidarCapacitoresContent() {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-500">
-                            Corrente Teórica ({resultado.tensaoMedida}V):
+                            Corrente Teórica ({resultado.tensaoMedida}V / {resultado.freqMedida}Hz):
                           </span>
                           <span className="font-medium text-primary">
                             {resultado.correnteTeorica?.toFixed(2)} A
@@ -780,6 +790,12 @@ function ValidarCapacitoresContent() {
                             {resultado.correnteMedida?.toFixed(2)} A
                           </span>
                         </div>
+                        {resultado.freqNominal !== resultado.freqMedida && (
+                          <div className="flex justify-between text-xs text-slate-400">
+                            <span>Observação:</span>
+                            <span>Potência ajustada de {resultado.freqNominal}Hz para {resultado.freqMedida}Hz</span>
+                          </div>
+                        )}
                       </>
                     ) : (
                       <>
