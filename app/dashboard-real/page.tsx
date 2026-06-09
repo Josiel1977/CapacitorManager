@@ -41,20 +41,9 @@ ChartJS.register(
   ArcElement,
 );
 
-// Funções de cálculo
-function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
-  if (!tensaoNominal || tensaoNominal === 0) return 0;
-  return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
-}
-function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
-  return capacitanciaNominalFase * 1.5;
-}
-function getStatusValidacao(desvio: number): string {
-  if (desvio >= -5 && desvio <= 10) return "aprovado";
-  if (desvio >= -10 && desvio < -5) return "atencao";
-  if (desvio > 10 && desvio <= 15) return "atencao";
-  return "reprovado";
-}
+// ============================================================
+// CORREÇÃO: Dashboard agora usa os valores SALVOS no banco
+// ============================================================
 
 export default function DashboardReal() {
   const [stats, setStats] = useState({
@@ -98,43 +87,6 @@ export default function DashboardReal() {
     }
   }
 
-  async function recalcularMedicao(med: any) {
-    let desvio = med.desvio_percentual;
-    let status = med.status_validacao;
-    let capacitor = med.capacitores;
-    if (!capacitor && med.capacitor_id) {
-      const { data } = await supabase
-        .from("capacitores")
-        .select("*")
-        .eq("id", med.capacitor_id)
-        .single();
-      capacitor = data;
-    }
-    if (capacitor) {
-      const tensao = capacitor.tensao_nominal_v;
-      if (med.tipo_teste === "corrente" && med.corrente_medida_a) {
-        const teorico = calcularCorrenteTeorica(capacitor.potencia_kvar, tensao);
-        if (teorico > 0) {
-          desvio = ((med.corrente_medida_a - teorico) / teorico) * 100;
-          status = getStatusValidacao(desvio);
-        }
-      } else if (med.tipo_teste === "capacitancia" && med.capacitancia_medida_uf) {
-        const teorico = calcularCapacitanciaTeoricaDelta(capacitor.capacitancia_nominal_uf);
-        if (teorico > 0) {
-          desvio = ((med.capacitancia_medida_uf - teorico) / teorico) * 100;
-          status = getStatusValidacao(desvio);
-        }
-      }
-    }
-    return {
-      ...med,
-      desvio_percentual: desvio,
-      status_validacao: status,
-      tensao_capacitor: capacitor?.tensao_nominal_v,
-      capacitor,
-    };
-  }
-
   async function fetchStats() {
     try {
       setLoading(true);
@@ -147,12 +99,18 @@ export default function DashboardReal() {
       const { count: capacitoresCount } = await supabase
         .from("capacitores")
         .select("*", { count: "exact", head: true });
-      const { data: medicoesData } = await supabase
+
+      // Buscar medições com relacionamentos
+      const { data: medicoesData, error } = await supabase
         .from("medicoes")
         .select(
-          `*, capacitores!inner(id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v), clientes(id, nome)`,
+          `*, 
+           capacitores!inner(id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v), 
+           clientes(id, nome)`
         )
         .order("created_at", { ascending: false });
+
+      if (error) throw error;
 
       if (!medicoesData || medicoesData.length === 0) {
         setStats({
@@ -171,36 +129,55 @@ export default function DashboardReal() {
         return;
       }
 
-      const processed = await Promise.all(medicoesData.map(recalcularMedicao));
-      const statusCounts = processed.reduce(
-        (acc: any, curr: any) => {
-          acc[curr.status_validacao] = (acc[curr.status_validacao] || 0) + 1;
+      // ============================================================
+      // CORREÇÃO: Para cada capacitor, pegar apenas a medição mais recente
+      // e contar o status SALVO (não recalcular)
+      // ============================================================
+      const ultimasMedicoesPorCapacitor = new Map();
+      for (const med of medicoesData) {
+        const capacitorId = med.capacitor_id;
+        const dataAtual = new Date(med.created_at);
+        const existente = ultimasMedicoesPorCapacitor.get(capacitorId);
+        if (!existente || new Date(existente.created_at) < dataAtual) {
+          ultimasMedicoesPorCapacitor.set(capacitorId, med);
+        }
+      }
+
+      const medicoesRecentes = Array.from(ultimasMedicoesPorCapacitor.values());
+
+      // Contar status APENAS das medições mais recentes (usando o status salvo)
+      const statusCounts = medicoesRecentes.reduce(
+        (acc, curr) => {
+          const status = curr.status_validacao?.toLowerCase();
+          if (status === "aprovado") acc.aprovado++;
+          else if (status === "atencao") acc.atencao++;
+          else if (status === "reprovado") acc.reprovado++;
           return acc;
         },
-        { aprovado: 0, atencao: 0, reprovado: 0 },
+        { aprovado: 0, atencao: 0, reprovado: 0 }
       );
 
-      const totalMedicoes = processed.length;
-      const percAprovado = totalMedicoes ? statusCounts.aprovado / totalMedicoes : 0;
-
+      const totalMedicoesRecentes = medicoesRecentes.length;
+      const percAprovado = totalMedicoesRecentes ? statusCounts.aprovado / totalMedicoesRecentes : 0;
       const economiaEstimada = maxEconomiaMensal * percAprovado * fatorEficiencia;
-
-      const eficienciaGeral = totalMedicoes ? (statusCounts.aprovado / totalMedicoes) * 100 : 0;
+      const eficienciaGeral = totalMedicoesRecentes ? (statusCounts.aprovado / totalMedicoesRecentes) * 100 : 0;
 
       setStats({
         clientes: clientesCount || 0,
         bancos: bancosCount || 0,
         capacitores: capacitoresCount || 0,
-        medicoes: totalMedicoes,
+        medicoes: totalMedicoesRecentes,
         aprovados: statusCounts.aprovado,
         atencao: statusCounts.atencao,
         reprovados: statusCounts.reprovado,
         economiaTotal: economiaEstimada,
         eficienciaGeral,
       });
-      setRecentMedicoes(processed.slice(0, 5));
+
+      // Para a tabela, podemos manter as últimas 5 medições (todas, não filtradas por capacitor)
+      setRecentMedicoes(medicoesData.slice(0, 5));
     } catch (err) {
-      console.error(err);
+      console.error("Erro ao carregar estatísticas:", err);
     } finally {
       setLoading(false);
     }
@@ -241,7 +218,6 @@ export default function DashboardReal() {
     visible: { y: 0, opacity: 1 },
   };
 
-  // Mensagem enfática para capacitores reprovados
   const softwareMessage = stats.reprovados === 1
     ? "⚠️ ALERTA: 1 capacitor fora do padrão! Substituição urgente recomendada para evitar multas e danos ao sistema."
     : stats.reprovados > 1
@@ -486,8 +462,9 @@ export default function DashboardReal() {
             <tbody className="divide-y divide-slate-50">
               {recentMedicoes.map((med) => (
                 <tr key={med.id} className="text-sm text-slate-700">
+                  {/* CORREÇÃO: Adicionar {} e ajustar fuso horário */}
                   <td className="py-4">
-                    new Date(med.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+                    {new Date(med.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
                   </td>
                   <td className="py-4 font-medium">
                     {med.clientes?.nome || "-"}
@@ -497,11 +474,7 @@ export default function DashboardReal() {
                   </td>
                   <td className="py-4">
                     <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full">
-                      ⚡{" "}
-                      {med.tensao_capacitor ||
-                        med.capacitores?.tensao_nominal_v ||
-                        "?"}
-                      V
+                      ⚡ {med.capacitores?.tensao_nominal_v || "?"} V
                     </span>
                   </td>
                   <td className="py-4 capitalize">
@@ -511,13 +484,11 @@ export default function DashboardReal() {
                     <span
                       className={cn(
                         "font-bold",
-                        med.desvio_percentual !== null &&
-                          med.desvio_percentual > 0
+                        med.desvio_percentual !== null && med.desvio_percentual > 0
                           ? "text-red-600"
-                          : med.desvio_percentual !== null &&
-                              med.desvio_percentual < 0
+                          : med.desvio_percentual !== null && med.desvio_percentual < 0
                             ? "text-amber-600"
-                            : "text-slate-600",
+                            : "text-slate-600"
                       )}
                     >
                       {formatDesvio(med.desvio_percentual)}
