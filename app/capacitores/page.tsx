@@ -2,14 +2,13 @@
 
 import React, { useEffect, useState, Suspense } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { Plus, Search, Edit2, Trash2, X, Save, Zap, ChevronDown, Eye, ArrowLeft, Loader2 } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, X, Save, Zap, ChevronDown, ArrowLeft, Loader2, Filter } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseNumber, cn } from '@/lib/utils';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/AuthContext';
 
-// Componente que usa useSearchParams (precisa de Suspense)
 function CapacitoresContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -29,6 +28,7 @@ function CapacitoresContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCapacitor, setEditingCapacitor] = useState<any>(null);
   const [bancoSelecionadoInfo, setBancoSelecionadoInfo] = useState<any>(null);
+  const [mostrarNaoMedidos, setMostrarNaoMedidos] = useState(false);
   const [formData, setFormData] = useState({
     banco_id: '',
     codigo_identificacao: '',
@@ -40,7 +40,6 @@ function CapacitoresContent() {
     modelo: '',
   });
 
-  // Detecta admin e tenant do usuário
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
@@ -78,7 +77,7 @@ function CapacitoresContent() {
   useEffect(() => {
     if (loadingInitial) return;
     fetchData();
-  }, [loadingInitial, bancoFiltro]);
+  }, [loadingInitial, bancoFiltro, mostrarNaoMedidos]);
 
   useEffect(() => {
     if (bancoIdFromUrl) {
@@ -100,7 +99,6 @@ function CapacitoresContent() {
     try {
       setLoading(true);
       
-      // Buscar bancos (com filtro de tenant se não admin)
       let bancosQuery = supabase
         .from('bancos_capacitores')
         .select('*, clientes(id, nome)')
@@ -112,7 +110,6 @@ function CapacitoresContent() {
       if (bancosError) throw bancosError;
       setBancos(bancosData || []);
 
-      // Buscar capacitores
       let capacitoresQuery = supabase
         .from('capacitores')
         .select('*, bancos_capacitores(*, clientes(id, nome))')
@@ -122,9 +119,24 @@ function CapacitoresContent() {
       }
       const { data: capacitoresData, error: capacitoresError } = await capacitoresQuery.order('codigo_identificacao');
       if (capacitoresError) throw capacitoresError;
-      setCapacitores(capacitoresData || []);
 
-      // Buscar clientes (apenas para exibição, não usado em filtro)
+      // Buscar quais capacitores possuem medição
+      const { data: medicoesData } = await supabase
+        .from('medicoes')
+        .select('capacitor_id');
+      const capacitoresComMedicao = new Set(medicoesData?.map(m => m.capacitor_id) || []);
+
+      let capacitoresComStatus = (capacitoresData || []).map(cap => ({
+        ...cap,
+        temMedicao: capacitoresComMedicao.has(cap.id)
+      }));
+
+      if (mostrarNaoMedidos) {
+        capacitoresComStatus = capacitoresComStatus.filter(cap => !cap.temMedicao);
+      }
+
+      setCapacitores(capacitoresComStatus);
+
       let clientesQuery = supabase.from('clientes').select('id, nome').eq('ativo', true);
       if (!isAdmin && userTenantId) {
         clientesQuery = clientesQuery.eq('tenant_id', userTenantId);
@@ -153,6 +165,7 @@ function CapacitoresContent() {
   const stats = {
     total: filteredCapacitores.length,
     totalPotencia: filteredCapacitores.reduce((acc, cap) => acc + (parseFloat(cap.potencia_kvar) || 0), 0),
+    naoMedidos: capacitores.filter(c => !c.temMedicao).length,
   };
 
   function handleOpenModal(capacitor: any = null) {
@@ -193,7 +206,6 @@ function CapacitoresContent() {
     }
     
     try {
-      // Obter o tenant_id do banco selecionado (obrigatório para a trigger)
       const { data: banco, error: bancoError } = await supabase
         .from('bancos_capacitores')
         .select('tenant_id')
@@ -213,7 +225,7 @@ function CapacitoresContent() {
         data_instalacao: formData.data_instalacao || null,
         fabricante: formData.fabricante || null,
         modelo: formData.modelo || null,
-        tenant_id: tenantId,   // 🔥 CAMPO OBRIGATÓRIO
+        tenant_id: tenantId,
         ativo: true,
       };
 
@@ -287,8 +299,6 @@ function CapacitoresContent() {
     router.push('/bancos');
   }
 
-  const bancoSelecionado = bancos.find(b => b.id === bancoFiltro);
-
   if (authLoading || loadingInitial) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -315,16 +325,29 @@ function CapacitoresContent() {
           <h1 className="text-3xl font-bold text-primary">Capacitores</h1>
           <p className="text-slate-500">Gerencie os capacitores dos bancos</p>
         </div>
-        <button 
-          onClick={() => handleOpenModal()}
-          className="flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-white transition-colors hover:bg-primary/90"
-        >
-          <Plus size={20} />
-          Novo Capacitor
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setMostrarNaoMedidos(!mostrarNaoMedidos)}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-4 py-2 transition-colors",
+              mostrarNaoMedidos 
+                ? "bg-amber-100 text-amber-700 border border-amber-300" 
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            )}
+          >
+            <Filter size={18} />
+            {mostrarNaoMedidos ? "Mostrando não medidos" : "Filtrar não medidos"}
+          </button>
+          <button 
+            onClick={() => handleOpenModal()}
+            className="flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-white transition-colors hover:bg-primary/90"
+          >
+            <Plus size={20} />
+            Novo Capacitor
+          </button>
+        </div>
       </header>
 
-      {/* Banner do Banco Selecionado */}
       {bancoSelecionadoInfo && (
         <div className="bg-gradient-to-r from-primary/10 to-secondary/10 rounded-2xl p-5 border border-primary/20">
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -347,7 +370,6 @@ function CapacitoresContent() {
         </div>
       )}
 
-      {/* Filtros */}
       <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-100">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           <div className="lg:col-span-4">
@@ -395,19 +417,24 @@ function CapacitoresContent() {
               <p className="text-xs text-slate-500">Potência Total</p>
               <p className="text-lg font-bold text-primary">{stats.totalPotencia.toFixed(0)} kVAr</p>
               <p className="text-[10px] text-slate-400">{stats.total} capacitor(es)</p>
+              {stats.naoMedidos > 0 && (
+                <p className="text-[10px] text-amber-600 mt-1">⚠️ {stats.naoMedidos} sem medição</p>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Grid de Capacitores */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
         {filteredCapacitores.map((capacitor) => (
           <motion.div 
             key={capacitor.id}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="group relative rounded-xl bg-white p-6 shadow-sm border border-slate-100 transition-all hover:shadow-md"
+            className={cn(
+              "group relative rounded-xl p-6 shadow-sm border transition-all hover:shadow-md",
+              !capacitor.temMedicao ? "bg-amber-50/30 border-amber-200" : "bg-white border-slate-100"
+            )}
           >
             <div className="mb-4 flex items-start justify-between">
               <div className="rounded-lg bg-primary/10 p-2 text-primary">
@@ -455,12 +482,26 @@ function CapacitoresContent() {
               )}
             </div>
 
-            <button 
-              onClick={() => router.push(`/medicoes?capacitor_id=${capacitor.id}`)}
-              className="mt-5 w-full text-center text-xs text-primary hover:underline"
-            >
-              Ver medições →
-            </button>
+            {!capacitor.temMedicao ? (
+              <div className="mt-4">
+                <span className="text-xs bg-amber-200 text-amber-800 px-2 py-1 rounded-full inline-flex items-center gap-1">
+                  ⚠️ Sem medição
+                </span>
+                <button 
+                  onClick={() => router.push(`/Validar-Capacitores?capacitor_id=${capacitor.id}`)}
+                  className="mt-2 w-full text-center text-xs text-primary hover:underline"
+                >
+                  + Realizar primeira medição →
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={() => router.push(`/medicoes?capacitor_id=${capacitor.id}`)}
+                className="mt-5 w-full text-center text-xs text-primary hover:underline"
+              >
+                Ver medições →
+              </button>
+            )}
           </motion.div>
         ))}
       </div>
@@ -469,16 +510,24 @@ function CapacitoresContent() {
         <div className="py-12 text-center text-slate-400 bg-white rounded-xl border border-slate-100">
           <Zap size={48} className="mx-auto mb-3 opacity-50" />
           <p>Nenhum capacitor encontrado</p>
-          <button 
-            onClick={() => handleOpenModal()}
-            className="mt-2 text-primary hover:underline"
-          >
-            + Cadastrar primeiro capacitor
-          </button>
+          {mostrarNaoMedidos ? (
+            <button 
+              onClick={() => setMostrarNaoMedidos(false)}
+              className="mt-2 text-primary hover:underline"
+            >
+              Limpar filtro de não medidos
+            </button>
+          ) : (
+            <button 
+              onClick={() => handleOpenModal()}
+              className="mt-2 text-primary hover:underline"
+            >
+              + Cadastrar primeiro capacitor
+            </button>
+          )}
         </div>
       )}
 
-      {/* Modal */}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -639,7 +688,6 @@ function CapacitoresContent() {
   );
 }
 
-// Componente principal com Suspense
 export default function CapacitoresPage() {
   return (
     <Suspense fallback={
