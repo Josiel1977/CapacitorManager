@@ -464,7 +464,7 @@ export default function DashboardReal() {
                 <tr key={med.id} className="text-sm text-slate-700">
                   {/* CORREÇÃO: Adicionar {} e ajustar fuso horário */}
                   <td className="py-4">
-                    {new Date(med.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
+                    {new Date(med.created_at + 'Z').toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
                   </td>
                   <td className="py-4 font-medium">
                     {med.clientes?.nome || "-"}
