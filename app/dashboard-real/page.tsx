@@ -41,20 +41,19 @@ ChartJS.register(
   ArcElement,
 );
 
-// ============================================================
-// FUNÇÃO AUXILIAR PARA FORMATAR DATA NO HORÁRIO DE BRASÍLIA
-// ============================================================
-function formatarDataLocal(dataString: string): string {
-  if (!dataString) return "";
-  let date: Date;
-  // Se a string não contém 'Z' nem offset explícito (+/-HH:MM), assume que está em UTC
-  if (!dataString.includes('Z') && !dataString.includes('+') && !dataString.includes('-', 10)) {
-    // Adiciona 'Z' para forçar interpretação como UTC
-    date = new Date(dataString + 'Z');
-  } else {
-    date = new Date(dataString);
-  }
-  return date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+// Funções de cálculo
+function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
+  if (!tensaoNominal || tensaoNominal === 0) return 0;
+  return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
+}
+function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
+  return capacitanciaNominalFase * 1.5;
+}
+function getStatusValidacao(desvio: number): string {
+  if (desvio >= -5 && desvio <= 10) return "aprovado";
+  if (desvio >= -10 && desvio < -5) return "atencao";
+  if (desvio > 10 && desvio <= 15) return "atencao";
+  return "reprovado";
 }
 
 export default function DashboardReal() {
@@ -99,6 +98,43 @@ export default function DashboardReal() {
     }
   }
 
+  async function recalcularMedicao(med: any) {
+    let desvio = med.desvio_percentual;
+    let status = med.status_validacao;
+    let capacitor = med.capacitores;
+    if (!capacitor && med.capacitor_id) {
+      const { data } = await supabase
+        .from("capacitores")
+        .select("*")
+        .eq("id", med.capacitor_id)
+        .single();
+      capacitor = data;
+    }
+    if (capacitor) {
+      const tensao = capacitor.tensao_nominal_v;
+      if (med.tipo_teste === "corrente" && med.corrente_medida_a) {
+        const teorico = calcularCorrenteTeorica(capacitor.potencia_kvar, tensao);
+        if (teorico > 0) {
+          desvio = ((med.corrente_medida_a - teorico) / teorico) * 100;
+          status = getStatusValidacao(desvio);
+        }
+      } else if (med.tipo_teste === "capacitancia" && med.capacitancia_medida_uf) {
+        const teorico = calcularCapacitanciaTeoricaDelta(capacitor.capacitancia_nominal_uf);
+        if (teorico > 0) {
+          desvio = ((med.capacitancia_medida_uf - teorico) / teorico) * 100;
+          status = getStatusValidacao(desvio);
+        }
+      }
+    }
+    return {
+      ...med,
+      desvio_percentual: desvio,
+      status_validacao: status,
+      tensao_capacitor: capacitor?.tensao_nominal_v,
+      capacitor,
+    };
+  }
+
   async function fetchStats() {
     try {
       setLoading(true);
@@ -111,17 +147,12 @@ export default function DashboardReal() {
       const { count: capacitoresCount } = await supabase
         .from("capacitores")
         .select("*", { count: "exact", head: true });
-
-      const { data: medicoesData, error } = await supabase
+      const { data: medicoesData } = await supabase
         .from("medicoes")
         .select(
-          `*, 
-           capacitores!inner(id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v), 
-           clientes(id, nome)`
+          `*, capacitores!inner(id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v), clientes(id, nome)`,
         )
         .order("created_at", { ascending: false });
-
-      if (error) throw error;
 
       if (!medicoesData || medicoesData.length === 0) {
         setStats({
@@ -140,54 +171,36 @@ export default function DashboardReal() {
         return;
       }
 
-      // Última medição por capacitor (sem recalcular)
-      const ultimasMedicoesPorCapacitor = new Map();
-      for (const med of medicoesData) {
-        const capacitorId = med.capacitor_id;
-        const dataAtual = new Date(med.created_at);
-        const existente = ultimasMedicoesPorCapacitor.get(capacitorId);
-        if (!existente || new Date(existente.created_at) < dataAtual) {
-          ultimasMedicoesPorCapacitor.set(capacitorId, med);
-        }
-      }
-
-      const medicoesRecentes = Array.from(ultimasMedicoesPorCapacitor.values());
-
-      const statusCounts = medicoesRecentes.reduce(
-        (acc, curr) => {
-          const status = curr.status_validacao?.toLowerCase();
-          if (status === "aprovado") acc.aprovado++;
-          else if (status === "atencao") acc.atencao++;
-          else if (status === "reprovado") acc.reprovado++;
+      const processed = await Promise.all(medicoesData.map(recalcularMedicao));
+      const statusCounts = processed.reduce(
+        (acc: any, curr: any) => {
+          acc[curr.status_validacao] = (acc[curr.status_validacao] || 0) + 1;
           return acc;
         },
-        { aprovado: 0, atencao: 0, reprovado: 0 }
+        { aprovado: 0, atencao: 0, reprovado: 0 },
       );
 
-      const totalMedicoesRecentes = medicoesRecentes.length;
-      const percAprovado = totalMedicoesRecentes
-        ? statusCounts.aprovado / totalMedicoesRecentes
-        : 0;
+      const totalMedicoes = processed.length;
+      const percAprovado = totalMedicoes ? statusCounts.aprovado / totalMedicoes : 0;
+
       const economiaEstimada = maxEconomiaMensal * percAprovado * fatorEficiencia;
-      const eficienciaGeral = totalMedicoesRecentes
-        ? (statusCounts.aprovado / totalMedicoesRecentes) * 100
-        : 0;
+
+      const eficienciaGeral = totalMedicoes ? (statusCounts.aprovado / totalMedicoes) * 100 : 0;
 
       setStats({
         clientes: clientesCount || 0,
         bancos: bancosCount || 0,
         capacitores: capacitoresCount || 0,
-        medicoes: totalMedicoesRecentes,
+        medicoes: totalMedicoes,
         aprovados: statusCounts.aprovado,
         atencao: statusCounts.atencao,
         reprovados: statusCounts.reprovado,
         economiaTotal: economiaEstimada,
         eficienciaGeral,
       });
-
-      setRecentMedicoes(medicoesData.slice(0, 5));
+      setRecentMedicoes(processed.slice(0, 5));
     } catch (err) {
-      console.error("Erro ao carregar estatísticas:", err);
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -228,12 +241,12 @@ export default function DashboardReal() {
     visible: { y: 0, opacity: 1 },
   };
 
-  const softwareMessage =
-    stats.reprovados === 1
-      ? "⚠️ ALERTA: 1 capacitor fora do padrão! Substituição urgente recomendada para evitar multas e danos ao sistema."
-      : stats.reprovados > 1
-        ? `⚠️ ALERTA: ${stats.reprovados} capacitores fora do padrão! Substituição urgente recomendada para evitar multas e danos ao sistema.`
-        : "✅ Sistema operando normalmente. Software analisando 24/7 para manter o fator de potência ideal.";
+  // Mensagem enfática para capacitores reprovados
+  const softwareMessage = stats.reprovados === 1
+    ? "⚠️ ALERTA: 1 capacitor fora do padrão! Substituição urgente recomendada para evitar multas e danos ao sistema."
+    : stats.reprovados > 1
+    ? `⚠️ ALERTA: ${stats.reprovados} capacitores fora do padrão! Substituição urgente recomendada para evitar multas e danos ao sistema.`
+    : "✅ Sistema operando normalmente. Software analisando 24/7 para manter o fator de potência ideal.";
 
   return (
     <div className="space-y-8 pb-12">
@@ -320,35 +333,25 @@ export default function DashboardReal() {
             "rounded-2xl p-6 shadow-sm border",
             stats.reprovados > 0
               ? "bg-red-50 border-red-200"
-              : "bg-white border-slate-100",
+              : "bg-white border-slate-100"
           )}
         >
           <div className="flex items-center justify-between mb-4">
-            <div
-              className={cn(
-                "rounded-xl p-3",
-                stats.reprovados > 0
-                  ? "bg-red-100 text-red-700"
-                  : "bg-blue-50 text-blue-600",
-              )}
-            >
+            <div className={cn(
+              "rounded-xl p-3",
+              stats.reprovados > 0 ? "bg-red-100 text-red-700" : "bg-blue-50 text-blue-600"
+            )}>
               <Cpu size={24} />
             </div>
             <div className="flex items-center gap-1.5">
-              <div
-                className={cn(
-                  "h-2 w-2 rounded-full",
-                  stats.reprovados > 0
-                    ? "bg-red-500 animate-pulse"
-                    : "bg-blue-500 animate-ping",
-                )}
-              />
-              <span
-                className={cn(
-                  "text-xs font-bold",
-                  stats.reprovados > 0 ? "text-red-700" : "text-blue-600",
-                )}
-              >
+              <div className={cn(
+                "h-2 w-2 rounded-full",
+                stats.reprovados > 0 ? "bg-red-500 animate-pulse" : "bg-blue-500 animate-ping"
+              )} />
+              <span className={cn(
+                "text-xs font-bold",
+                stats.reprovados > 0 ? "text-red-700" : "text-blue-600"
+              )}>
                 {stats.reprovados > 0 ? "ALERTA" : "ATIVO"}
               </span>
             </div>
@@ -357,16 +360,12 @@ export default function DashboardReal() {
             Status do Sistema
           </h3>
           <p className="text-xl font-bold text-slate-900">
-            {stats.reprovados > 0
-              ? "Manutenção Necessária - Urgente!"
-              : "Otimização de Custos"}
+            {stats.reprovados > 0 ? "Manutenção Necessária - Urgente!" : "Otimização de Custos"}
           </p>
-          <p
-            className={cn(
-              "text-xs mt-2 font-medium",
-              stats.reprovados > 0 ? "text-red-700" : "text-slate-500",
-            )}
-          >
+          <p className={cn(
+            "text-xs mt-2 font-medium",
+            stats.reprovados > 0 ? "text-red-700" : "text-slate-500"
+          )}>
             {softwareMessage}
           </p>
         </motion.div>
@@ -488,7 +487,7 @@ export default function DashboardReal() {
               {recentMedicoes.map((med) => (
                 <tr key={med.id} className="text-sm text-slate-700">
                   <td className="py-4">
-                    {formatarDataLocal(med.created_at)}
+                    {new Date(med.created_at).toLocaleDateString("pt-BR")}
                   </td>
                   <td className="py-4 font-medium">
                     {med.clientes?.nome || "-"}
@@ -498,7 +497,11 @@ export default function DashboardReal() {
                   </td>
                   <td className="py-4">
                     <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full">
-                      ⚡ {med.capacitores?.tensao_nominal_v || "?"} V
+                      ⚡{" "}
+                      {med.tensao_capacitor ||
+                        med.capacitores?.tensao_nominal_v ||
+                        "?"}
+                      V
                     </span>
                   </td>
                   <td className="py-4 capitalize">
