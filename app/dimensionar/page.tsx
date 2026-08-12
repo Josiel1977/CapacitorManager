@@ -12,6 +12,13 @@ import Swal from "sweetalert2";
 import jsPDF from "jspdf";
 import { toPng } from "html-to-image";
 import { supabase } from "@/lib/supabase";
+import {
+  calculateAuditableSizing,
+  MINIMUM_INVOICES,
+  RECOMMENDED_INVOICES,
+  SIZING_ENGINE_VERSION,
+  type ConfidenceLevel,
+} from "@/lib/capacitor-sizing";
 
 export const dynamic = 'force-dynamic';
 
@@ -79,6 +86,10 @@ interface Fatura {
   concessionaria: string;
   tenant_id?: string;
   fp_calculado?: number;
+  reativo_origem?: "nao_classificado" | "excedente_faturado" | "reativo_total_medido";
+  penalidade_reativa_informada?: number | null;
+  tarifa_reativa_aplicada?: number | null;
+  fonte_dados?: "manual" | "pdf" | "xml" | "csv" | "api";
 }
 
 interface DistribuicaoTrafo {
@@ -91,6 +102,12 @@ interface DistribuicaoTrafo {
 }
 
 interface ResultadoDimensionamento {
+  nivel_confiabilidade: ConfidenceLevel;
+  versao_motor: string;
+  data_calculo: string;
+  kvar_teorico_percentil: number;
+  percentil_utilizado: number;
+  faturas_excluidas: Array<{ id: string; month: string; reason: string }>;
   banco_automatico_kvar: number;
   estagios_automaticos: number[];
   tensao_capacitores: string;
@@ -139,6 +156,19 @@ const formatMoney = (valor: number) =>
 
 const formatNumber = (valor: number, dec = 2) =>
   new Intl.NumberFormat("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec }).format(valor);
+
+const canonicalJson = (value: unknown): string => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+};
+
+const sha256Hex = async (value: unknown) => {
+  const bytes = new TextEncoder().encode(canonicalJson(value));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
 
 const parseMesReferencia = (mesRef: string) => {
   const [m, a] = mesRef.split("/");
@@ -207,8 +237,8 @@ let pdfjsLib: any = null;
 async function carregarPDFJS() {
   if (typeof window === 'undefined') return null;
   if (pdfjsLib) return pdfjsLib;
-  const module = await import('pdfjs-dist');
-  pdfjsLib = module;
+  const pdfModule = await import('pdfjs-dist');
+  pdfjsLib = pdfModule;
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
     'pdfjs-dist/build/pdf.worker.min.mjs',
     import.meta.url
@@ -448,25 +478,10 @@ function DimensionarContent() {
     try {
       const { data: trafosDB } = await supabase.from("transformadores").select("*").eq("tenant_id", tenant).order("created_at");
       if (trafosDB?.length) setTransformadores(trafosDB);
-      else {
-        const defaultTrafos = [
-          { id: crypto.randomUUID(), potencia_kva: 300, quantidade: 1, tensao_v: 380, horas_trabalho: 220, tenant_id: tenant },
-          { id: crypto.randomUUID(), potencia_kva: 225, quantidade: 1, tensao_v: 380, horas_trabalho: 220, tenant_id: tenant },
-        ];
-        await supabase.from("transformadores").insert(defaultTrafos);
-        setTransformadores(defaultTrafos.map(({ tenant_id, ...rest }) => rest));
-      }
+      else setTransformadores([]);
       const { data: faturasDB } = await supabase.from("faturas").select("*").eq("tenant_id", tenant).order("mes_referencia", { ascending: false });
       if (faturasDB?.length) setFaturas(faturasDB);
-      else {
-        const faturasRaw = [
-          { id: crypto.randomUUID(), mes_referencia: "11/2025", consumo_ponta_kwh: 457.21, consumo_fora_ponta_kwh: 5179.86, demanda_ponta_kw: 53.42, demanda_fora_ponta_kw: 53.42, reativo_ponta_kvarh: 493.76, reativo_fora_ponta_kvarh: 4696.54, total_pagar: 12617.5, dias_ciclo: 30, concessionaria: "EQUATORIAL_PARA", tenant_id: tenant, fp_calculado: undefined },
-          { id: crypto.randomUUID(), mes_referencia: "12/2025", consumo_ponta_kwh: 595.56, consumo_fora_ponta_kwh: 6106.21, demanda_ponta_kw: 40.66, demanda_fora_ponta_kw: 40.66, reativo_ponta_kvarh: 1130.49, reativo_fora_ponta_kvarh: 8932.83, total_pagar: 14486.71, dias_ciclo: 31, concessionaria: "EQUATORIAL_PARA", tenant_id: tenant, fp_calculado: 0.36776590 },
-          { id: crypto.randomUUID(), mes_referencia: "01/2026", consumo_ponta_kwh: 558.52, consumo_fora_ponta_kwh: 5974.5, demanda_ponta_kw: 37.96, demanda_fora_ponta_kw: 39.98, reativo_ponta_kvarh: 993.0, reativo_fora_ponta_kvarh: 8690.47, total_pagar: 13728.12, dias_ciclo: 31, concessionaria: "EQUATORIAL_PARA", tenant_id: tenant, fp_calculado: undefined },
-        ];
-        await supabase.from("faturas").insert(faturasRaw);
-        setFaturas(faturasRaw);
-      }
+      else setFaturas([]);
     } catch (error: any) {
       Swal.fire("Erro", error.message || "Falha ao carregar dados.", "error");
     } finally {
@@ -514,6 +529,14 @@ function DimensionarContent() {
       concessionaria: currentFatura.concessionaria || "EQUATORIAL_PARA",
       tenant_id: tenantId,
       fp_calculado: currentFatura.fp_calculado ? parseFloat(currentFatura.fp_calculado) : undefined,
+      reativo_origem: currentFatura.reativo_origem || "nao_classificado",
+      penalidade_reativa_informada: currentFatura.penalidade_reativa_informada_str
+        ? parseBRLocal(currentFatura.penalidade_reativa_informada_str)
+        : null,
+      tarifa_reativa_aplicada: currentFatura.tarifa_reativa_aplicada_str
+        ? parseBRLocal(currentFatura.tarifa_reativa_aplicada_str)
+        : null,
+      fonte_dados: currentFatura.fonte_dados || "manual",
     };
     const { error } = await supabase.from("faturas").upsert(novaFatura, { onConflict: "id" });
     if (error) return Swal.fire("Erro", "Não foi possível salvar.", "error");
@@ -605,9 +628,9 @@ function DimensionarContent() {
   const { getRootProps, getInputProps } = useDropzone({ onDrop: onDropPDF, accept: { "application/pdf": [".pdf"], "text/markdown": [".md"], "text/plain": [".txt"] }, multiple: false });
 
   // ==================== DIMENSIONAMENTO CORRIGIDO ====================
-  const calcularDimensionamento = () => {
-    if (faturas.length < 2) {
-      Swal.fire("Atenção", "Mínimo de 2 faturas", "warning");
+  const calcularDimensionamento = async () => {
+    if (faturas.length < MINIMUM_INVOICES) {
+      Swal.fire("Dados insuficientes", `São necessárias pelo menos ${MINIMUM_INVOICES} faturas. Recomendamos ${RECOMMENDED_INVOICES} a 12.`, "warning");
       return;
     }
     setCalculando(true);
@@ -615,94 +638,53 @@ function DimensionarContent() {
       const alertas: string[] = [];
       const concessionarias = [...new Set(faturas.map((f) => f.concessionaria))];
       if (concessionarias.length > 1) alertas.push(`⚠️ Faturas de diferentes concessionárias: ${concessionarias.join(", ")}`);
-
-      // Processa as faturas
-      const faturasProcessadas = faturas.map((f) => {
-        let ativoTotal = f.consumo_ponta_kwh + f.consumo_fora_ponta_kwh;
-        let reativoTotal = f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh;
-        const demandaMaxKw = Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw, 0.1);
-        let fp;
-        if (f.fp_calculado && f.fp_calculado > 0.3 && f.fp_calculado < 1) {
-          fp = f.fp_calculado;
-          if (ativoTotal === 0 && demandaMaxKw > 0) {
-            const horasEstimadas = 200;
-            ativoTotal = demandaMaxKw * horasEstimadas;
-            console.log(`⚠️ Fatura ${f.mes_referencia}: ativo estimado (${ativoTotal.toFixed(0)} kWh) a partir da demanda.`);
-          }
-          if (reativoTotal === 0 && ativoTotal > 0) {
-            const tanPhi = Math.tan(Math.acos(fp));
-            reativoTotal = ativoTotal * tanPhi;
-            console.log(`⚠️ Fatura ${f.mes_referencia}: reativo estimado (${reativoTotal.toFixed(0)} kVArh) a partir do FP.`);
-          }
-        } else if (ativoTotal > 0 && reativoTotal > 0) {
-          fp = calcularFatorPotencia(ativoTotal, reativoTotal);
-        } else {
-          fp = 0.92;
-          alertas.push(`⚠️ Fatura ${f.mes_referencia} sem dados suficientes. FP assumido 0,92.`);
-        }
-        const multa = calcularMultaDaFatura(f); // usa reativo (real ou estimado)
-        return { ...f, ativoTotal, reativoTotal, fp, multa, demandaMaxKw };
+      const audit = calculateAuditableSizing(faturas.map((f) => ({
+        id: f.id,
+        month: f.mes_referencia,
+        demandKw: demandaPersonalizadaKw > 0
+          ? demandaPersonalizadaKw
+          : Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw),
+        measuredPowerFactor: f.fp_calculado,
+        excessReactiveKvarh: f.reativo_origem === "excedente_faturado"
+          ? f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh
+          : undefined,
+        reactiveTariff: f.tarifa_reativa_aplicada ?? TARIFAS_REATIVO[f.concessionaria] ?? TARIFAS_REATIVO.DEFAULT,
+        informedReactiveCharge: f.penalidade_reativa_informada ?? undefined,
+      })), {
+        targetPowerFactor: targetFP,
+        percentile: 0.9,
+        futureLoadMarginPercent: margemSeguranca,
+        controllerStages: numeroEstagios,
+        installedTransformerKva: potenciaTotalTransformadores,
+        transformerSafetyLimit: 0.4,
       });
 
-      // Pior mês (menor FP)
-      const piorMes = faturasProcessadas.reduce((prev, curr) => (curr.fp < prev.fp ? curr : prev), faturasProcessadas[0]);
-      let fpAtual = piorMes.fp;
-      if (fpAtual >= 0.99 || fpAtual <= 0.3) {
-        const totalAtivo = faturasProcessadas.reduce((s, f) => s + f.ativoTotal, 0);
-        const totalReativo = faturasProcessadas.reduce((s, f) => s + f.reativoTotal, 0);
-        fpAtual = calcularFatorPotencia(totalAtivo, totalReativo);
-        alertas.push(`⚠️ FP do pior mês inválido. Recalculado: ${(fpAtual * 100).toFixed(1)}%`);
+      alertas.push(...audit.warnings.map((warning) => `⚠️ ${warning}`));
+      if (transformadores.length > 1) {
+        alertas.push("⚠️ A distribuição entre transformadores é preliminar até que a carga medida de cada unidade seja informada.");
       }
-
-      // Demanda do pior mês
-      let demandaReal = piorMes.demandaMaxKw;
-      console.log(`📈 Demanda do pior mês (${piorMes.mes_referencia}): ${demandaReal} kW | FP: ${fpAtual}`);
-
-      if (demandaReal < 1) {
-        demandaReal = Math.max(...faturasProcessadas.map((f) => f.demandaMaxKw), 0);
-        alertas.push(`⚠️ Demanda do pior mês não identificada. Utilizada a maior demanda entre todas: ${demandaReal.toFixed(1)} kW.`);
-      }
-
-      let potenciaBase = demandaReal;
-      let potenciaAtivaFinal = potenciaBase * (1 + margemSeguranca / 100);
-      console.log(`✅ Potência ativa utilizada: ${potenciaBase} kW → final: ${potenciaAtivaFinal} kW`);
-
-      const precisaCapacitor = fpAtual < FP_MINIMO_REGULAMENTAR;
-      let kvarAutomatico = 0, estagios: number[] = [], economiaMensal = 0, motivo = "";
-
-      if (precisaCapacitor) {
-        const phi1 = Math.acos(Math.min(0.99, Math.max(0.3, fpAtual)));
-        const phi2 = Math.acos(FP_MINIMO_REGULAMENTAR);
-        const kvarTeorico = potenciaAtivaFinal * (Math.tan(phi1) - Math.tan(phi2));
-        let baseStep = 2.5;
-        if (kvarTeorico >= 60) baseStep = 12.5;
-        else if (kvarTeorico >= 20) baseStep = 5;
-        let kvarComercial = Math.ceil(kvarTeorico / baseStep) * baseStep;
-        kvarComercial = Math.max(kvarComercial, CONFIG_CAPACITORES.minimo_kvar_grupo_a);
-        let fixedStep = baseStep;
-        if (kvarComercial <= fixedStep) fixedStep = kvarComercial;
-        let autoCapacity = kvarComercial - fixedStep;
-        let stepsList: number[] = [];
-        if (fixedStep > 0) stepsList.push(fixedStep);
-        let majorStep = baseStep * 2;
-        let numMajor = Math.floor(autoCapacity / majorStep);
-        for (let i = 0; i < numMajor; i++) stepsList.push(majorStep);
-        let remainder = autoCapacity % majorStep;
-        if (remainder > 0) stepsList.push(remainder);
-        estagios = stepsList.sort((a, b) => a - b);
-        kvarAutomatico = kvarComercial;
-        const mediaMulta = faturasProcessadas.reduce((acc, f) => acc + f.multa, 0) / faturasProcessadas.length;
-        economiaMensal = mediaMulta * 0.92;
-        motivo = `Potência ativa = ${potenciaAtivaFinal.toFixed(1)} kW | FP atual = ${(fpAtual * 100).toFixed(1)}% | Meta = ${(FP_MINIMO_REGULAMENTAR * 100).toFixed(0)}% → kVAr teórico = ${kvarTeorico.toFixed(1)} → comercial = ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios).`;
-      } else {
-        motivo = `✅ Sistema regularizado (FP médio: ${(fpAtual * 100).toFixed(1)}%)`;
-      }
+      const nivelConfiabilidade: ConfidenceLevel = transformadores.length > 1 && audit.confidence === "validated"
+        ? "preliminary"
+        : audit.confidence;
+      const piorAudit = [...audit.monthly].sort((a, b) => a.powerFactor - b.powerFactor)[0];
+      const piorMes = piorAudit ? faturas.find((f) => f.id === piorAudit.id) ?? null : null;
+      const fpAtual = piorAudit?.powerFactor ?? targetFP;
+      const potenciaAtivaFinal = audit.monthly.length
+        ? Math.max(...audit.monthly.map((item) => item.demandKw)) * (1 + Math.max(0, margemSeguranca) / 100)
+        : 0;
+      const kvarAutomatico = audit.commercialKvar;
+      const estagios = audit.stages;
+      const economiaMensal = audit.estimatedMonthlySaving;
+      const precisaCapacitor = nivelConfiabilidade !== "insufficient" && kvarAutomatico > 0;
+      const motivo = nivelConfiabilidade === "insufficient"
+        ? "⛔ Dimensionamento não liberado: faltam faturas válidas com demanda e fator de potência confiável."
+        : `Percentil ${(audit.percentile * 100).toFixed(0)} = ${audit.theoreticalKvar.toFixed(1)} kVAr | Meta = ${(targetFP * 100).toFixed(0)}% → comercial = ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios utilizados).`;
 
       const investimentoTotal = calcularPrecoMercado(kvarAutomatico);
       const payback = economiaMensal > 0 ? Math.ceil(investimentoTotal / economiaMensal) : 99;
       const economiaAnual = economiaMensal * 12;
       const retorno5Anos = economiaAnual * 5 - investimentoTotal;
-      const prejuizoAcumulado = faturasProcessadas.reduce((acc, f) => acc + f.multa, 0);
+      const prejuizoAcumulado = audit.monthly.reduce((acc, f) => acc + f.estimatedReactiveCharge, 0);
       const projecao1Ano = economiaAnual - investimentoTotal;
       const projecao3Anos = economiaAnual * 3 - investimentoTotal;
       const projecao5Anos = retorno5Anos;
@@ -710,26 +692,32 @@ function DimensionarContent() {
       const precoPorKvar = kvarAutomatico > 0 ? investimentoTotal / kvarAutomatico : 0;
       const distribuicaoPorTrafo = distribuirKvarPorTrafo(transformadores, estagios, kvarAutomatico);
       const tensaoCapacitores = transformadores[0]?.tensao_v === 380 ? CONFIG_CAPACITORES.tensao_padrao_380v : CONFIG_CAPACITORES.tensao_padrao_220v;
-      const mediaFpPorMes = faturasProcessadas.map((f) => ({ mes: f.mes_referencia, fp: f.fp * 100, multa: f.multa })).sort((a, b) => a.fp - b.fp);
+      const mediaFpPorMes = audit.monthly.map((f) => ({ mes: f.month, fp: f.powerFactor * 100, multa: f.estimatedReactiveCharge })).sort((a, b) => a.fp - b.fp);
       const grupoTarifario = potenciaTotalTransformadores >= 75 ? "A" : "B";
 
-      setResult({
+      const resultadoFinal: ResultadoDimensionamento = {
+        nivel_confiabilidade: nivelConfiabilidade,
+        versao_motor: audit.engineVersion,
+        data_calculo: audit.calculatedAt,
+        kvar_teorico_percentil: audit.theoreticalKvar,
+        percentil_utilizado: audit.percentile,
+        faturas_excluidas: audit.excludedInvoices,
         banco_automatico_kvar: kvarAutomatico,
         estagios_automaticos: estagios,
         tensao_capacitores: tensaoCapacitores,
-        fator_dessintonia: CONFIG_CAPACITORES.dessintonia_padrao,
+        fator_dessintonia: 0,
         economia_mensal_estimada: economiaMensal,
         investimento_estimado_total: investimentoTotal,
         payback_meses: payback,
         fp_atual_percent: fpAtual * 100,
-        fp_projetado_percent: precisaCapacitor ? FP_MINIMO_REGULAMENTAR * 100 : fpAtual * 100,
-        multa_atual_mensal_real: faturasProcessadas.reduce((acc, f) => acc + f.multa, 0) / faturasProcessadas.length,
+        fp_projetado_percent: precisaCapacitor ? targetFP * 100 : fpAtual * 100,
+        multa_atual_mensal_real: audit.estimatedMonthlyReactiveCharge,
         potencia_ativa_utilizada_kw: potenciaAtivaFinal,
         precisa_capacitor: precisaCapacitor,
         grupo_tarifario: grupoTarifario,
         motivo_recomendacao: motivo,
         concessionaria_identificada: concessionarias[0] || "NÃO IDENTIFICADA",
-        quantidade_faturas_analisadas: faturasProcessadas.length,
+        quantidade_faturas_analisadas: audit.monthly.length,
         pior_mes: piorMes || null,
         media_fp_por_mes: mediaFpPorMes,
         alertas: alertas,
@@ -743,17 +731,66 @@ function DimensionarContent() {
         projecao_3_anos: projecao3Anos,
         projecao_5_anos: projecao5Anos,
         roi_5_anos_percent: roi5AnosPercent,
-        metodo_calculo_utilizado: "Fórmula clássica P×Δtan",
+        metodo_calculo_utilizado: audit.formula,
         fator_carga_utilizado: fatorCarga,
         numero_estagios: numeroEstagios,
-      });
+      };
+
+      if (tenantId) {
+        const auditContent = {
+          engine_version: audit.engineVersion,
+          target_power_factor: targetFP,
+          percentile: audit.percentile,
+          future_load_margin_percent: margemSeguranca,
+          controller_stages: numeroEstagios,
+          transformer_installed_kva: potenciaTotalTransformadores,
+          invoices: faturas.map((f) => ({
+            id: f.id,
+            month: f.mes_referencia,
+            demand_peak_kw: f.demanda_ponta_kw,
+            demand_off_peak_kw: f.demanda_fora_ponta_kw,
+            measured_power_factor: f.fp_calculado ?? null,
+            excess_reactive_peak_kvarh: f.reativo_ponta_kvarh,
+            excess_reactive_off_peak_kvarh: f.reativo_fora_ponta_kvarh,
+            reactive_origin: f.reativo_origem ?? "nao_classificado",
+            informed_reactive_charge: f.penalidade_reativa_informada ?? null,
+            applied_reactive_tariff: f.tarifa_reativa_aplicada ?? null,
+            concessionaire: f.concessionaria,
+          })),
+        };
+        const contentHash = await sha256Hex(auditContent);
+        const { error: auditError } = await supabase.from("dimensioning_runs").insert({
+          tenant_id: tenantId,
+          engine_version: audit.engineVersion,
+          status: nivelConfiabilidade === "insufficient" ? "blocked" : "completed",
+          confidence_level: nivelConfiabilidade,
+          target_power_factor: targetFP,
+          percentile: audit.percentile,
+          theoretical_kvar: audit.theoreticalKvar,
+          commercial_kvar: audit.commercialKvar,
+          formula: audit.formula,
+          inputs_snapshot: auditContent,
+          result_snapshot: audit,
+          excluded_invoices: audit.excludedInvoices,
+          warnings: alertas,
+          content_hash: contentHash,
+        });
+        if (auditError && auditError.code !== "23505") {
+          alertas.push("⚠️ Resultado calculado, mas a memória auditável não foi gravada. Aplique a migração 202608110003.");
+          console.error("Falha ao persistir dimensionamento auditável:", auditError);
+        } else if (auditError?.code === "23505") {
+          alertas.push("ℹ️ Esta mesma combinação de entradas já possui uma memória auditável registrada.");
+        }
+      }
+
+      setResult(resultadoFinal);
 
       Swal.fire({
-        title: precisaCapacitor ? "✅ Dimensionamento Concluído" : "✅ Análise Concluída",
+        title: nivelConfiabilidade === "insufficient" ? "⛔ Dados insuficientes" : precisaCapacitor ? "✅ Dimensionamento calculado" : "✅ Análise concluída",
         html: `<div class="text-center"><p class="text-lg font-bold">FP no pior mês: ${(fpAtual * 100).toFixed(1)}%</p>${
-          precisaCapacitor ? `<p class="text-primary font-bold mt-2">🔋 Recomendação:<br/>• Banco automático: ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios)</p>` : '<p class="text-green-600 mt-2">Sistema dentro das normas ANEEL</p>'
-        }<p class="text-xs text-slate-500 mt-2">💰 Multa média: ${formatMoney(faturasProcessadas.reduce((acc, f) => acc + f.multa, 0) / faturasProcessadas.length)}/mês</p><p class="text-xs text-slate-500">💰 Investimento estimado: ${formatMoney(investimentoTotal)}</p><p class="text-xs text-slate-500">⏱️ Payback: ${payback} meses</p></div>`,
-        icon: precisaCapacitor ? "success" : "info",
+          precisaCapacitor ? `<p class="text-primary font-bold mt-2">🔋 Resultado ${nivelConfiabilidade === "validated" ? "validado" : "preliminar"}:<br/>• Banco automático: ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios)</p>` : `<p class="text-amber-600 mt-2">${motivo}</p>`
+        }<p class="text-xs text-slate-500 mt-2">Motor: ${SIZING_ENGINE_VERSION}</p><p class="text-xs text-slate-500">Penalidade estimada média: ${formatMoney(audit.estimatedMonthlyReactiveCharge)}/mês</p><p class="text-xs text-slate-500">Investimento estimado: ${formatMoney(investimentoTotal)}</p></div>`,
+        icon: nivelConfiabilidade === "insufficient" ? "warning" : precisaCapacitor ? "success" : "info",
         timer: 6000,
       });
     } catch (error) {
@@ -835,7 +872,7 @@ function DimensionarContent() {
                 const multa = calcularMultaDaFatura(fat);
                 return (
                   <div key={fat.id} className="p-3 rounded-lg bg-slate-50">
-                    <div className="flex justify-between"><span className="font-bold">{fat.mes_referencia}</span><div><button onClick={() => { setCurrentFatura({ id: fat.id, mes_referencia: fat.mes_referencia, concessionaria: fat.concessionaria, dias_ciclo: fat.dias_ciclo, consumo_ponta_str: fat.consumo_ponta_kwh.toString(), consumo_fora_str: fat.consumo_fora_ponta_kwh.toString(), demanda_ponta_str: fat.demanda_ponta_kw.toString(), demanda_fora_str: fat.demanda_fora_ponta_kw.toString(), reativo_ponta_str: fat.reativo_ponta_kvarh.toString(), reativo_fora_str: fat.reativo_fora_ponta_kvarh.toString(), total_pagar_str: fat.total_pagar.toString(), fp_calculado: fat.fp_calculado }); setEditandoFaturaId(fat.id); setShowFaturaModal(true); }} className="text-blue-500"><Edit3 size={14} /></button><button onClick={() => removerFatura(fat.id)} className="text-red-500"><Trash2 size={14} /></button></div></div>
+                    <div className="flex justify-between"><span className="font-bold">{fat.mes_referencia}</span><div><button onClick={() => { setCurrentFatura({ id: fat.id, mes_referencia: fat.mes_referencia, concessionaria: fat.concessionaria, dias_ciclo: fat.dias_ciclo, consumo_ponta_str: fat.consumo_ponta_kwh.toString(), consumo_fora_str: fat.consumo_fora_ponta_kwh.toString(), demanda_ponta_str: fat.demanda_ponta_kw.toString(), demanda_fora_str: fat.demanda_fora_ponta_kw.toString(), reativo_ponta_str: fat.reativo_ponta_kvarh.toString(), reativo_fora_str: fat.reativo_fora_ponta_kvarh.toString(), reativo_origem: fat.reativo_origem ?? "nao_classificado", penalidade_reativa_informada_str: fat.penalidade_reativa_informada?.toString() ?? "", tarifa_reativa_aplicada_str: fat.tarifa_reativa_aplicada?.toString() ?? "", fonte_dados: fat.fonte_dados ?? "manual", total_pagar_str: fat.total_pagar.toString(), fp_calculado: fat.fp_calculado }); setEditandoFaturaId(fat.id); setShowFaturaModal(true); }} className="text-blue-500"><Edit3 size={14} /></button><button onClick={() => removerFatura(fat.id)} className="text-red-500"><Trash2 size={14} /></button></div></div>
                     <div className="grid grid-cols-2 gap-1 text-xs mt-2">
                       <div>Consumo Ponta: {formatNumber(fat.consumo_ponta_kwh, 2)} kWh</div>
                       <div>Consumo F/Ponta: {formatNumber(fat.consumo_fora_ponta_kwh, 2)} kWh</div>
@@ -861,7 +898,8 @@ function DimensionarContent() {
                 <div><label className="text-xs text-slate-600">Número de estágios automáticos (6 a 12)</label><input type="range" min="6" max="12" step="1" value={numeroEstagios} onChange={(e) => setNumeroEstagios(parseInt(e.target.value))} className="w-full" /><div className="flex justify-between text-xs"><span>6</span><span className="font-bold">{numeroEstagios}</span><span>12</span></div></div>
               </div>
             </details>
-            <button onClick={calcularDimensionamento} disabled={calculando || faturas.length < 2} className="w-full bg-primary text-white py-3 rounded-xl font-bold disabled:opacity-50 flex justify-center gap-2">{calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />} Calcular Dimensionamento</button>
+            <button onClick={calcularDimensionamento} disabled={calculando || faturas.length < MINIMUM_INVOICES} className="w-full bg-primary text-white py-3 rounded-xl font-bold disabled:opacity-50 flex justify-center gap-2">{calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />} Calcular Dimensionamento</button>
+            <p className="text-[11px] text-slate-500 text-center mt-2">Mínimo: {MINIMUM_INVOICES} faturas válidas. Recomendado: {RECOMMENDED_INVOICES} a 12.</p>
           </div>
         </div>
 
@@ -872,11 +910,17 @@ function DimensionarContent() {
               <div ref={reportRef} className="bg-white rounded-2xl overflow-hidden shadow-sm border">
                 <div className="bg-slate-900 p-6 text-white text-center"><Zap size={32} className="mx-auto text-secondary mb-2" /><h2 className="text-2xl font-black">CapacitorManager</h2><p className="text-slate-400 text-sm">Memorial de Dimensionamento</p><p className="text-slate-500 text-xs">Gerado em {new Date().toLocaleDateString("pt-BR")}</p></div>
                 <div className="p-6 space-y-6">
-                  {result.precisa_capacitor ? (
+                  <div className={`rounded-xl border p-3 text-center ${result.nivel_confiabilidade === "validated" ? "border-green-200 bg-green-50 text-green-800" : result.nivel_confiabilidade === "preliminary" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-red-200 bg-red-50 text-red-800"}`}>
+                    <p className="text-sm font-black uppercase">{result.nivel_confiabilidade === "validated" ? "Dimensionamento validado" : result.nivel_confiabilidade === "preliminary" ? "Estimativa preliminar" : "Dados insuficientes — recomendação bloqueada"}</p>
+                    <p className="text-[10px] mt-1">Motor {result.versao_motor} • Percentil {(result.percentil_utilizado * 100).toFixed(0)} • {result.quantidade_faturas_analisadas} faturas válidas • {result.faturas_excluidas.length} excluídas</p>
+                  </div>
+                  {result.nivel_confiabilidade === "insufficient" ? (
+                    <div className="text-center py-8"><AlertTriangle size={40} className="mx-auto text-red-600 mb-2" /><p className="text-xl font-bold text-red-700">Dimensionamento não liberado</p><p className="text-sm mt-2">{result.motivo_recomendacao}</p>{result.alertas.map((a, i) => (<div key={i} className="bg-amber-50 p-3 rounded-xl text-xs text-amber-700 mt-3">{a}</div>))}</div>
+                  ) : result.precisa_capacitor ? (
                     <>
-                      <div className="text-center border-b pb-4"><p className="text-sm text-slate-500">Solução Proposta</p><p className="text-3xl font-bold text-primary">{formatNumber(result.banco_automatico_kvar, 1)} kVAr</p><p className="text-xs text-slate-400">Banco automático com {result.estagios_automaticos.length} estágios</p><p className="text-xs text-slate-400">Grupo {result.grupo_tarifario} • {result.quantidade_faturas_analisadas} faturas • Método: {result.metodo_calculo_utilizado}</p><p className="text-xs text-slate-400">Potência ativa usada: {result.potencia_ativa_utilizada_kw.toFixed(1)} kW</p></div>
+                      <div className="text-center border-b pb-4"><p className="text-sm text-slate-500">Solução calculada</p><p className="text-3xl font-bold text-primary">{formatNumber(result.banco_automatico_kvar, 1)} kVAr</p><p className="text-xs text-slate-400">Banco automático com {result.estagios_automaticos.length} estágios utilizados</p><p className="text-xs text-slate-400">{result.quantidade_faturas_analisadas} faturas • Método: {result.metodo_calculo_utilizado}</p><p className="text-xs text-slate-400">Potência ativa usada: {result.potencia_ativa_utilizada_kw.toFixed(1)} kW</p></div>
                       {result.alertas.map((a, i) => (<div key={i} className="bg-amber-50 p-3 rounded-xl text-xs text-amber-700 flex gap-2"><AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />{a}</div>))}
-                      <div className="bg-blue-50 p-4 rounded-xl"><p className="text-sm font-bold text-blue-700">📌 {result.motivo_recomendacao}</p><p className="text-xs mt-2">FP atual: {result.fp_atual_percent.toFixed(1)}% → Meta: {result.fp_projetado_percent.toFixed(0)}%</p><div className="mt-3"><BarraFP fp={result.fp_atual_percent} /><div className="flex justify-between text-[10px] mt-1"><span>Atual: {result.fp_atual_percent.toFixed(1)}%</span><span>Meta ANEEL: 92%</span></div></div></div>
+                      <div className="bg-blue-50 p-4 rounded-xl"><p className="text-sm font-bold text-blue-700">📌 {result.motivo_recomendacao}</p><p className="text-xs mt-2">FP atual: {result.fp_atual_percent.toFixed(1)}% → FP-alvo selecionado: {result.fp_projetado_percent.toFixed(0)}%</p><div className="mt-3"><BarraFP fp={result.fp_atual_percent} /><div className="flex justify-between text-[10px] mt-1"><span>Atual: {result.fp_atual_percent.toFixed(1)}%</span><span>Alvo: {result.fp_projetado_percent.toFixed(0)}%</span></div></div></div>
                       <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs font-bold flex gap-2"><Activity size={14} /> Evolução do FP e Multa por Mês</p><div className="space-y-2 max-h-48 overflow-y-auto">{result.media_fp_por_mes.map((item, idx) => (<div key={idx} className="flex items-center gap-2 text-xs"><span className="w-14 font-medium">{item.mes}</span><div className="flex-1"><div className="w-full bg-slate-200 rounded-full h-1.5"><div className={`${item.fp >= 92 ? "bg-green-500" : item.fp >= 80 ? "bg-amber-500" : "bg-red-500"} h-1.5 rounded-full`} style={{ width: `${Math.min(100, item.fp)}%` }} /></div></div><span className="w-10 text-right font-bold">{item.fp.toFixed(1)}%</span><span className="w-20 text-right text-red-500 text-[10px]">{formatMoney(item.multa)}</span></div>))}</div></div>
                       {result.pior_mes && (<div className="bg-amber-50 p-4 rounded-xl"><p className="text-xs font-bold">Pior Mês: {result.pior_mes.mes_referencia}</p><p className="text-sm mt-1">FP: {result.pior_mes.fp_calculado ? (result.pior_mes.fp_calculado * 100).toFixed(1) : "0"}% • Multa: {formatMoney(calcularMultaDaFatura(result.pior_mes as Fatura))}</p></div>)}
                       <div className="bg-indigo-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><Factory size={14} /> Distribuição do Banco entre Transformadores</p>{result.distribuicao_por_trafo.map((dist, idx) => (<div key={idx} className="bg-white rounded-lg p-3 mt-2 border"><div className="flex justify-between"><span className="font-bold text-sm">Transformador {formatNumber(dist.trafo_kva, 0)} kVA</span><span className="text-xs text-slate-500">{dist.percentual.toFixed(1)}% da carga</span></div><div className="grid grid-cols-2 gap-1 text-sm mt-2"><div>Recomendado: {formatNumber(dist.kvar_recomendado, 1)} kVAr</div><div>Comercial: {formatNumber(dist.kvar_comercial, 0)} kVAr</div><div className="col-span-2 text-xs text-slate-600">Configuração de estágios: {dist.configuracao_estagios}</div><div className="col-span-2 font-medium">Investimento: {formatMoney(dist.preco_estimado)}</div></div></div>))}</div>
@@ -886,7 +930,7 @@ function DimensionarContent() {
                       <div className="bg-slate-50 p-4 rounded-xl"><h4 className="font-bold text-sm mb-2">Especificações Técnicas</h4><div className="grid grid-cols-2 gap-2 text-xs"><div>• Tensão: {result.tensao_capacitores} (Δ)</div><div>• Reatores: {result.fator_dessintonia}%</div><div>• Controlador: Automático</div><div>• Grau IP: Mínimo IP54</div><div className="col-span-2 text-[10px] text-slate-500 mt-1">• Compatível com rede 3~ 380V • Conformidade NBR 14922/2022</div></div></div>
                     </>
                   ) : (<div className="text-center py-8"><CheckCircle2 size={40} className="mx-auto text-green-600 mb-2" /><p className="text-xl font-bold text-green-700">Instalação Regularizada</p><p className="text-sm mt-2">{result.motivo_recomendacao}</p></div>)}
-                  <div className="text-center text-[10px] text-slate-400 border-t pt-4"><p>Cálculos baseados em ANEEL, NBR 14922/2022 e dados reais de fatura</p></div>
+                  <div className="text-center text-[10px] text-slate-400 border-t pt-4"><p>Memória rastreável • Motor {result.versao_motor} • Resultado condicionado à qualidade dos dados informados</p></div>
                 </div>
               </div>
               <button onClick={exportMemorial} className="w-full bg-white border py-3 rounded-xl font-medium flex justify-center gap-2 hover:bg-slate-50 transition"><Printer size={18} /> Exportar Memorial em PDF</button>
@@ -907,6 +951,9 @@ function DimensionarContent() {
                 <div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Consumo Ponta (kWh)</label><input type="text" placeholder="Ex: 457.21" value={currentFatura.consumo_ponta_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, consumo_ponta_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Consumo F/Ponta (kWh)</label><input type="text" placeholder="Ex: 5179.86" value={currentFatura.consumo_fora_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, consumo_fora_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div></div>
                 <div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Demanda Ponta (kW)</label><input type="text" placeholder="Ex: 53.42" value={currentFatura.demanda_ponta_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, demanda_ponta_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Demanda F/Ponta (kW)</label><input type="text" placeholder="Ex: 53.42" value={currentFatura.demanda_fora_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, demanda_fora_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div></div>
                 <div className="grid grid-cols-2 gap-2"><div><label className="text-xs font-medium text-red-600">Reativo Ponta (kVArh) *</label><input type="text" placeholder="Ex: 493.76" value={currentFatura.reativo_ponta_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, reativo_ponta_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1 border-red-200" /></div><div><label className="text-xs font-medium text-red-600">Reativo F/Ponta (kVArh) *</label><input type="text" placeholder="Ex: 4696.54" value={currentFatura.reativo_fora_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, reativo_fora_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1 border-red-200" /></div></div>
+                <div><label className="text-xs font-medium">O que representam os valores reativos?</label><select value={currentFatura.reativo_origem || "nao_classificado"} onChange={(e) => setCurrentFatura({ ...currentFatura, reativo_origem: e.target.value })} className="w-full border rounded p-2 text-sm mt-1"><option value="nao_classificado">Não classificado — não usar no financeiro</option><option value="excedente_faturado">Consumo reativo excedente faturado</option><option value="reativo_total_medido">Energia reativa total medida</option></select><p className="text-[10px] text-amber-700 mt-1">Reativo excedente não é utilizado para reconstruir o fator de potência.</p></div>
+                <div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Penalidade reativa informada (R$)</label><input type="text" placeholder="Ex: 289,45" value={currentFatura.penalidade_reativa_informada_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, penalidade_reativa_informada_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Tarifa reativa (R$/kVArh)</label><input type="text" placeholder="Ex: 0,28622" value={currentFatura.tarifa_reativa_aplicada_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, tarifa_reativa_aplicada_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div></div>
+                <div><label className="text-xs">Origem dos dados</label><select value={currentFatura.fonte_dados || "manual"} onChange={(e) => setCurrentFatura({ ...currentFatura, fonte_dados: e.target.value })} className="w-full border rounded p-2 text-sm mt-1"><option value="manual">Digitação manual</option><option value="pdf">Extração de PDF</option><option value="xml">Importação XML</option><option value="csv">Importação CSV</option><option value="api">Integração API</option></select></div>
                 <div className="grid grid-cols-2 gap-2"><div><label className="text-xs">Dias do ciclo</label><input type="text" placeholder="30" value={currentFatura.dias_ciclo ?? "30"} onChange={(e) => setCurrentFatura({ ...currentFatura, dias_ciclo: e.target.value === "" ? 30 : parseInt(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" /></div><div><label className="text-xs">Total a Pagar (R$)</label><input type="text" placeholder="Ex: 12617.50" value={currentFatura.total_pagar_str ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, total_pagar_str: e.target.value })} className="w-full border rounded p-2 text-sm mt-1" /></div></div>
                 <div><label className="text-xs">Fator de Potência (opcional)</label><input type="text" step="0.0001" value={currentFatura.fp_calculado ?? ""} onChange={(e) => setCurrentFatura({ ...currentFatura, fp_calculado: parseFloat(e.target.value) })} className="w-full border rounded p-2 text-sm mt-1" placeholder="Ex: 0.3678" /></div>
               </div>
