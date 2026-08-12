@@ -8,6 +8,7 @@ import { analyzeTransformerMeasurements } from "@/lib/transformer-measurement-an
 import { parseEmbrasulReport } from "@/lib/embrasul-report-parser";
 import { reconstructPdfText } from "@/lib/equatorial-invoice-parser";
 import { recommendCapacitorBank, type RecommendationMode } from "@/lib/capacitor-recommendation";
+import { parseEmbrasulSeriesText } from "@/lib/embrasul-series-parser";
 
 interface Transformer {
   id: string;
@@ -63,6 +64,7 @@ export default function TransformerMeasurementsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importingSeries, setImportingSeries] = useState(false);
   const [fixedCapacitorConnected, setFixedCapacitorConnected] = useState(true);
   const [fixedCapacitorKvar, setFixedCapacitorKvar] = useState("5");
   const [transformerForm, setTransformerForm] = useState(emptyTransformerForm);
@@ -91,7 +93,7 @@ export default function TransformerMeasurementsPage() {
       .select("id, measured_at, interval_minutes, active_power_kw, reactive_power_kvar, apparent_power_kva, power_factor, voltage_v, current_a, thdv_percent, thdi_percent, source, source_device, notes")
       .eq("transformer_id", transformerId)
       .order("measured_at", { ascending: false })
-      .limit(200);
+      .limit(5000);
     if (queryError) throw queryError;
     setMeasurements((data ?? []) as Measurement[]);
   }, []);
@@ -318,6 +320,62 @@ export default function TransformerMeasurementsPage() {
     }
   };
 
+  const importEmbrasulSeries = async (file?: File) => {
+    if (!file || !tenantId || !selectedId) return;
+    try {
+      setImportingSeries(true);
+      const bytes = await file.arrayBuffer();
+      const utf8 = new TextDecoder("utf-8").decode(bytes);
+      const text = utf8.includes("�") ? new TextDecoder("windows-1252").decode(bytes) : utf8;
+      const series = parseEmbrasulSeriesText(text);
+      if (!series.measurements.length) throw new Error(series.warnings[0] ?? "Nenhuma medição válida foi reconhecida.");
+      const mapped = Object.entries(series.mappedColumns).filter(([, value]) => value).map(([field, value]) => `${field}: ${value}`).join(" · ");
+      const confirm = await Swal.fire({
+        title: "Série temporal reconhecida",
+        html: `<div class="text-left text-sm">
+          <p><b>Arquivo:</b> ${file.name}</p>
+          <p><b>Linhas:</b> ${series.rowsRead} lidas · ${series.measurements.length} válidas · ${series.rejectedRows.length} rejeitadas</p>
+          <p><b>Período:</b> ${series.startedAt ? new Date(series.startedAt).toLocaleString("pt-BR") : "—"} até ${series.endedAt ? new Date(series.endedAt).toLocaleString("pt-BR") : "—"}</p>
+          <p><b>Integração estimada:</b> ${series.intervalMinutes ?? "—"} min</p>
+          <p><b>Amostras capacitivas:</b> ${series.capacitiveSamples}</p>
+          <p class="mt-2 text-xs"><b>Colunas:</b> ${mapped}</p>
+          <hr class="my-2"/>${series.warnings.map((warning) => `<p>⚠️ ${warning}</p>`).join("")}
+        </div>`,
+        icon: series.rejectedRows.length || series.warnings.length ? "warning" : "info",
+        showCancelButton: true,
+        confirmButtonText: `Importar ${series.measurements.length} amostras`,
+        cancelButtonText: "Cancelar",
+      });
+      if (!confirm.isConfirmed) return;
+      const notes = `Série Embrasul ${file.name}. Capacitor fixo ${fixedCapacitorConnected ? `ligado (${fixedCapacitorKvar || "?"} kVAr)` : "desligado"}. Parser v${series.version}.`;
+      const records = series.measurements.map((item) => ({
+        tenant_id: tenantId,
+        transformer_id: selectedId,
+        measured_at: item.measuredAt,
+        interval_minutes: series.intervalMinutes == null ? null : Math.round(series.intervalMinutes),
+        active_power_kw: item.activePowerKw,
+        reactive_power_kvar: item.reactivePowerKvar,
+        apparent_power_kva: item.apparentPowerKva,
+        power_factor: item.powerFactor,
+        voltage_v: item.voltageV,
+        current_a: item.currentA,
+        thdv_percent: item.thdvPercent,
+        thdi_percent: item.thdiPercent,
+        source: "analisador",
+        source_device: "EMBRASUL — série temporal",
+        notes,
+      }));
+      const { error: insertError } = await supabase.from("transformer_load_measurements").insert(records);
+      if (insertError) throw insertError;
+      await loadMeasurements(selectedId);
+      await Swal.fire("Série importada", `${records.length} amostras foram vinculadas ao transformador selecionado. A recomendação foi recalculada.`, "success");
+    } catch (cause) {
+      await Swal.fire("Falha na importação da série", cause instanceof Error ? cause.message : "Não foi possível interpretar o arquivo.", "error");
+    } finally {
+      setImportingSeries(false);
+    }
+  };
+
   if (loading) return <div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="animate-spin text-primary" size={36} /></div>;
 
   return (
@@ -363,14 +421,19 @@ export default function TransformerMeasurementsPage() {
           <section className="rounded-xl border border-blue-200 bg-blue-50 p-5">
             <h2 className="flex items-center gap-2 font-bold text-blue-950"><FileUp size={19} /> Importar relatório Embrasul</h2>
             <p className="mt-1 text-sm text-blue-800">Informe a condição real do capacitor durante a campanha. O sistema não ignora o reativo capacitivo: ele contextualiza a medição.</p>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
               <label className="text-sm text-blue-950"><span className="mb-1 block font-medium">Capacitor fixo durante a medição</span><select value={fixedCapacitorConnected ? "ligado" : "desligado"} onChange={(e) => setFixedCapacitorConnected(e.target.value === "ligado")} className="input"><option value="ligado">Ligado</option><option value="desligado">Desligado</option></select></label>
               <label className="text-sm text-blue-950"><span className="mb-1 block font-medium">Potência fixa (kVAr)</span><input value={fixedCapacitorKvar} disabled={!fixedCapacitorConnected} onChange={(e) => setFixedCapacitorKvar(e.target.value)} className="input disabled:bg-slate-100" /></label>
               <label className="flex cursor-pointer items-center justify-center gap-2 self-end rounded-lg bg-blue-700 px-4 py-3 font-semibold text-white">
                 {importing ? <Loader2 className="animate-spin" size={18} /> : <FileUp size={18} />} Selecionar PDF
                 <input type="file" accept="application/pdf" className="hidden" disabled={importing} onChange={(e) => { void importEmbrasulPdf(e.target.files?.[0]); e.currentTarget.value = ""; }} />
               </label>
+              <label className="flex cursor-pointer items-center justify-center gap-2 self-end rounded-lg bg-violet-700 px-4 py-3 font-semibold text-white">
+                {importingSeries ? <Loader2 className="animate-spin" size={18} /> : <FileUp size={18} />} Série TXT/CSV
+                <input type="file" accept=".txt,.csv,.md,text/plain,text/csv,text/markdown" className="hidden" disabled={importingSeries} onChange={(e) => { void importEmbrasulSeries(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+              </label>
             </div>
+            <p className="mt-3 text-xs text-blue-700">PDF importa apenas a média para diagnóstico. TXT/CSV/Markdown Embrasul importa cada intervalo e pode liberar o dimensionamento quando houver campanha representativa.</p>
           </section>
 
           <section className="grid gap-4 md:grid-cols-4">
