@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseEquatorialInvoiceText } from "../lib/equatorial-invoice-parser.ts";
+import { parseEquatorialInvoiceText, reconstructPdfText } from "../lib/equatorial-invoice-parser.ts";
 
 const invoiceText = `
 Equatorial Pará Distribuidora de Energia S.A.
@@ -34,4 +34,14 @@ test("classifica reativo excedente sem inventar fator de potência", () => {
   assert.equal(result.penalidade_reativa_informada, 2026.58);
   assert.ok(Math.abs((result.tarifa_reativa_aplicada ?? 0) - 0.3830707) < 0.000001);
   assert.equal(result.fonte_dados, "pdf");
+});
+
+test("reconstrói linhas por coordenadas antes de interpretar o PDF", () => {
+  const text = reconstructPdfText([
+    { str: "24.608,05", transform: [1, 0, 0, 1, 300, 500] },
+    { str: "TUSD Energia Fora Ponta (kWh)", transform: [1, 0, 0, 1, 30, 500] },
+    { str: "07/2026", transform: [1, 0, 0, 1, 250, 700] },
+    { str: "Conta Mês", transform: [1, 0, 0, 1, 30, 700] },
+  ]);
+  assert.equal(text, "Conta Mês 07/2026\nTUSD Energia Fora Ponta (kWh) 24.608,05");
 });
