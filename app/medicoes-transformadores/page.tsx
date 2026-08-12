@@ -107,7 +107,7 @@ export default function TransformerMeasurementsPage() {
   }, [selectedId, loadMeasurements]);
 
   const analysis = useMemo(() => analyzeTransformerMeasurements(
-    Number(selected?.potencia_kva ?? 0),
+    Number(selected?.potencia_kva ?? 0) * Math.max(1, Number(selected?.quantidade ?? 1)),
     measurements.map((item) => ({
       apparentPowerKva: item.apparent_power_kva,
       activePowerKw: item.active_power_kw,
@@ -180,7 +180,7 @@ export default function TransformerMeasurementsPage() {
           <section className="rounded-xl border bg-white p-5 shadow-sm">
             <label className="mb-2 block text-sm font-semibold text-slate-700">Transformador analisado</label>
             <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="w-full rounded-lg border px-3 py-2 md:max-w-md">
-              {transformers.map((item, index) => <option key={item.id} value={item.id}>T{index + 1} — {item.potencia_kva} kVA{item.tensao_v ? ` / ${item.tensao_v} V` : ""}</option>)}
+              {transformers.map((item, index) => <option key={item.id} value={item.id}>T{index + 1} — {Math.max(1, item.quantidade ?? 1)} × {item.potencia_kva} kVA{item.tensao_v ? ` / ${item.tensao_v} V` : ""}</option>)}
             </select>
           </section>
 
