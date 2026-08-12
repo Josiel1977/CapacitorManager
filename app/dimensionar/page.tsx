@@ -447,8 +447,8 @@ function DimensionarContent() {
         const { data: profile } = await supabase.from("profiles").select("tenant_id").eq("id", session.user.id).single();
         if (profile?.tenant_id) {
           setTenantId(profile.tenant_id);
-          const { data: tenantData } = await supabase.from("tenants").select("nome").eq("id", profile.tenant_id).single();
-          if (tenantData?.nome) setEmpresaNome(tenantData.nome);
+          const { data: tenantData } = await supabase.from("tenants").select("name").eq("id", profile.tenant_id).single();
+          if (tenantData?.name) setEmpresaNome(tenantData.name);
           await carregarDados(profile.tenant_id);
         } else Swal.fire("Erro", "Perfil não configurado.", "error");
         setCarregando(false);
@@ -465,8 +465,8 @@ function DimensionarContent() {
         const { data: profile } = await supabase.from("profiles").select("tenant_id").eq("id", session.user.id).single();
         if (profile?.tenant_id) {
           setTenantId(profile.tenant_id);
-          const { data: tenantData } = await supabase.from("tenants").select("nome").eq("id", profile.tenant_id).single();
-          if (tenantData?.nome) setEmpresaNome(tenantData.nome);
+          const { data: tenantData } = await supabase.from("tenants").select("name").eq("id", profile.tenant_id).single();
+          if (tenantData?.name) setEmpresaNome(tenantData.name);
           await carregarDados(profile.tenant_id);
         } else Swal.fire("Erro", "Perfil não configurado.", "error");
       } else if (mounted) setCarregando(false);
