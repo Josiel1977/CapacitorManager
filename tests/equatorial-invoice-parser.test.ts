@@ -56,3 +56,11 @@ test("recupera cabeçalho fragmentado do novo formulário gráfico", () => {
   assert.equal(result.concessionaria, "EQUATORIAL_PARA");
   assert.equal(result.total_pagar, 6984.32);
 });
+
+test("não confunde competência com emissão ou próxima leitura", () => {
+  const graphicHeader = `${invoiceText.replace("Conta Mês 07/2026 Total a Pagar R$ 6.984,32", "")}
+    Leitura Anterior Leitura Atual Nº de Dias Próxima Leitura
+    30/06/2026 31/07/2026 31 31/08/2026
+    07/2026 21/10/2026 R$ 6.984,32 07/08/2026 às 09:52:28`;
+  assert.equal(parseEquatorialInvoiceText(graphicHeader).mes_referencia, "07/2026");
+});
