@@ -101,7 +101,7 @@ export function recommendCapacitorBank(input: RecommendationInput): CapacitorRec
   if (!(targetFp >= 0.92 && targetFp < 1)) throw new Error("O FP alvo deve estar entre 0,92 e 0,99.");
 
   const valid = input.samples.filter((sample) =>
-    Number.isFinite(sample.activePowerKw) && sample.activePowerKw >= 0 && Number.isFinite(sample.reactivePowerKvar)
+    Number.isFinite(sample.activePowerKw) && sample.activePowerKw > 0 && Number.isFinite(sample.reactivePowerKvar)
   );
   const capacitive = valid.filter((sample) => sample.reactivePowerKvar < 0);
   const inductive = valid.filter((sample) => sample.reactivePowerKvar > 0);
