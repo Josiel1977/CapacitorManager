@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Factory, FileUp, Loader2, Plus, RefreshCw, ShieldCheck } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Factory, FileUp, Loader2, Plus, RefreshCw, Save, ShieldCheck } from "lucide-react";
 import Swal from "sweetalert2";
 import { supabase } from "@/lib/supabase";
 import { analyzeTransformerMeasurements } from "@/lib/transformer-measurement-analysis";
@@ -43,6 +43,8 @@ const emptyForm = () => ({
   source: "manual", source_device: "", notes: "",
 });
 
+const emptyTransformerForm = () => ({ potencia_kva: "150", quantidade: "1", tensao_v: "380" });
+
 const numberOrNull = (value: string) => {
   if (!value.trim()) return null;
   const parsed = Number(value.replace(",", "."));
@@ -62,9 +64,21 @@ export default function TransformerMeasurementsPage() {
   const [importing, setImporting] = useState(false);
   const [fixedCapacitorConnected, setFixedCapacitorConnected] = useState(true);
   const [fixedCapacitorKvar, setFixedCapacitorKvar] = useState("5");
+  const [transformerForm, setTransformerForm] = useState(emptyTransformerForm);
+  const [savingTransformer, setSavingTransformer] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selected = transformers.find((item) => item.id === selectedId) ?? null;
+  const selectedTotalKva = Number(selected?.potencia_kva ?? 0) * Math.max(1, Number(selected?.quantidade ?? 1));
+
+  useEffect(() => {
+    if (!selected) return;
+    setTransformerForm({
+      potencia_kva: String(selected.potencia_kva),
+      quantidade: String(Math.max(1, selected.quantidade ?? 1)),
+      tensao_v: selected.tensao_v == null ? "" : String(selected.tensao_v),
+    });
+  }, [selected]);
 
   const loadMeasurements = useCallback(async (transformerId: string) => {
     if (!transformerId) { setMeasurements([]); return; }
@@ -111,8 +125,50 @@ export default function TransformerMeasurementsPage() {
     loadMeasurements(selectedId).catch((cause) => setError(cause instanceof Error ? cause.message : "Falha ao carregar medições."));
   }, [selectedId, loadMeasurements]);
 
+  const saveTransformer = async (createNew = false) => {
+    if (!tenantId) return;
+    const potencia = numberOrNull(transformerForm.potencia_kva);
+    const quantidade = Math.trunc(numberOrNull(transformerForm.quantidade) ?? 0);
+    const tensao = numberOrNull(transformerForm.tensao_v);
+    if (potencia == null || potencia <= 0 || quantidade < 1 || tensao == null || tensao <= 0) {
+      await Swal.fire("Dados inválidos", "Informe potência por unidade, quantidade e tensão maiores que zero.", "warning");
+      return;
+    }
+    try {
+      setSavingTransformer(true);
+      const payload = {
+        ...(createNew ? {} : { id: selectedId }),
+        tenant_id: tenantId,
+        potencia_kva: potencia,
+        quantidade,
+        tensao_v: tensao,
+        horas_trabalho: 220,
+      };
+      const { data, error: saveError } = await supabase
+        .from("transformadores")
+        .upsert(payload)
+        .select("id, potencia_kva, quantidade, tensao_v")
+        .single();
+      if (saveError) throw saveError;
+      const saved = data as Transformer;
+      setTransformers((current) => createNew
+        ? [...current, saved]
+        : current.map((item) => item.id === saved.id ? saved : item));
+      setSelectedId(saved.id);
+      await Swal.fire(
+        createNew ? "Transformador adicionado" : "Transformador atualizado",
+        `${quantidade} × ${potencia} kVA = ${quantidade * potencia} kVA em ${tensao} V.`,
+        "success",
+      );
+    } catch (cause) {
+      await Swal.fire("Não foi possível salvar", cause instanceof Error ? cause.message : "Verifique os dados e tente novamente.", "error");
+    } finally {
+      setSavingTransformer(false);
+    }
+  };
+
   const analysis = useMemo(() => analyzeTransformerMeasurements(
-    Number(selected?.potencia_kva ?? 0) * Math.max(1, Number(selected?.quantidade ?? 1)),
+    selectedTotalKva,
     measurements.map((item) => ({
       apparentPowerKva: item.apparent_power_kva,
       activePowerKw: item.active_power_kw,
@@ -121,7 +177,7 @@ export default function TransformerMeasurementsPage() {
       thdvPercent: item.thdv_percent,
       thdiPercent: item.thdi_percent,
     })),
-  ), [measurements, selected]);
+  ), [measurements, selectedTotalKva]);
 
   const saveMeasurement = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -251,10 +307,22 @@ export default function TransformerMeasurementsPage() {
       ) : (
         <>
           <section className="rounded-xl border bg-white p-5 shadow-sm">
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Transformador analisado</label>
-            <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="w-full rounded-lg border px-3 py-2 md:max-w-md">
-              {transformers.map((item, index) => <option key={item.id} value={item.id}>T{index + 1} — {Math.max(1, item.quantidade ?? 1)} × {item.potencia_kva} kVA{item.tensao_v ? ` / ${item.tensao_v} V` : ""}</option>)}
-            </select>
+            <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+              <label className="block flex-1 text-sm font-semibold text-slate-700">Transformador ou conjunto analisado
+                <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="mt-2 w-full rounded-lg border px-3 py-2 md:max-w-xl">
+                  {transformers.map((item, index) => <option key={item.id} value={item.id}>T{index + 1} — {Math.max(1, item.quantidade ?? 1)} × {item.potencia_kva} kVA = {Math.max(1, item.quantidade ?? 1) * item.potencia_kva} kVA{item.tensao_v ? ` / ${item.tensao_v} V` : ""}</option>)}
+                </select>
+              </label>
+              <p className="text-sm font-semibold text-primary">Capacidade analisada: {fmt(selectedTotalKva)} kVA</p>
+            </div>
+            <div className="mt-4 grid gap-3 border-t pt-4 md:grid-cols-5">
+              <label className="text-sm"><span className="mb-1 block font-medium text-slate-700">Potência por unidade (kVA)</span><input inputMode="decimal" value={transformerForm.potencia_kva} onChange={(e) => setTransformerForm({ ...transformerForm, potencia_kva: e.target.value })} className="input" /></label>
+              <label className="text-sm"><span className="mb-1 block font-medium text-slate-700">Quantidade</span><input inputMode="numeric" value={transformerForm.quantidade} onChange={(e) => setTransformerForm({ ...transformerForm, quantidade: e.target.value })} className="input" /></label>
+              <label className="text-sm"><span className="mb-1 block font-medium text-slate-700">Tensão (V)</span><input inputMode="decimal" value={transformerForm.tensao_v} onChange={(e) => setTransformerForm({ ...transformerForm, tensao_v: e.target.value })} className="input" /></label>
+              <button type="button" disabled={savingTransformer || !selectedId} onClick={() => void saveTransformer(false)} className="flex items-center justify-center gap-2 self-end rounded-lg bg-slate-800 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"><Save size={17} /> Atualizar selecionado</button>
+              <button type="button" disabled={savingTransformer} onClick={() => void saveTransformer(true)} className="flex items-center justify-center gap-2 self-end rounded-lg border border-primary px-4 py-3 text-sm font-semibold text-primary disabled:opacity-60"><Plus size={17} /> Adicionar como novo</button>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">Para vários transformadores iguais, informe a quantidade. Se o analisador estiver em apenas um transformador, cadastre e selecione essa unidade separadamente. Não misture medições de pontos elétricos diferentes.</p>
           </section>
 
           <section className="rounded-xl border border-blue-200 bg-blue-50 p-5">
