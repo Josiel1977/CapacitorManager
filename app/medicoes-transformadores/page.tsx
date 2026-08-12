@@ -303,7 +303,16 @@ export default function TransformerMeasurementsPage() {
 
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
       {!transformers.length ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-800">Nenhum transformador cadastrado para esta empresa. Cadastre-o no dimensionamento antes de registrar medições.</div>
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-6">
+          <h2 className="font-bold text-amber-950">Cadastre o transformador antes de importar o analisador</h2>
+          <p className="mt-1 text-sm text-amber-800">Informe uma unidade ou um conjunto de transformadores iguais. A potência total será calculada automaticamente.</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <label className="text-sm"><span className="mb-1 block font-medium">Potência por unidade (kVA)</span><input inputMode="decimal" value={transformerForm.potencia_kva} onChange={(e) => setTransformerForm({ ...transformerForm, potencia_kva: e.target.value })} className="input" /></label>
+            <label className="text-sm"><span className="mb-1 block font-medium">Quantidade</span><input inputMode="numeric" value={transformerForm.quantidade} onChange={(e) => setTransformerForm({ ...transformerForm, quantidade: e.target.value })} className="input" /></label>
+            <label className="text-sm"><span className="mb-1 block font-medium">Tensão (V)</span><input inputMode="decimal" value={transformerForm.tensao_v} onChange={(e) => setTransformerForm({ ...transformerForm, tensao_v: e.target.value })} className="input" /></label>
+            <button type="button" disabled={savingTransformer} onClick={() => void saveTransformer(true)} className="flex items-center justify-center gap-2 self-end rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">{savingTransformer ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />} Cadastrar e analisar</button>
+          </div>
+        </section>
       ) : (
         <>
           <section className="rounded-xl border bg-white p-5 shadow-sm">
