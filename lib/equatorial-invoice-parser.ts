@@ -70,6 +70,9 @@ export function parseEquatorialInvoiceText(text: string): ParsedEquatorialInvoic
   const normalized = text.replace(/\s+/g, " ").trim();
   const isEquatorialPara = /Equatorial/i.test(normalized) && /Par[aá]/i.test(normalized);
   const labelledMonth = normalized.match(/(?:Conta\s*M[eê]s|Refer[eê]ncia|Compet[eê]ncia)\s*[:\-]?\s*(\d{2}\/\d{4})/i);
+  // No formulário gráfico, os títulos do quadro podem não ser extraídos, mas a linha mantém:
+  // competência (MM/AAAA), vencimento (DD/MM/AAAA) e valor monetário, nesta ordem.
+  const billingSummaryMonth = normalized.match(/\b(0[1-9]|1[0-2])\/(20\d{2})\s+\d{2}\/\d{2}\/20\d{2}\s+R\$\s*[\d.]+,\d{2}/i);
   const monthCandidates = [...normalized.matchAll(/\b(0[1-9]|1[0-2])\/(20\d{2})\b/g)].map((match) => match[0]);
   const frequency = new Map<string, number>();
   for (const candidate of monthCandidates) frequency.set(candidate, (frequency.get(candidate) ?? 0) + 1);
@@ -94,7 +97,10 @@ export function parseEquatorialInvoiceText(text: string): ParsedEquatorialInvoic
 
   return {
     concessionaria: isEquatorialPara ? "EQUATORIAL_PARA" : "DESCONHECIDA",
-    mes_referencia: labelledMonth?.[1] ?? predominantMonth ?? "",
+    mes_referencia: labelledMonth?.[1]
+      ?? (billingSummaryMonth ? `${billingSummaryMonth[1]}/${billingSummaryMonth[2]}` : undefined)
+      ?? predominantMonth
+      ?? "",
     consumo_ponta_kwh: firstNumberAfter(normalized, /TUSD\s+Energia\s+Ponta\s*\(kWh\)/i),
     consumo_fora_ponta_kwh: firstNumberAfter(normalized, /TUSD\s+Energia\s+Fora\s+Ponta\s*\(kWh\)/i),
     demanda_ponta_kw: parseBR(demandPeak?.[1]),
