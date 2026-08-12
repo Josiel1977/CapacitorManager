@@ -430,10 +430,10 @@ export default function TransformerMeasurementsPage() {
               </label>
               <label className="flex cursor-pointer items-center justify-center gap-2 self-end rounded-lg bg-violet-700 px-4 py-3 font-semibold text-white">
                 {importingSeries ? <Loader2 className="animate-spin" size={18} /> : <FileUp size={18} />} Série TXT/CSV
-                <input type="file" accept=".txt,.csv,text/plain,text/csv" className="hidden" disabled={importingSeries} onChange={(e) => { void importEmbrasulSeries(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+                <input type="file" accept=".txt,.csv,.md,text/plain,text/csv,text/markdown" className="hidden" disabled={importingSeries} onChange={(e) => { void importEmbrasulSeries(e.target.files?.[0]); e.currentTarget.value = ""; }} />
               </label>
             </div>
-            <p className="mt-3 text-xs text-blue-700">PDF importa apenas a média para diagnóstico. TXT/CSV Embrasul importa cada intervalo e pode liberar o dimensionamento quando houver campanha representativa.</p>
+            <p className="mt-3 text-xs text-blue-700">PDF importa apenas a média para diagnóstico. TXT/CSV/Markdown Embrasul importa cada intervalo e pode liberar o dimensionamento quando houver campanha representativa.</p>
           </section>
 
           <section className="grid gap-4 md:grid-cols-4">
