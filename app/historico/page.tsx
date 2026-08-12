@@ -248,6 +248,9 @@ export default function HistoricoPage() {
       <header>
         <h1 className="text-3xl font-bold text-primary">Histórico de Medições</h1>
         <p className="text-slate-500">Consulte, compare e analise a evolução dos capacitores</p>
+        <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          Os números desta tela representam <strong>medições históricas</strong>. O estado atual de cada capacitor considera somente o teste mais recente de cada tipo e está consolidado no Dashboard e em Manutenção Preditiva.
+        </div>
       </header>
 
       <div className="rounded-xl bg-white p-6 shadow-sm">
