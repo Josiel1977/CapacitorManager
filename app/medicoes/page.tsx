@@ -140,45 +140,33 @@ function ValidarCapacitoresContent() {
       return;
     }
 
-    const adminEmails = [
-      'suporte@capacitormanager.com.br',
-      'eng.eletrica1977@gmail.com',
-    ];
-    const isUserAdmin = adminEmails.includes(user.email || '');
-    setIsAdmin(isUserAdmin);
-
-    if (!isUserAdmin) {
-      let tenant = user.user_metadata?.tenant_id;
-      if (!tenant) {
-        supabase
-          .from('profiles')
-          .select('tenant_id')
-          .eq('id', user.id)
-          .single()
-          .then(({ data }) => {
-            setUserTenantId(data?.tenant_id || null);
-          });
-      } else {
-        setUserTenantId(tenant);
-      }
-    } else {
-      setUserTenantId(null);
-    }
+    supabase
+      .from('profiles')
+      .select('role, tenant_id')
+      .eq('id', user.id)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data?.tenant_id) {
+          console.error('Perfil sem tenant:', error);
+          setUserTenantId(null);
+          setIsAdmin(false);
+          return;
+        }
+        setIsAdmin(data.role === 'admin');
+        setUserTenantId(data.tenant_id);
+      });
   }, [user, authLoading, router]);
 
   // Carrega clientes
   useEffect(() => {
     if (authLoading) return;
     if (!user) return;
-    if (!isAdmin && !userTenantId) return;
+    if (!userTenantId) return;
 
     const fetchClientes = async () => {
       setLoadingClientes(true);
       try {
-        let query = supabase.from('clientes').select('id, nome').eq('ativo', true);
-        if (!isAdmin && userTenantId) {
-          query = query.eq('tenant_id', userTenantId);
-        }
+        const query = supabase.from('clientes').select('id, nome').eq('tenant_id', userTenantId).eq('ativo', true);
         const { data, error } = await query.order('nome');
         if (error) throw error;
         setClientes(data || []);
@@ -195,10 +183,10 @@ function ValidarCapacitoresContent() {
 
   // Pré-seleção único cliente
   useEffect(() => {
-    if (!isAdmin && clientes.length === 1 && !selection.cliente_id) {
+    if (clientes.length === 1 && !selection.cliente_id) {
       setSelection(prev => ({ ...prev, cliente_id: clientes[0].id }));
     }
-  }, [clientes, isAdmin, selection.cliente_id]);
+  }, [clientes, selection.cliente_id]);
 
   async function fetchBancos(clienteId: string) {
     const { data } = await supabase

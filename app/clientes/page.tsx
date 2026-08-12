@@ -70,10 +70,8 @@ export default function ClientesPage() {
   const fetchClientes = async () => {
     try {
       setLoading(true);
-      let query = supabase.from('clientes').select('*').eq('ativo', true);
-      if (!isAdmin && tenantId) {
-        query = query.eq('tenant_id', tenantId);
-      }
+      if (!tenantId) return;
+      const query = supabase.from('clientes').select('*').eq('tenant_id', tenantId).eq('ativo', true);
       const { data, error } = await query.order('nome');
       if (error) throw error;
       setClientes(data || []);
@@ -121,13 +119,13 @@ export default function ClientesPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!isAdmin && !tenantId) {
+    if (!tenantId) {
       Swal.fire('Erro', 'Tenant não identificado.', 'error');
       return;
     }
     const dataToSave = {
       ...formData,
-      tenant_id: isAdmin ? null : tenantId,
+      tenant_id: tenantId,
       ativo: true,
     };
     try {
