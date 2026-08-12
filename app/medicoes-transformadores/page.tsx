@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { analyzeTransformerMeasurements } from "@/lib/transformer-measurement-analysis";
 import { parseEmbrasulReport } from "@/lib/embrasul-report-parser";
 import { reconstructPdfText } from "@/lib/equatorial-invoice-parser";
+import { recommendCapacitorBank, type RecommendationMode } from "@/lib/capacitor-recommendation";
 
 interface Transformer {
   id: string;
@@ -66,6 +67,9 @@ export default function TransformerMeasurementsPage() {
   const [fixedCapacitorKvar, setFixedCapacitorKvar] = useState("5");
   const [transformerForm, setTransformerForm] = useState(emptyTransformerForm);
   const [savingTransformer, setSavingTransformer] = useState(false);
+  const [recommendationMode, setRecommendationMode] = useState<RecommendationMode>("otimizar_existente");
+  const [targetPowerFactor, setTargetPowerFactor] = useState("0.92");
+  const [installedBankKvar, setInstalledBankKvar] = useState("5");
   const [error, setError] = useState<string | null>(null);
 
   const selected = transformers.find((item) => item.id === selectedId) ?? null;
@@ -178,6 +182,28 @@ export default function TransformerMeasurementsPage() {
       thdiPercent: item.thdi_percent,
     })),
   ), [measurements, selectedTotalKva]);
+
+  const parsedTargetPowerFactor = numberOrNull(targetPowerFactor);
+  const safeTargetPowerFactor = parsedTargetPowerFactor != null && parsedTargetPowerFactor >= 0.92 && parsedTargetPowerFactor < 1
+    ? parsedTargetPowerFactor
+    : 0.92;
+  const recommendation = useMemo(() => recommendCapacitorBank({
+    mode: recommendationMode,
+    targetPowerFactor: safeTargetPowerFactor,
+    transformerKva: selectedTotalKva,
+    samples: measurements.map((item) => ({
+      timestamp: item.measured_at,
+      activePowerKw: item.active_power_kw ?? 0,
+      reactivePowerKvar: item.reactive_power_kvar ?? 0,
+      powerFactor: item.power_factor,
+      thdvPercent: item.thdv_percent,
+      thdiPercent: item.thdi_percent,
+    })),
+    existingBank: recommendationMode === "otimizar_existente" ? {
+      totalKvar: numberOrNull(installedBankKvar) ?? 0,
+      fixedKvar: fixedCapacitorConnected ? numberOrNull(fixedCapacitorKvar) ?? 0 : 0,
+    } : undefined,
+  }), [measurements, recommendationMode, safeTargetPowerFactor, selectedTotalKva, installedBankKvar, fixedCapacitorConnected, fixedCapacitorKvar]);
 
   const saveMeasurement = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -354,6 +380,30 @@ export default function TransformerMeasurementsPage() {
             <Metric title="Triagem" value={analysis.status.replace("_", " ")} detail={`motor v${analysis.version}`} />
           </section>
 
+          <section className="rounded-xl border border-violet-200 bg-violet-50 p-5 shadow-sm">
+            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div><h2 className="flex items-center gap-2 font-bold text-violet-950"><ShieldCheck size={19} /> Recomendação técnica do banco</h2><p className="mt-1 text-sm text-violet-800">Motor auditável v{recommendation.engineVersion}. A recomendação considera somente as medições do transformador/conjunto selecionado.</p></div>
+              <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold uppercase ${recommendation.specificationAllowed ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{recommendation.specificationAllowed ? "especificação liberada" : "diagnóstico preliminar"}</span>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <label className="text-sm text-violet-950"><span className="mb-1 block font-medium">Objetivo da análise</span><select value={recommendationMode} onChange={(e) => setRecommendationMode(e.target.value as RecommendationMode)} className="input"><option value="novo_banco">Projetar banco novo</option><option value="otimizar_existente">Otimizar banco existente</option></select></label>
+              <label className="text-sm text-violet-950"><span className="mb-1 block font-medium">FP alvo</span><input inputMode="decimal" value={targetPowerFactor} onChange={(e) => setTargetPowerFactor(e.target.value)} className="input" /></label>
+              {recommendationMode === "otimizar_existente" && <label className="text-sm text-violet-950"><span className="mb-1 block font-medium">Banco total instalado (kVAr)</span><input inputMode="decimal" value={installedBankKvar} onChange={(e) => setInstalledBankKvar(e.target.value)} className="input" /></label>}
+              <div className="rounded-lg bg-white p-3 text-sm"><span className="block text-xs font-semibold uppercase text-slate-500">Decisão</span><strong className="mt-1 block text-violet-950">{recommendationLabel(recommendation.decision)}</strong><span className="text-xs text-slate-500">Confiança: {recommendation.confidence}</span></div>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Metric title="Potência indicada" value={recommendation.recommendedKvar == null ? "Não liberada" : `${fmt(recommendation.recommendedKvar)} kVAr`} detail={recommendation.p90RequiredKvar == null ? "P90 indisponível" : `necessidade P90: ${fmt(recommendation.p90RequiredKvar)} kVAr`} />
+              <Metric title="Estágios sugeridos" value={recommendation.suggestedStagesKvar.length ? recommendation.suggestedStagesKvar.map((value) => fmt(value)).join(" + ") : "—"} detail={recommendation.suggestedStagesKvar.length ? "valores comerciais em kVAr" : "aguardando campanha válida"} />
+              <Metric title="Campanha" value={`${recommendation.validSamples} amostra(s)`} detail={recommendation.coverageHours == null ? "cobertura não determinada" : `${fmt(recommendation.coverageHours)} horas de cobertura`} />
+              <Metric title="Comportamento capacitivo" value={`${fmt(recommendation.capacitivePercent)}%`} detail={`${recommendation.capacitiveSamples} capacitiva(s) · ${recommendation.inductiveSamples} indutiva(s)`} />
+            </div>
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-violet-200 bg-white p-4"><h3 className="mb-2 text-sm font-bold text-violet-950">Ações recomendadas</h3>{recommendation.actions.map((action) => <p key={action} className="mb-2 flex gap-2 text-sm text-slate-700"><CheckCircle2 className="mt-0.5 shrink-0 text-violet-600" size={16} />{action}</p>)}</div>
+              <div className="rounded-lg border border-amber-200 bg-white p-4"><h3 className="mb-2 text-sm font-bold text-amber-900">Alertas e limitações</h3>{recommendation.warnings.length ? recommendation.warnings.map((warning) => <p key={warning} className="mb-2 flex gap-2 text-sm text-amber-800"><AlertTriangle className="mt-0.5 shrink-0" size={16} />{warning}</p>) : <p className="text-sm text-emerald-700">Nenhuma limitação adicional identificada pelo motor.</p>}</div>
+            </div>
+            <p className="mt-3 text-xs text-violet-700">Fórmula: {recommendation.formula}</p>
+          </section>
+
           <section className="grid gap-6 lg:grid-cols-2">
             <form onSubmit={saveMeasurement} className="rounded-xl border bg-white p-5 shadow-sm">
               <h2 className="mb-4 flex items-center gap-2 font-bold"><Plus size={19} /> Nova medição</h2>
@@ -405,4 +455,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Metric({ title, value, detail }: { title: string; value: string; detail: string }) {
   return <div className="rounded-xl border bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p><p className="mt-1 text-2xl font-bold capitalize text-slate-900">{value}</p><p className="mt-1 text-xs text-slate-500">{detail}</p></div>;
+}
+
+function recommendationLabel(decision: string) {
+  return ({
+    coletar_dados: "Coletar mais dados",
+    corrigir_sobrecompensacao: "Corrigir sobrecompensação",
+    recomendar_banco: "Dimensionar/reconfigurar banco",
+    manter_banco: "Manter potência instalada",
+  } as Record<string, string>)[decision] ?? decision;
 }
