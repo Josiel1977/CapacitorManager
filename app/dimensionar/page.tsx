@@ -11,7 +11,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
 import jsPDF from "jspdf";
 import { toPng } from "html-to-image";
-import { supabase } from "@/lib/supabase";\nimport { parseEquatorialInvoiceText, reconstructPdfText } from "@/lib/equatorial-invoice-parser";
+import { supabase } from "@/lib/supabase";
+import { parseEquatorialInvoiceText, reconstructPdfText } from "@/lib/equatorial-invoice-parser";
 import {
   calculateAuditableSizing,
   MINIMUM_INVOICES,
