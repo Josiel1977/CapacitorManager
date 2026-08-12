@@ -68,11 +68,17 @@ const billedItem = (text: string, label: RegExp) => {
 
 export function parseEquatorialInvoiceText(text: string): ParsedEquatorialInvoice {
   const normalized = text.replace(/\s+/g, " ").trim();
-  const isEquatorialPara = /Equatorial\s+Par[aá]\s+Distribuidora/i.test(normalized);
-  const month = normalized.match(/(?:Conta\s*M[eê]s|Refer[eê]ncia|Compet[eê]ncia)\s*[:\-]?\s*(\d{2}\/\d{4})/i)
-    ?? normalized.match(/\b(\d{2}\/\d{4})\b/);
+  const isEquatorialPara = /Equatorial/i.test(normalized) && /Par[aá]/i.test(normalized);
+  const labelledMonth = normalized.match(/(?:Conta\s*M[eê]s|Refer[eê]ncia|Compet[eê]ncia)\s*[:\-]?\s*(\d{2}\/\d{4})/i);
+  const monthCandidates = [...normalized.matchAll(/\b(0[1-9]|1[0-2])\/(20\d{2})\b/g)].map((match) => match[0]);
+  const frequency = new Map<string, number>();
+  for (const candidate of monthCandidates) frequency.set(candidate, (frequency.get(candidate) ?? 0) + 1);
+  const predominantMonth = [...frequency.entries()].sort((a, b) =>
+    b[1] - a[1] || Number(b[0].slice(3) + b[0].slice(0, 2)) - Number(a[0].slice(3) + a[0].slice(0, 2))
+  )[0]?.[0];
   const days = normalized.match(/N[ºo°]\s*de\s*Dias\s*(\d{1,2})/i);
-  const total = normalized.match(/Total\s*a\s*Pagar\s*R\$\s*([\d.]+,\d{2})/i);
+  const labelledTotal = normalized.match(/Total\s*a\s*Pagar\s*R\$\s*([\d.]+,\d{2})/i);
+  const currencyValues = [...normalized.matchAll(/R\$\s*([\d.]+,\d{2})/gi)].map((match) => parseBR(match[1]));
   const demandOffPeak = normalized.match(/Dem\.\s*M[aá]x\.\s*F\.\s*Ponta\s*\(kW\)\s*:\s*([\d.,]+)/i);
   const demandPeak = normalized.match(/Dem\.\s*M[aá]x\.\s*Ponta\s*\(kW\)\s*:\s*([\d.,]+)/i);
   const reactivePeak = billedItem(normalized, /Consumo\s+Reativo\s+Excedente\s+NP\s*\(kVAr\)/i);
@@ -88,14 +94,14 @@ export function parseEquatorialInvoiceText(text: string): ParsedEquatorialInvoic
 
   return {
     concessionaria: isEquatorialPara ? "EQUATORIAL_PARA" : "DESCONHECIDA",
-    mes_referencia: month?.[1] ?? "",
+    mes_referencia: labelledMonth?.[1] ?? predominantMonth ?? "",
     consumo_ponta_kwh: firstNumberAfter(normalized, /TUSD\s+Energia\s+Ponta\s*\(kWh\)/i),
     consumo_fora_ponta_kwh: firstNumberAfter(normalized, /TUSD\s+Energia\s+Fora\s+Ponta\s*\(kWh\)/i),
     demanda_ponta_kw: parseBR(demandPeak?.[1]),
     demanda_fora_ponta_kw: parseBR(demandOffPeak?.[1]),
     reativo_ponta_kvarh: reactivePeak?.quantity ?? 0,
     reativo_fora_ponta_kvarh: reactiveOffPeak?.quantity ?? 0,
-    total_pagar: parseBR(total?.[1]),
+    total_pagar: parseBR(labelledTotal?.[1]) || Math.max(0, ...currencyValues),
     dias_ciclo: days ? Number(days[1]) : 30,
     fp_calculado: undefined,
     reativo_origem: "excedente_faturado",
