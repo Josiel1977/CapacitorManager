@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Factory, Loader2, Plus, RefreshCw, ShieldCheck } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Factory, FileUp, Loader2, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import Swal from "sweetalert2";
 import { supabase } from "@/lib/supabase";
 import { analyzeTransformerMeasurements } from "@/lib/transformer-measurement-analysis";
+import { parseEmbrasulReport } from "@/lib/embrasul-report-parser";
+import { reconstructPdfText } from "@/lib/equatorial-invoice-parser";
 
 interface Transformer {
   id: string;
@@ -57,6 +59,9 @@ export default function TransformerMeasurementsPage() {
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [fixedCapacitorConnected, setFixedCapacitorConnected] = useState(true);
+  const [fixedCapacitorKvar, setFixedCapacitorKvar] = useState("5");
   const [error, setError] = useState<string | null>(null);
 
   const selected = transformers.find((item) => item.id === selectedId) ?? null;
@@ -167,6 +172,70 @@ export default function TransformerMeasurementsPage() {
     }
   };
 
+  const importEmbrasulPdf = async (file?: File) => {
+    if (!file || !tenantId || !selectedId) return;
+    try {
+      setImporting(true);
+      const pdfjs = await import("pdfjs-dist");
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+        "pdfjs-dist/build/pdf.worker.min.mjs",
+        import.meta.url,
+      ).toString();
+      const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+      let text = "";
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+        const page = await pdf.getPage(pageNumber);
+        const content = await page.getTextContent();
+        text += reconstructPdfText(content.items as any[]) + "\n";
+      }
+      const parsed = parseEmbrasulReport(text, {
+        fixedCapacitorConnected,
+        fixedCapacitorKvar: numberOrNull(fixedCapacitorKvar),
+      });
+      if (parsed.confidence === "insuficiente" || parsed.averageActivePowerKw == null || parsed.averageReactivePowerKvar == null) {
+        throw new Error("O relatório não contém P, Q e S médios em um formato Embrasul reconhecido.");
+      }
+      const confirm = await Swal.fire({
+        title: "Relatório Embrasul identificado",
+        html: `<div class="text-left text-sm">
+          <p><b>Analisador:</b> ${parsed.analyzer} · NS ${parsed.serialNumber ?? "não identificado"}</p>
+          <p><b>Integração:</b> ${parsed.integrationMinutes ?? "—"} min</p>
+          <p><b>P/Q/S:</b> ${parsed.averageActivePowerKw} kW / ${parsed.averageReactivePowerKvar} kVAr / ${parsed.averageApparentPowerKva ?? "—"} kVA</p>
+          <p><b>FP:</b> ${parsed.averagePowerFactor ?? "—"} (${parsed.reactiveBehavior})</p>
+          <p><b>Capacitor fixo:</b> ${fixedCapacitorConnected ? `ligado (${fixedCapacitorKvar || "?"} kVAr)` : "desligado"}</p>
+          <hr class="my-2"/>${parsed.alerts.map((alert) => `<p>⚠️ ${alert}</p>`).join("")}
+        </div>`,
+        icon: parsed.reactiveBehavior === "capacitivo" ? "warning" : "info",
+        showCancelButton: true,
+        confirmButtonText: "Importar medição média",
+        cancelButtonText: "Cancelar",
+      });
+      if (!confirm.isConfirmed) return;
+      const { error: insertError } = await supabase.from("transformer_load_measurements").insert({
+        tenant_id: tenantId,
+        transformer_id: selectedId,
+        measured_at: parsed.endedAt ?? new Date().toISOString(),
+        interval_minutes: parsed.integrationMinutes,
+        active_power_kw: parsed.averageActivePowerKw,
+        reactive_power_kvar: parsed.averageReactivePowerKvar,
+        apparent_power_kva: parsed.averageApparentPowerKva,
+        power_factor: parsed.averagePowerFactor,
+        voltage_v: parsed.averagePhaseVoltageV,
+        current_a: parsed.averagePhaseCurrentA,
+        source: "analisador",
+        source_device: `${parsed.analyzer} NS:${parsed.serialNumber ?? "?"}`,
+        notes: `Importado de ${file.name}. Capacitor fixo ${fixedCapacitorConnected ? `ligado (${fixedCapacitorKvar || "?"} kVAr)` : "desligado"}. Parser Embrasul. ${parsed.alerts.join(" ")}`,
+      });
+      if (insertError) throw insertError;
+      await loadMeasurements(selectedId);
+      await Swal.fire("Relatório importado", "A medição média foi registrada com o contexto do capacitor fixo.", "success");
+    } catch (cause) {
+      await Swal.fire("Falha na importação", cause instanceof Error ? cause.message : "Não foi possível interpretar o relatório.", "error");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   if (loading) return <div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="animate-spin text-primary" size={36} /></div>;
 
   return (
@@ -186,6 +255,19 @@ export default function TransformerMeasurementsPage() {
             <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="w-full rounded-lg border px-3 py-2 md:max-w-md">
               {transformers.map((item, index) => <option key={item.id} value={item.id}>T{index + 1} — {Math.max(1, item.quantidade ?? 1)} × {item.potencia_kva} kVA{item.tensao_v ? ` / ${item.tensao_v} V` : ""}</option>)}
             </select>
+          </section>
+
+          <section className="rounded-xl border border-blue-200 bg-blue-50 p-5">
+            <h2 className="flex items-center gap-2 font-bold text-blue-950"><FileUp size={19} /> Importar relatório Embrasul</h2>
+            <p className="mt-1 text-sm text-blue-800">Informe a condição real do capacitor durante a campanha. O sistema não ignora o reativo capacitivo: ele contextualiza a medição.</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <label className="text-sm text-blue-950"><span className="mb-1 block font-medium">Capacitor fixo durante a medição</span><select value={fixedCapacitorConnected ? "ligado" : "desligado"} onChange={(e) => setFixedCapacitorConnected(e.target.value === "ligado")} className="input"><option value="ligado">Ligado</option><option value="desligado">Desligado</option></select></label>
+              <label className="text-sm text-blue-950"><span className="mb-1 block font-medium">Potência fixa (kVAr)</span><input value={fixedCapacitorKvar} disabled={!fixedCapacitorConnected} onChange={(e) => setFixedCapacitorKvar(e.target.value)} className="input disabled:bg-slate-100" /></label>
+              <label className="flex cursor-pointer items-center justify-center gap-2 self-end rounded-lg bg-blue-700 px-4 py-3 font-semibold text-white">
+                {importing ? <Loader2 className="animate-spin" size={18} /> : <FileUp size={18} />} Selecionar PDF
+                <input type="file" accept="application/pdf" className="hidden" disabled={importing} onChange={(e) => { void importEmbrasulPdf(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+              </label>
+            </div>
           </section>
 
           <section className="grid gap-4 md:grid-cols-4">
