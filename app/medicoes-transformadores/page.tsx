@@ -133,6 +133,10 @@ export default function TransformerMeasurementsPage() {
       await Swal.fire("Fator de potência inválido", "Use um valor entre -1 e 1, diferente de zero. Valor negativo indica capacitivo.", "warning");
       return;
     }
+    const calculatedS = s ?? (p != null && q != null ? Math.sqrt(p ** 2 + q ** 2) : null);
+    const calculatedFp = fp ?? (p != null && calculatedS != null && calculatedS > 0
+      ? Math.min(1, Math.abs(p) / calculatedS)
+      : null);
     try {
       setSaving(true);
       const { error: insertError } = await supabase.from("transformer_load_measurements").insert({
@@ -142,8 +146,8 @@ export default function TransformerMeasurementsPage() {
         interval_minutes: numberOrNull(form.interval_minutes),
         active_power_kw: p,
         reactive_power_kvar: q,
-        apparent_power_kva: s,
-        power_factor: fp,
+        apparent_power_kva: calculatedS,
+        power_factor: calculatedFp,
         voltage_v: numberOrNull(form.voltage_v),
         current_a: numberOrNull(form.current_a),
         thdv_percent: numberOrNull(form.thdv_percent),
