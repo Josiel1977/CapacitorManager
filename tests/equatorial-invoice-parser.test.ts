@@ -64,3 +64,9 @@ test("não confunde competência com emissão ou próxima leitura", () => {
     07/2026 21/10/2026 R$ 6.984,32 07/08/2026 às 09:52:28`;
   assert.equal(parseEquatorialInvoiceText(graphicHeader).mes_referencia, "07/2026");
 });
+
+test("prioriza competência auditável presente no nome do PDF", () => {
+  const ambiguous = `${invoiceText.replace(/Conta Mês 07\/2026/, "")}
+    30/06/2026 31/07/2026 31/08/2026 07/08/2026 07/08/2026`;
+  assert.equal(parseEquatorialInvoiceText(ambiguous, "EQTL - 07.2026.pdf").mes_referencia, "07/2026");
+});
