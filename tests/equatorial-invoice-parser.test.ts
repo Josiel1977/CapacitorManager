@@ -45,3 +45,14 @@ test("reconstrói linhas por coordenadas antes de interpretar o PDF", () => {
   ]);
   assert.equal(text, "Conta Mês 07/2026\nTUSD Energia Fora Ponta (kWh) 24.608,05");
 });
+
+test("recupera cabeçalho fragmentado do novo formulário gráfico", () => {
+  const fragmented = `${invoiceText.replace("Conta Mês 07/2026 Total a Pagar R$ 6.984,32", "Conta Mês Total a Pagar")}
+    30/06/2026 31/07/2026 31/08/2026 07/2026 07/2026
+    Equatorial Energia Pará Distribuidora
+    R$ 6.984,32`;
+  const result = parseEquatorialInvoiceText(fragmented);
+  assert.equal(result.mes_referencia, "07/2026");
+  assert.equal(result.concessionaria, "EQUATORIAL_PARA");
+  assert.equal(result.total_pagar, 6984.32);
+});
