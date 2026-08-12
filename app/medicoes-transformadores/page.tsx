@@ -3,13 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, CheckCircle2, Factory, FileUp, Loader2, Plus, RefreshCw, Save, ShieldCheck } from "lucide-react";
 import Swal from "sweetalert2";
-import Papa from "papaparse";
 import { supabase } from "@/lib/supabase";
 import { analyzeTransformerMeasurements } from "@/lib/transformer-measurement-analysis";
 import { parseEmbrasulReport } from "@/lib/embrasul-report-parser";
 import { reconstructPdfText } from "@/lib/equatorial-invoice-parser";
 import { recommendCapacitorBank, type RecommendationMode } from "@/lib/capacitor-recommendation";
-import { parseEmbrasulSeries } from "@/lib/embrasul-series-parser";
+import { parseEmbrasulSeriesText } from "@/lib/embrasul-series-parser";
 
 interface Transformer {
   id: string;
@@ -325,19 +324,10 @@ export default function TransformerMeasurementsPage() {
     if (!file || !tenantId || !selectedId) return;
     try {
       setImportingSeries(true);
-      const parsedCsv = await new Promise<Papa.ParseResult<Record<string, unknown>>>((resolve, reject) => {
-        Papa.parse<Record<string, unknown>>(file, {
-          header: true,
-          skipEmptyLines: "greedy",
-          dynamicTyping: false,
-          complete: resolve,
-          error: reject,
-        });
-      });
-      if (parsedCsv.errors.some((item) => item.type === "Delimiter" || item.type === "Quotes")) {
-        throw new Error(`CSV inválido: ${parsedCsv.errors[0].message}`);
-      }
-      const series = parseEmbrasulSeries(parsedCsv.data);
+      const bytes = await file.arrayBuffer();
+      const utf8 = new TextDecoder("utf-8").decode(bytes);
+      const text = utf8.includes("�") ? new TextDecoder("windows-1252").decode(bytes) : utf8;
+      const series = parseEmbrasulSeriesText(text);
       if (!series.measurements.length) throw new Error(series.warnings[0] ?? "Nenhuma medição válida foi reconhecida.");
       const mapped = Object.entries(series.mappedColumns).filter(([, value]) => value).map(([field, value]) => `${field}: ${value}`).join(" · ");
       const confirm = await Swal.fire({
@@ -439,11 +429,11 @@ export default function TransformerMeasurementsPage() {
                 <input type="file" accept="application/pdf" className="hidden" disabled={importing} onChange={(e) => { void importEmbrasulPdf(e.target.files?.[0]); e.currentTarget.value = ""; }} />
               </label>
               <label className="flex cursor-pointer items-center justify-center gap-2 self-end rounded-lg bg-violet-700 px-4 py-3 font-semibold text-white">
-                {importingSeries ? <Loader2 className="animate-spin" size={18} /> : <FileUp size={18} />} Série CSV
-                <input type="file" accept=".csv,text/csv" className="hidden" disabled={importingSeries} onChange={(e) => { void importEmbrasulSeries(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+                {importingSeries ? <Loader2 className="animate-spin" size={18} /> : <FileUp size={18} />} Série TXT/CSV
+                <input type="file" accept=".txt,.csv,text/plain,text/csv" className="hidden" disabled={importingSeries} onChange={(e) => { void importEmbrasulSeries(e.target.files?.[0]); e.currentTarget.value = ""; }} />
               </label>
             </div>
-            <p className="mt-3 text-xs text-blue-700">PDF importa apenas a média para diagnóstico. CSV importa cada intervalo e pode liberar o dimensionamento quando houver campanha representativa.</p>
+            <p className="mt-3 text-xs text-blue-700">PDF importa apenas a média para diagnóstico. TXT/CSV Embrasul importa cada intervalo e pode liberar o dimensionamento quando houver campanha representativa.</p>
           </section>
 
           <section className="grid gap-4 md:grid-cols-4">
