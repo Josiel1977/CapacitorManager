@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Factory, FileUp, Loader2, Plus, RefreshCw, ShieldCheck } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Factory, FileUp, Loader2, Plus, RefreshCw, Save, ShieldCheck } from "lucide-react";
 import Swal from "sweetalert2";
 import { supabase } from "@/lib/supabase";
 import { analyzeTransformerMeasurements } from "@/lib/transformer-measurement-analysis";
 import { parseEmbrasulReport } from "@/lib/embrasul-report-parser";
 import { reconstructPdfText } from "@/lib/equatorial-invoice-parser";
+import { recommendCapacitorBank, type RecommendationMode } from "@/lib/capacitor-recommendation";
 
 interface Transformer {
   id: string;
@@ -43,6 +44,8 @@ const emptyForm = () => ({
   source: "manual", source_device: "", notes: "",
 });
 
+const emptyTransformerForm = () => ({ potencia_kva: "150", quantidade: "1", tensao_v: "380" });
+
 const numberOrNull = (value: string) => {
   if (!value.trim()) return null;
   const parsed = Number(value.replace(",", "."));
@@ -62,9 +65,24 @@ export default function TransformerMeasurementsPage() {
   const [importing, setImporting] = useState(false);
   const [fixedCapacitorConnected, setFixedCapacitorConnected] = useState(true);
   const [fixedCapacitorKvar, setFixedCapacitorKvar] = useState("5");
+  const [transformerForm, setTransformerForm] = useState(emptyTransformerForm);
+  const [savingTransformer, setSavingTransformer] = useState(false);
+  const [recommendationMode, setRecommendationMode] = useState<RecommendationMode>("otimizar_existente");
+  const [targetPowerFactor, setTargetPowerFactor] = useState("0.92");
+  const [installedBankKvar, setInstalledBankKvar] = useState("5");
   const [error, setError] = useState<string | null>(null);
 
   const selected = transformers.find((item) => item.id === selectedId) ?? null;
+  const selectedTotalKva = Number(selected?.potencia_kva ?? 0) * Math.max(1, Number(selected?.quantidade ?? 1));
+
+  useEffect(() => {
+    if (!selected) return;
+    setTransformerForm({
+      potencia_kva: String(selected.potencia_kva),
+      quantidade: String(Math.max(1, selected.quantidade ?? 1)),
+      tensao_v: selected.tensao_v == null ? "" : String(selected.tensao_v),
+    });
+  }, [selected]);
 
   const loadMeasurements = useCallback(async (transformerId: string) => {
     if (!transformerId) { setMeasurements([]); return; }
@@ -111,8 +129,50 @@ export default function TransformerMeasurementsPage() {
     loadMeasurements(selectedId).catch((cause) => setError(cause instanceof Error ? cause.message : "Falha ao carregar medições."));
   }, [selectedId, loadMeasurements]);
 
+  const saveTransformer = async (createNew = false) => {
+    if (!tenantId) return;
+    const potencia = numberOrNull(transformerForm.potencia_kva);
+    const quantidade = Math.trunc(numberOrNull(transformerForm.quantidade) ?? 0);
+    const tensao = numberOrNull(transformerForm.tensao_v);
+    if (potencia == null || potencia <= 0 || quantidade < 1 || tensao == null || tensao <= 0) {
+      await Swal.fire("Dados inválidos", "Informe potência por unidade, quantidade e tensão maiores que zero.", "warning");
+      return;
+    }
+    try {
+      setSavingTransformer(true);
+      const payload = {
+        ...(createNew ? {} : { id: selectedId }),
+        tenant_id: tenantId,
+        potencia_kva: potencia,
+        quantidade,
+        tensao_v: tensao,
+        horas_trabalho: 220,
+      };
+      const { data, error: saveError } = await supabase
+        .from("transformadores")
+        .upsert(payload)
+        .select("id, potencia_kva, quantidade, tensao_v")
+        .single();
+      if (saveError) throw saveError;
+      const saved = data as Transformer;
+      setTransformers((current) => createNew
+        ? [...current, saved]
+        : current.map((item) => item.id === saved.id ? saved : item));
+      setSelectedId(saved.id);
+      await Swal.fire(
+        createNew ? "Transformador adicionado" : "Transformador atualizado",
+        `${quantidade} × ${potencia} kVA = ${quantidade * potencia} kVA em ${tensao} V.`,
+        "success",
+      );
+    } catch (cause) {
+      await Swal.fire("Não foi possível salvar", cause instanceof Error ? cause.message : "Verifique os dados e tente novamente.", "error");
+    } finally {
+      setSavingTransformer(false);
+    }
+  };
+
   const analysis = useMemo(() => analyzeTransformerMeasurements(
-    Number(selected?.potencia_kva ?? 0) * Math.max(1, Number(selected?.quantidade ?? 1)),
+    selectedTotalKva,
     measurements.map((item) => ({
       apparentPowerKva: item.apparent_power_kva,
       activePowerKw: item.active_power_kw,
@@ -121,7 +181,29 @@ export default function TransformerMeasurementsPage() {
       thdvPercent: item.thdv_percent,
       thdiPercent: item.thdi_percent,
     })),
-  ), [measurements, selected]);
+  ), [measurements, selectedTotalKva]);
+
+  const parsedTargetPowerFactor = numberOrNull(targetPowerFactor);
+  const safeTargetPowerFactor = parsedTargetPowerFactor != null && parsedTargetPowerFactor >= 0.92 && parsedTargetPowerFactor < 1
+    ? parsedTargetPowerFactor
+    : 0.92;
+  const recommendation = useMemo(() => recommendCapacitorBank({
+    mode: recommendationMode,
+    targetPowerFactor: safeTargetPowerFactor,
+    transformerKva: selectedTotalKva,
+    samples: measurements.map((item) => ({
+      timestamp: item.measured_at,
+      activePowerKw: item.active_power_kw ?? 0,
+      reactivePowerKvar: item.reactive_power_kvar ?? 0,
+      powerFactor: item.power_factor,
+      thdvPercent: item.thdv_percent,
+      thdiPercent: item.thdi_percent,
+    })),
+    existingBank: recommendationMode === "otimizar_existente" ? {
+      totalKvar: numberOrNull(installedBankKvar) ?? 0,
+      fixedKvar: fixedCapacitorConnected ? numberOrNull(fixedCapacitorKvar) ?? 0 : 0,
+    } : undefined,
+  }), [measurements, recommendationMode, safeTargetPowerFactor, selectedTotalKva, installedBankKvar, fixedCapacitorConnected, fixedCapacitorKvar]);
 
   const saveMeasurement = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -247,14 +329,35 @@ export default function TransformerMeasurementsPage() {
 
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
       {!transformers.length ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-800">Nenhum transformador cadastrado para esta empresa. Cadastre-o no dimensionamento antes de registrar medições.</div>
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-6">
+          <h2 className="font-bold text-amber-950">Cadastre o transformador antes de importar o analisador</h2>
+          <p className="mt-1 text-sm text-amber-800">Informe uma unidade ou um conjunto de transformadores iguais. A potência total será calculada automaticamente.</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <label className="text-sm"><span className="mb-1 block font-medium">Potência por unidade (kVA)</span><input inputMode="decimal" value={transformerForm.potencia_kva} onChange={(e) => setTransformerForm({ ...transformerForm, potencia_kva: e.target.value })} className="input" /></label>
+            <label className="text-sm"><span className="mb-1 block font-medium">Quantidade</span><input inputMode="numeric" value={transformerForm.quantidade} onChange={(e) => setTransformerForm({ ...transformerForm, quantidade: e.target.value })} className="input" /></label>
+            <label className="text-sm"><span className="mb-1 block font-medium">Tensão (V)</span><input inputMode="decimal" value={transformerForm.tensao_v} onChange={(e) => setTransformerForm({ ...transformerForm, tensao_v: e.target.value })} className="input" /></label>
+            <button type="button" disabled={savingTransformer} onClick={() => void saveTransformer(true)} className="flex items-center justify-center gap-2 self-end rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">{savingTransformer ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />} Cadastrar e analisar</button>
+          </div>
+        </section>
       ) : (
         <>
           <section className="rounded-xl border bg-white p-5 shadow-sm">
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Transformador analisado</label>
-            <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="w-full rounded-lg border px-3 py-2 md:max-w-md">
-              {transformers.map((item, index) => <option key={item.id} value={item.id}>T{index + 1} — {Math.max(1, item.quantidade ?? 1)} × {item.potencia_kva} kVA{item.tensao_v ? ` / ${item.tensao_v} V` : ""}</option>)}
-            </select>
+            <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+              <label className="block flex-1 text-sm font-semibold text-slate-700">Transformador ou conjunto analisado
+                <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="mt-2 w-full rounded-lg border px-3 py-2 md:max-w-xl">
+                  {transformers.map((item, index) => <option key={item.id} value={item.id}>T{index + 1} — {Math.max(1, item.quantidade ?? 1)} × {item.potencia_kva} kVA = {Math.max(1, item.quantidade ?? 1) * item.potencia_kva} kVA{item.tensao_v ? ` / ${item.tensao_v} V` : ""}</option>)}
+                </select>
+              </label>
+              <p className="text-sm font-semibold text-primary">Capacidade analisada: {fmt(selectedTotalKva)} kVA</p>
+            </div>
+            <div className="mt-4 grid gap-3 border-t pt-4 md:grid-cols-5">
+              <label className="text-sm"><span className="mb-1 block font-medium text-slate-700">Potência por unidade (kVA)</span><input inputMode="decimal" value={transformerForm.potencia_kva} onChange={(e) => setTransformerForm({ ...transformerForm, potencia_kva: e.target.value })} className="input" /></label>
+              <label className="text-sm"><span className="mb-1 block font-medium text-slate-700">Quantidade</span><input inputMode="numeric" value={transformerForm.quantidade} onChange={(e) => setTransformerForm({ ...transformerForm, quantidade: e.target.value })} className="input" /></label>
+              <label className="text-sm"><span className="mb-1 block font-medium text-slate-700">Tensão (V)</span><input inputMode="decimal" value={transformerForm.tensao_v} onChange={(e) => setTransformerForm({ ...transformerForm, tensao_v: e.target.value })} className="input" /></label>
+              <button type="button" disabled={savingTransformer || !selectedId} onClick={() => void saveTransformer(false)} className="flex items-center justify-center gap-2 self-end rounded-lg bg-slate-800 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"><Save size={17} /> Atualizar selecionado</button>
+              <button type="button" disabled={savingTransformer} onClick={() => void saveTransformer(true)} className="flex items-center justify-center gap-2 self-end rounded-lg border border-primary px-4 py-3 text-sm font-semibold text-primary disabled:opacity-60"><Plus size={17} /> Adicionar como novo</button>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">Para vários transformadores iguais, informe a quantidade. Se o analisador estiver em apenas um transformador, cadastre e selecione essa unidade separadamente. Não misture medições de pontos elétricos diferentes.</p>
           </section>
 
           <section className="rounded-xl border border-blue-200 bg-blue-50 p-5">
@@ -275,6 +378,30 @@ export default function TransformerMeasurementsPage() {
             <Metric title="Carga média" value={`${fmt(analysis.averageLoadPercent)}%`} detail={`mín. ${fmt(analysis.minimumLoadPercent)}% · máx. ${fmt(analysis.maximumLoadPercent)}%`} />
             <Metric title="FP médio" value={fmt(analysis.averagePowerFactor, 3)} detail={`mín. ${fmt(analysis.minimumPowerFactor, 3)}`} />
             <Metric title="Triagem" value={analysis.status.replace("_", " ")} detail={`motor v${analysis.version}`} />
+          </section>
+
+          <section className="rounded-xl border border-violet-200 bg-violet-50 p-5 shadow-sm">
+            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div><h2 className="flex items-center gap-2 font-bold text-violet-950"><ShieldCheck size={19} /> Recomendação técnica do banco</h2><p className="mt-1 text-sm text-violet-800">Motor auditável v{recommendation.engineVersion}. A recomendação considera somente as medições do transformador/conjunto selecionado.</p></div>
+              <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold uppercase ${recommendation.specificationAllowed ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{recommendation.specificationAllowed ? "especificação liberada" : "diagnóstico preliminar"}</span>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <label className="text-sm text-violet-950"><span className="mb-1 block font-medium">Objetivo da análise</span><select value={recommendationMode} onChange={(e) => setRecommendationMode(e.target.value as RecommendationMode)} className="input"><option value="novo_banco">Projetar banco novo</option><option value="otimizar_existente">Otimizar banco existente</option></select></label>
+              <label className="text-sm text-violet-950"><span className="mb-1 block font-medium">FP alvo</span><input inputMode="decimal" value={targetPowerFactor} onChange={(e) => setTargetPowerFactor(e.target.value)} className="input" /></label>
+              {recommendationMode === "otimizar_existente" && <label className="text-sm text-violet-950"><span className="mb-1 block font-medium">Banco total instalado (kVAr)</span><input inputMode="decimal" value={installedBankKvar} onChange={(e) => setInstalledBankKvar(e.target.value)} className="input" /></label>}
+              <div className="rounded-lg bg-white p-3 text-sm"><span className="block text-xs font-semibold uppercase text-slate-500">Decisão</span><strong className="mt-1 block text-violet-950">{recommendationLabel(recommendation.decision)}</strong><span className="text-xs text-slate-500">Confiança: {recommendation.confidence}</span></div>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Metric title="Potência indicada" value={recommendation.recommendedKvar == null ? "Não liberada" : `${fmt(recommendation.recommendedKvar)} kVAr`} detail={recommendation.p90RequiredKvar == null ? "P90 indisponível" : `necessidade P90: ${fmt(recommendation.p90RequiredKvar)} kVAr`} />
+              <Metric title="Estágios sugeridos" value={recommendation.suggestedStagesKvar.length ? recommendation.suggestedStagesKvar.map((value) => fmt(value)).join(" + ") : "—"} detail={recommendation.suggestedStagesKvar.length ? "valores comerciais em kVAr" : "aguardando campanha válida"} />
+              <Metric title="Campanha" value={`${recommendation.validSamples} amostra(s)`} detail={recommendation.coverageHours == null ? "cobertura não determinada" : `${fmt(recommendation.coverageHours)} horas de cobertura`} />
+              <Metric title="Comportamento capacitivo" value={`${fmt(recommendation.capacitivePercent)}%`} detail={`${recommendation.capacitiveSamples} capacitiva(s) · ${recommendation.inductiveSamples} indutiva(s)`} />
+            </div>
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-violet-200 bg-white p-4"><h3 className="mb-2 text-sm font-bold text-violet-950">Ações recomendadas</h3>{recommendation.actions.map((action) => <p key={action} className="mb-2 flex gap-2 text-sm text-slate-700"><CheckCircle2 className="mt-0.5 shrink-0 text-violet-600" size={16} />{action}</p>)}</div>
+              <div className="rounded-lg border border-amber-200 bg-white p-4"><h3 className="mb-2 text-sm font-bold text-amber-900">Alertas e limitações</h3>{recommendation.warnings.length ? recommendation.warnings.map((warning) => <p key={warning} className="mb-2 flex gap-2 text-sm text-amber-800"><AlertTriangle className="mt-0.5 shrink-0" size={16} />{warning}</p>) : <p className="text-sm text-emerald-700">Nenhuma limitação adicional identificada pelo motor.</p>}</div>
+            </div>
+            <p className="mt-3 text-xs text-violet-700">Fórmula: {recommendation.formula}</p>
           </section>
 
           <section className="grid gap-6 lg:grid-cols-2">
@@ -328,4 +455,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Metric({ title, value, detail }: { title: string; value: string; detail: string }) {
   return <div className="rounded-xl border bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p><p className="mt-1 text-2xl font-bold capitalize text-slate-900">{value}</p><p className="mt-1 text-xs text-slate-500">{detail}</p></div>;
+}
+
+function recommendationLabel(decision: string) {
+  return ({
+    coletar_dados: "Coletar mais dados",
+    corrigir_sobrecompensacao: "Corrigir sobrecompensação",
+    recomendar_banco: "Dimensionar/reconfigurar banco",
+    manter_banco: "Manter potência instalada",
+  } as Record<string, string>)[decision] ?? decision;
 }
