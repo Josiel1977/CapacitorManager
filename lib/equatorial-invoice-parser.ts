@@ -18,6 +18,31 @@ export interface ParsedEquatorialInvoice {
 
 const BR_NUMBER = "([\\d.]+,\\d+)";
 
+export interface PdfTextItemLike {
+  str: string;
+  transform?: number[];
+}
+
+export function reconstructPdfText(items: PdfTextItemLike[]): string {
+  const positioned = items
+    .filter((item) => item.str?.trim())
+    .map((item, index) => ({
+      text: item.str.trim(),
+      x: item.transform?.[4] ?? index,
+      y: item.transform?.[5] ?? 0,
+    }));
+  const rows: Array<{ y: number; items: typeof positioned }> = [];
+  for (const item of positioned.sort((a, b) => b.y - a.y || a.x - b.x)) {
+    const row = rows.find((candidate) => Math.abs(candidate.y - item.y) <= 2);
+    if (row) row.items.push(item);
+    else rows.push({ y: item.y, items: [item] });
+  }
+  return rows
+    .sort((a, b) => b.y - a.y)
+    .map((row) => row.items.sort((a, b) => a.x - b.x).map((item) => item.text).join(" "))
+    .join("\n");
+}
+
 const parseBR = (value?: string) => value
   ? Number(value.replace(/\./g, "").replace(",", "."))
   : 0;
