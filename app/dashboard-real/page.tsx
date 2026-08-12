@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/utils";
+import { countCurrentCapacitorStatuses } from "@/lib/current-capacitor-status";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -172,20 +173,21 @@ export default function DashboardReal() {
       }
 
       const processed = await Promise.all(medicoesData.map(recalcularMedicao));
-      const statusCounts = processed.reduce(
-        (acc: any, curr: any) => {
-          acc[curr.status_validacao] = (acc[curr.status_validacao] || 0) + 1;
-          return acc;
-        },
-        { aprovado: 0, atencao: 0, reprovado: 0 },
-      );
-
+      // Estado atual por ativo: usa a medição mais recente de cada tipo de teste
+      // e conta cada capacitor uma única vez.
+      const statusCounts = countCurrentCapacitorStatuses(processed);
       const totalMedicoes = processed.length;
-      const percAprovado = totalMedicoes ? statusCounts.aprovado / totalMedicoes : 0;
+      const totalCapacitoresAvaliados =
+        statusCounts.aprovado + statusCounts.atencao + statusCounts.reprovado;
+      const percAprovado = totalCapacitoresAvaliados
+        ? statusCounts.aprovado / totalCapacitoresAvaliados
+        : 0;
 
       const economiaEstimada = maxEconomiaMensal * percAprovado * fatorEficiencia;
 
-      const eficienciaGeral = totalMedicoes ? (statusCounts.aprovado / totalMedicoes) * 100 : 0;
+      const eficienciaGeral = totalCapacitoresAvaliados
+        ? (statusCounts.aprovado / totalCapacitoresAvaliados) * 100
+        : 0;
 
       setStats({
         clientes: clientesCount || 0,
@@ -241,12 +243,13 @@ export default function DashboardReal() {
     visible: { y: 0, opacity: 1 },
   };
 
-  // Mensagem enfática para capacitores reprovados
   const softwareMessage = stats.reprovados === 1
-    ? "⚠️ ALERTA: 1 capacitor fora do padrão! Substituição urgente recomendada para evitar multas e danos ao sistema."
+    ? "⚠️ 1 capacitor apresenta reprovação no estado atual. Realize reteste técnico antes de decidir pela substituição."
     : stats.reprovados > 1
-    ? `⚠️ ALERTA: ${stats.reprovados} capacitores fora do padrão! Substituição urgente recomendada para evitar multas e danos ao sistema.`
-    : "✅ Sistema operando normalmente. Software analisando 24/7 para manter o fator de potência ideal.";
+      ? `⚠️ ${stats.reprovados} capacitores apresentam reprovação no estado atual. Realize retestes técnicos e priorize a inspeção.`
+      : stats.atencao > 0
+        ? `⚠️ ${stats.atencao} capacitor(es) em atenção. Acompanhe a tendência e programe nova medição.`
+        : "✅ Capacitores avaliados dentro dos limites configurados.";
 
   return (
     <div className="space-y-8 pb-12">
@@ -360,7 +363,7 @@ export default function DashboardReal() {
             Status do Sistema
           </h3>
           <p className="text-xl font-bold text-slate-900">
-            {stats.reprovados > 0 ? "Manutenção Necessária - Urgente!" : "Otimização de Custos"}
+            {stats.reprovados > 0 ? "Confirmação técnica necessária" : "Otimização de Custos"}
           </p>
           <p className={cn(
             "text-xs mt-2 font-medium",
