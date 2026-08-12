@@ -1,0 +1,37 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { parseEquatorialInvoiceText } from "../lib/equatorial-invoice-parser.ts";
+
+const invoiceText = `
+Equatorial Pará Distribuidora de Energia S.A.
+Conta Mês 07/2026 Total a Pagar R$ 6.984,32
+Leitura Anterior 30/06/2026 Leitura Atual 31/07/2026 Nº de Dias 31
+TUSD Energia Fora Ponta (kWh) 24.608,05 0,203246 0,151860 314,23 950,28 5.001,48
+TUSD Energia Ponta (kWh) 1.688,90 0,203239 0,151860 21,56 65,22 343,25
+Consumo Reativo Excedente NP (kVAr) 365,08 0,383067 0,286220 8,79 26,57 139,85
+Consumo Reativo Excedente FP (kVAr) 4.925,27 0,383071 0,286220 118,54 358,48 1.886,73
+Dem. Máx. F. Ponta (kW): 194,80 Dem. Máx. Ponta (kW): 36,79
+`;
+
+test("extrai o novo layout Equatorial de julho de 2026", () => {
+  const result = parseEquatorialInvoiceText(invoiceText);
+  assert.equal(result.concessionaria, "EQUATORIAL_PARA");
+  assert.equal(result.mes_referencia, "07/2026");
+  assert.equal(result.consumo_ponta_kwh, 1688.9);
+  assert.equal(result.consumo_fora_ponta_kwh, 24608.05);
+  assert.equal(result.demanda_ponta_kw, 36.79);
+  assert.equal(result.demanda_fora_ponta_kw, 194.8);
+  assert.equal(result.reativo_ponta_kvarh, 365.08);
+  assert.equal(result.reativo_fora_ponta_kvarh, 4925.27);
+  assert.equal(result.total_pagar, 6984.32);
+  assert.equal(result.dias_ciclo, 31);
+});
+
+test("classifica reativo excedente sem inventar fator de potência", () => {
+  const result = parseEquatorialInvoiceText(invoiceText);
+  assert.equal(result.reativo_origem, "excedente_faturado");
+  assert.equal(result.fp_calculado, undefined);
+  assert.equal(result.penalidade_reativa_informada, 2026.58);
+  assert.ok(Math.abs((result.tarifa_reativa_aplicada ?? 0) - 0.3830707) < 0.000001);
+  assert.equal(result.fonte_dados, "pdf");
+});
