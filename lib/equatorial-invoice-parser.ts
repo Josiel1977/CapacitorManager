@@ -66,8 +66,9 @@ const billedItem = (text: string, label: RegExp) => {
   };
 };
 
-export function parseEquatorialInvoiceText(text: string): ParsedEquatorialInvoice {
+export function parseEquatorialInvoiceText(text: string, fileName = ""): ParsedEquatorialInvoice {
   const normalized = text.replace(/\s+/g, " ").trim();
+  const fileMonth = fileName.match(/(?:^|\D)(0[1-9]|1[0-2])[.\-_\/](20\d{2})(?:\D|$)/);
   const isEquatorialPara = /Equatorial/i.test(normalized) && /Par[aá]/i.test(normalized);
   const labelledMonth = normalized.match(/(?:Conta\s*M[eê]s|Refer[eê]ncia|Compet[eê]ncia)\s*[:\-]?\s*(\d{2}\/\d{4})/i);
   // No formulário gráfico, os títulos do quadro podem não ser extraídos, mas a linha mantém:
@@ -97,10 +98,12 @@ export function parseEquatorialInvoiceText(text: string): ParsedEquatorialInvoic
 
   return {
     concessionaria: isEquatorialPara ? "EQUATORIAL_PARA" : "DESCONHECIDA",
-    mes_referencia: labelledMonth?.[1]
-      ?? (billingSummaryMonth ? `${billingSummaryMonth[1]}/${billingSummaryMonth[2]}` : undefined)
-      ?? predominantMonth
-      ?? "",
+    mes_referencia: fileMonth
+      ? `${fileMonth[1]}/${fileMonth[2]}`
+      : labelledMonth?.[1]
+        ?? (billingSummaryMonth ? `${billingSummaryMonth[1]}/${billingSummaryMonth[2]}` : undefined)
+        ?? predominantMonth
+        ?? "",
     consumo_ponta_kwh: firstNumberAfter(normalized, /TUSD\s+Energia\s+Ponta\s*\(kWh\)/i),
     consumo_fora_ponta_kwh: firstNumberAfter(normalized, /TUSD\s+Energia\s+Fora\s+Ponta\s*\(kWh\)/i),
     demanda_ponta_kw: parseBR(demandPeak?.[1]),
