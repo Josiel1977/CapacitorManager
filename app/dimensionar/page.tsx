@@ -570,7 +570,7 @@ function DimensionarContent() {
       } else {
         texto = await extrairTextoDoPDF(file);
       }
-      const dadosExtraidos = isMarkdown ? parseFaturaFromMarkdown(texto) : parseEquatorialInvoiceText(texto);
+      const dadosExtraidos = isMarkdown ? parseFaturaFromMarkdown(texto) : parseEquatorialInvoiceText(texto, file.name);
       if (!dadosExtraidos.mes_referencia) throw new Error("Não foi possível identificar o mês/ano da fatura.");
       
       // Estima multa para exibição no preview (apenas para informação, não salva)
