@@ -34,6 +34,7 @@ const privateMenuItems = [
   { name: 'Análise de Massa', href: '/analise-massa', icon: Activity },
   { name: 'Dimensionar', href: '/dimensionar', icon: Calculator },
   { name: 'Medicoes', href: '/medicoes', icon: ClipboardCheck },
+  { name: 'Medições dos Trafos', href: '/medicoes-transformadores', icon: Activity },
   { name: 'Gráficos', href: '/graficos', icon: BarChart3 },
   { name: 'Histórico', href: '/historico', icon: History },
   { name: 'Relatórios', href: '/relatorios', icon: FileText },
