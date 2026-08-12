@@ -12,6 +12,7 @@ import Swal from "sweetalert2";
 import jsPDF from "jspdf";
 import { toPng } from "html-to-image";
 import { supabase } from "@/lib/supabase";
+import { parseEquatorialInvoiceText, reconstructPdfText } from "@/lib/equatorial-invoice-parser";
 import {
   calculateAuditableSizing,
   MINIMUM_INVOICES,
@@ -255,7 +256,7 @@ async function extrairTextoDoPDF(file: File): Promise<string> {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items.map((item: any) => item.str).join(" ");
+    const pageText = reconstructPdfText(content.items as any[]);
     textoCompleto += pageText + "\n";
   }
   return textoCompleto;
@@ -569,13 +570,13 @@ function DimensionarContent() {
       } else {
         texto = await extrairTextoDoPDF(file);
       }
-      const dadosExtraidos = isMarkdown ? parseFaturaFromMarkdown(texto) : parseFaturaFromPDF(texto);
+      const dadosExtraidos = isMarkdown ? parseFaturaFromMarkdown(texto) : parseEquatorialInvoiceText(texto, file.name);
       if (!dadosExtraidos.mes_referencia) throw new Error("Não foi possível identificar o mês/ano da fatura.");
       
       // Estima multa para exibição no preview (apenas para informação, não salva)
       const reativoTotal = (dadosExtraidos.reativo_ponta_kvarh || 0) + (dadosExtraidos.reativo_fora_ponta_kvarh || 0);
       const tarifa = TARIFAS_REATIVO[dadosExtraidos.concessionaria] || TARIFAS_REATIVO.DEFAULT;
-      const multaEstimada = reativoTotal * tarifa;
+      const multaEstimada = dadosExtraidos.penalidade_reativa_informada ?? reativoTotal * tarifa;
       
       const confirm = await Swal.fire({
         title: "Dados extraídos do arquivo",
@@ -590,7 +591,7 @@ function DimensionarContent() {
           <p><strong>Valor Total:</strong> ${formatMoney(dadosExtraidos.total_pagar || 0)}</p>
           <p><strong>Concessionária:</strong> ${dadosExtraidos.concessionaria}</p>
           <p><strong>Fator de Potência:</strong> ${dadosExtraidos.fp_calculado ? (dadosExtraidos.fp_calculado * 100).toFixed(1) + '%' : 'não identificado'}</p>
-          <p><strong>Multa por Reativo Excedente (estimada):</strong> ${multaEstimada > 0 ? formatMoney(multaEstimada) : 'não aplicável'}</p>
+          <p><strong>Cobrança por Reativo Excedente:</strong> ${multaEstimada > 0 ? formatMoney(multaEstimada) : 'não aplicável'} ${dadosExtraidos.penalidade_reativa_informada != null ? '(extraída da fatura)' : '(estimada)'}</p>
         </div>`,
         icon: "info",
         showCancelButton: true,
@@ -612,6 +613,10 @@ function DimensionarContent() {
         concessionaria: dadosExtraidos.concessionaria || "EQUATORIAL_PARA",
         tenant_id: tenantId,
         fp_calculado: dadosExtraidos.fp_calculado,
+        reativo_origem: dadosExtraidos.reativo_origem ?? "nao_classificado",
+        penalidade_reativa_informada: dadosExtraidos.penalidade_reativa_informada ?? null,
+        tarifa_reativa_aplicada: dadosExtraidos.tarifa_reativa_aplicada ?? null,
+        fonte_dados: dadosExtraidos.fonte_dados ?? (isMarkdown ? "manual" : "pdf"),
       };
       const { error } = await supabase.from("faturas").insert(novaFatura);
       if (error) throw error;
