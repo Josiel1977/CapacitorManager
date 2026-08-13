@@ -56,6 +56,7 @@ function calcularTendencia(medicoes: any[]) {
 }
 
 export default function HistoricoPage() {
+  const [capacitorIdFiltro, setCapacitorIdFiltro] = useState('');
   const [medicoes, setMedicoes] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +69,8 @@ export default function HistoricoPage() {
   });
 
   useEffect(() => {
+    const capacitorId = new URLSearchParams(window.location.search).get('capacitor_id') || '';
+    setCapacitorIdFiltro(capacitorId);
     fetchData();
   }, []);
 
@@ -150,6 +153,7 @@ export default function HistoricoPage() {
   };
 
   const filteredMedicoes = medicoes.filter(m => {
+    const matchCapacitor = !capacitorIdFiltro || m.capacitor_id === capacitorIdFiltro;
     const matchCliente = !filters.cliente_id || m.cliente_id === filters.cliente_id;
     const matchTipo = !filters.tipo_teste || m.tipo_teste === filters.tipo_teste;
     const matchStatus = !filters.status || m.status_validacao === filters.status;
@@ -160,7 +164,7 @@ export default function HistoricoPage() {
     const dataLimite = getDataLimite();
     const matchPeriodo = !dataLimite || new Date(m.created_at) >= dataLimite;
     
-    return matchCliente && matchTipo && matchStatus && matchSearch && matchPeriodo;
+    return matchCapacitor && matchCliente && matchTipo && matchStatus && matchSearch && matchPeriodo;
   });
 
   const medicoesPorCapacitor = filteredMedicoes.reduce((acc: any, med) => {
