@@ -1078,7 +1078,7 @@ export default function ManutencaoPage() {
                       ) : (
                         <button
                           onClick={() =>
-                            router.push(`/medicoes?capacitor_id=${cap.id}`)
+                            router.push(`/historico?capacitor_id=${cap.id}`)
                           }
                           className="px-3 py-1 bg-primary/10 text-primary text-xs rounded-lg hover:bg-primary/20 transition-colors"
                         >
