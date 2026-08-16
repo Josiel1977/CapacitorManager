@@ -6,8 +6,8 @@ import { useAuth } from '@/lib/AuthContext';
 import { useRouter } from 'next/navigation';
 import { 
   Plus, Search, Edit2, Trash2, X, Save, LayoutGrid, List,
-  Database, ChevronDown, RefreshCw, Calculator, Eye, ArrowRight,
-  Building, Zap, TrendingUp, Cpu
+  Database, ChevronDown, Eye, ArrowRight,
+  Building, Zap, TrendingUp, Sliders
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
@@ -25,12 +25,13 @@ export default function BancosPage() {
   const [viewMode, setViewMode] = useState<'cards' | 'lista'>('cards');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBanco, setEditingBanco] = useState<any>(null);
+  const [isManualOverride, setIsManualOverride] = useState(false); // Estado para permitir edição manual do kVAr
   const [formData, setFormData] = useState({
     cliente_id: '',
     nome_banco: '',
     localizacao: '',
     tensao_nominal: '',
-    potencia_trafo_kva: '', // Adicionado campo de potência do trafo em kVA
+    potencia_trafo_kva: '',
     potencia_total_kvar: '',
   });
   const [eficienciaMedia, setEficienciaMedia] = useState<number | null>(null);
@@ -61,12 +62,11 @@ export default function BancosPage() {
     if (isAuthenticated) fetchTenant();
   }, [user, isAuthenticated]);
 
-  // Carrega dados do tenant
+  // Carrega dados do tenant e calcula a potência real dos bancos via capacitores cadastrados
   const fetchData = async () => {
     if (!tenantId) return;
     setLoading(true);
     try {
-      // Buscar bancos do tenant (certifique-se de que a coluna potencia_trafo_kva existe na tabela bancos_capacitores do Supabase)
       const { data: bancosData, error: bancosError } = await supabase
         .from('bancos_capacitores')
         .select('*, clientes(id, nome)')
@@ -74,9 +74,34 @@ export default function BancosPage() {
         .eq('ativo', true)
         .order('nome_banco');
       if (bancosError) throw bancosError;
-      setBancos(bancosData || []);
 
-      // Buscar clientes do tenant (para os dropdowns)
+      // Para cada banco, calcula a potência somando os capacitores ativos vinculados
+      const bancosComPotenciaCalculada = await Promise.all(
+        (bancosData || []).map(async (banco) => {
+          const { data: caps } = await supabase
+            .from('capacitores')
+            .select('potencia_kvar')
+            .eq('banco_id', banco.id)
+            .eq('ativo', true);
+
+          const somaCapacitores = caps && caps.length > 0
+            ? caps.reduce((acc, cap) => acc + (cap.potencia_kvar || 0), 0)
+            : null;
+
+          // Se o banco não tiver override manual salvo ou se preferir priorizar o calculado, usa o somatório
+          const potenciaEfetiva = somaCapacitores !== null && somaCapacitores > 0 
+            ? somaCapacitores 
+            : (banco.potencia_total_kvar || 0);
+
+          return {
+            ...banco,
+            potencia_calculada: potenciaEfetiva
+          };
+        })
+      );
+
+      setBancos(bancosComPotenciaCalculada);
+
       const { data: clientesData, error: clientesError } = await supabase
         .from('clientes')
         .select('id, nome')
@@ -97,7 +122,7 @@ export default function BancosPage() {
     if (tenantId) fetchData();
   }, [tenantId]);
 
-  // Recalcular eficiência média quando dados ou filtro mudarem
+  // Recalcular eficiência média
   const calcularEficienciaMedia = async () => {
     if (!tenantId) return;
     try {
@@ -106,7 +131,6 @@ export default function BancosPage() {
         .select('potencia_kvar, banco_id, medicoes(desvio_percentual, status_validacao, created_at)')
         .eq('ativo', true);
 
-      // Se houver filtro de cliente, restringe aos bancos desse cliente
       if (clienteFiltro !== 'todos') {
         const { data: bancosDoCliente } = await supabase
           .from('bancos_capacitores')
@@ -177,16 +201,32 @@ export default function BancosPage() {
   };
 
   // Handlers do modal
-  function handleOpenModal(banco: any = null) {
+  async function handleOpenModal(banco: any = null) {
+    setIsManualOverride(false);
     if (banco) {
       setEditingBanco(banco);
+      
+      // Busca a soma real dos capacitores cadastrados neste banco para exibir no modal
+      let potenciaCalculada = banco.potencia_total_kvar || 0;
+      if (tenantId) {
+        const { data: caps } = await supabase
+          .from('capacitores')
+          .select('potencia_kvar')
+          .eq('banco_id', banco.id)
+          .eq('ativo', true);
+        
+        if (caps && caps.length > 0) {
+          potenciaCalculada = caps.reduce((acc, cap) => acc + (cap.potencia_kvar || 0), 0);
+        }
+      }
+
       setFormData({
         cliente_id: banco.cliente_id || '',
         nome_banco: banco.nome_banco || '',
         localizacao: banco.localizacao || '',
         tensao_nominal: banco.tensao_nominal?.toString() || '',
-        potencia_trafo_kva: banco.potencia_trafo_kva?.toString() || '', // Carrega potência do trafo
-        potencia_total_kvar: banco.potencia_total_kvar?.toString() || '',
+        potencia_trafo_kva: banco.potencia_trafo_kva?.toString() || '',
+        potencia_total_kvar: potenciaCalculada.toString(),
       });
     } else {
       setEditingBanco(null);
@@ -196,7 +236,7 @@ export default function BancosPage() {
         localizacao: '',
         tensao_nominal: '',
         potencia_trafo_kva: '',
-        potencia_total_kvar: '',
+        potencia_total_kvar: '0',
       });
     }
     setIsModalOpen(true);
@@ -210,16 +250,20 @@ export default function BancosPage() {
       return;
     }
 
-    const dataToSave = {
+    const dataToSave: any = {
       cliente_id: formData.cliente_id,
       nome_banco: formData.nome_banco,
       localizacao: formData.localizacao || null,
       tensao_nominal: formData.tensao_nominal ? parseFloat(formData.tensao_nominal) : null,
-      potencia_trafo_kva: formData.potencia_trafo_kva ? parseFloat(formData.potencia_trafo_kva) : null, // Salva potência do trafo
-      potencia_total_kvar: 0, // mantido ou recalculado por trigger/função
+      potencia_trafo_kva: formData.potencia_trafo_kva ? parseFloat(formData.potencia_trafo_kva) : null,
       tenant_id: tenantId,
       ativo: true,
     };
+
+    // Se o usuário usou o ajuste manual, salva o valor informado no banco
+    if (isManualOverride) {
+      dataToSave.potencia_total_kvar = formData.potencia_total_kvar ? parseFloat(formData.potencia_total_kvar) : 0;
+    }
 
     try {
       if (editingBanco) {
@@ -405,7 +449,12 @@ export default function BancosPage() {
                 {banco.localizacao && <div className="flex justify-between"><span>📍 Localização:</span><span className="font-medium">{banco.localizacao}</span></div>}
                 {banco.tensao_nominal && <div className="flex justify-between"><span>⚡ Tensão Nominal:</span><span className="font-medium">{banco.tensao_nominal} V</span></div>}
                 {banco.potencia_trafo_kva && <div className="flex justify-between"><span>🔌 Potência do Trafo:</span><span className="font-medium text-amber-600">{banco.potencia_trafo_kva} kVA</span></div>}
-                <div className="flex justify-between pt-2 border-t"><span>Potência Bancos:</span><span className="font-bold text-lg text-primary">{banco.potencia_total_kvar?.toFixed(1) || 0} kVAr</span></div>
+                <div className="flex justify-between pt-2 border-t">
+                  <span>Potência Bancos:</span>
+                  <span className="font-bold text-lg text-primary">
+                    {(banco.potencia_calculada ?? banco.potencia_total_kvar ?? 0).toFixed(1)} kVAr
+                  </span>
+                </div>
               </div>
               <button onClick={() => router.push(`/capacitores?banco_id=${banco.id}`)} className="mt-5 w-full rounded-xl bg-primary/10 py-2.5 text-primary font-medium hover:bg-primary/20">Ver Capacitores <ArrowRight size={16} className="inline" /></button>
             </motion.div>
@@ -434,7 +483,9 @@ export default function BancosPage() {
                     <td className="px-6 py-4 text-slate-500">{banco.localizacao || '-'}</td>
                     <td className="px-6 py-4">{banco.tensao_nominal ? `${banco.tensao_nominal} V` : '-'}</td>
                     <td className="px-6 py-4 font-semibold text-amber-600">{banco.potencia_trafo_kva ? `${banco.potencia_trafo_kva} kVA` : '-'}</td>
-                    <td className="px-6 py-4 font-bold text-primary">{banco.potencia_total_kvar?.toFixed(1) || 0} kVAr</td>
+                    <td className="px-6 py-4 font-bold text-primary">
+                      {(banco.potencia_calculada ?? banco.potencia_total_kvar ?? 0).toFixed(1)} kVAr
+                    </td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex justify-center gap-2">
                         <button onClick={() => router.push(`/capacitores?banco_id=${banco.id}`)} className="p-1.5 text-primary hover:bg-primary/10 rounded-lg"><Eye size={18} /></button>
@@ -485,7 +536,6 @@ export default function BancosPage() {
                   <input type="text" placeholder="Ex: Barracão de Produção" className="w-full rounded-lg border border-slate-200 px-4 py-2" value={formData.localizacao} onChange={(e) => setFormData({...formData, localizacao: e.target.value})} />
                 </div>
                 
-                {/* Linha com Tensão e Potência do Trafo */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Tensão Nominal (V)</label>
@@ -498,9 +548,32 @@ export default function BancosPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Potência Total (kVAr)</label>
-                  <input type="number" className="w-full rounded-lg border border-slate-200 px-4 py-2 bg-slate-50" value={formData.potencia_total_kvar} disabled />
-                  <p className="text-[10px] text-slate-400 mt-1">Calculada automaticamente pelos capacitores cadastrados</p>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="block text-sm font-medium text-slate-700">Potência Total (kVAr)</label>
+                    <button 
+                      type="button" 
+                      onClick={() => setIsManualOverride(!isManualOverride)}
+                      className="text-xs text-primary font-medium hover:underline flex items-center gap-1"
+                    >
+                      <Sliders size={12} /> {isManualOverride ? '🔒 Travar (Automático)' : '⚙️ Ajustar Manualmente'}
+                    </button>
+                  </div>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    disabled={!isManualOverride}
+                    className={cn(
+                      "w-full rounded-lg border border-slate-200 px-4 py-2",
+                      !isManualOverride ? "bg-slate-50 text-slate-600 cursor-not-allowed" : "bg-white border-primary ring-1 ring-primary"
+                    )} 
+                    value={formData.potencia_total_kvar} 
+                    onChange={(e) => setFormData({...formData, potencia_total_kvar: e.target.value})} 
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    {isManualOverride 
+                      ? '⚠️ Modo manual ativado. O valor informado será salvo diretamente.' 
+                      : '🔄 Calculado automaticamente pelos capacitores cadastrados neste banco.'}
+                  </p>
                 </div>
 
                 <div className="flex justify-end gap-3 mt-8">
