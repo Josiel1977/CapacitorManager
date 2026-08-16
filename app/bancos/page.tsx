@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { 
   Plus, Search, Edit2, Trash2, X, Save, LayoutGrid, List,
   Database, ChevronDown, RefreshCw, Calculator, Eye, ArrowRight,
-  Building, Zap, TrendingUp
+  Building, Zap, TrendingUp, Cpu
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
@@ -20,7 +20,6 @@ export default function BancosPage() {
   const [bancos, setBancos] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [calculando, setCalculando] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [clienteFiltro, setClienteFiltro] = useState<string>('todos');
   const [viewMode, setViewMode] = useState<'cards' | 'lista'>('cards');
@@ -31,6 +30,7 @@ export default function BancosPage() {
     nome_banco: '',
     localizacao: '',
     tensao_nominal: '',
+    potencia_trafo_kva: '', // Adicionado campo de potência do trafo em kVA
     potencia_total_kvar: '',
   });
   const [eficienciaMedia, setEficienciaMedia] = useState<number | null>(null);
@@ -66,7 +66,7 @@ export default function BancosPage() {
     if (!tenantId) return;
     setLoading(true);
     try {
-      // Buscar bancos do tenant
+      // Buscar bancos do tenant (certifique-se de que a coluna potencia_trafo_kva existe na tabela bancos_capacitores do Supabase)
       const { data: bancosData, error: bancosError } = await supabase
         .from('bancos_capacitores')
         .select('*, clientes(id, nome)')
@@ -185,6 +185,7 @@ export default function BancosPage() {
         nome_banco: banco.nome_banco || '',
         localizacao: banco.localizacao || '',
         tensao_nominal: banco.tensao_nominal?.toString() || '',
+        potencia_trafo_kva: banco.potencia_trafo_kva?.toString() || '', // Carrega potência do trafo
         potencia_total_kvar: banco.potencia_total_kvar?.toString() || '',
       });
     } else {
@@ -194,6 +195,7 @@ export default function BancosPage() {
         nome_banco: '',
         localizacao: '',
         tensao_nominal: '',
+        potencia_trafo_kva: '',
         potencia_total_kvar: '',
       });
     }
@@ -213,7 +215,8 @@ export default function BancosPage() {
       nome_banco: formData.nome_banco,
       localizacao: formData.localizacao || null,
       tensao_nominal: formData.tensao_nominal ? parseFloat(formData.tensao_nominal) : null,
-      potencia_total_kvar: 0, // será recalculado depois
+      potencia_trafo_kva: formData.potencia_trafo_kva ? parseFloat(formData.potencia_trafo_kva) : null, // Salva potência do trafo
+      potencia_total_kvar: 0, // mantido ou recalculado por trigger/função
       tenant_id: tenantId,
       ativo: true,
     };
@@ -289,7 +292,7 @@ export default function BancosPage() {
             Bancos de <span className="text-secondary">Capacitores</span>
           </h1>
           <p className="text-lg text-white/80 md:text-xl max-w-2xl">
-            Gerencie todos os bancos de capacitores, acompanhe a potência instalada e a eficiência do sistema.
+            Gerencie todos os bancos de capacitores, acompanhe a potência do transformador vinculado e a eficiência do sistema.
           </p>
         </div>
       </motion.section>
@@ -400,8 +403,9 @@ export default function BancosPage() {
               <p className="mb-4 text-sm font-medium text-secondary">{banco.clientes?.nome}</p>
               <div className="space-y-2 text-sm text-slate-600">
                 {banco.localizacao && <div className="flex justify-between"><span>📍 Localização:</span><span className="font-medium">{banco.localizacao}</span></div>}
-                {banco.tensao_nominal && <div className="flex justify-between"><span>⚡ Tensão:</span><span className="font-medium">{banco.tensao_nominal} V</span></div>}
-                <div className="flex justify-between pt-2 border-t"><span>Potência:</span><span className="font-bold text-lg text-primary">{banco.potencia_total_kvar?.toFixed(1) || 0} kVAr</span></div>
+                {banco.tensao_nominal && <div className="flex justify-between"><span>⚡ Tensão Nominal:</span><span className="font-medium">{banco.tensao_nominal} V</span></div>}
+                {banco.potencia_trafo_kva && <div className="flex justify-between"><span>🔌 Potência do Trafo:</span><span className="font-medium text-amber-600">{banco.potencia_trafo_kva} kVA</span></div>}
+                <div className="flex justify-between pt-2 border-t"><span>Potência Bancos:</span><span className="font-bold text-lg text-primary">{banco.potencia_total_kvar?.toFixed(1) || 0} kVAr</span></div>
               </div>
               <button onClick={() => router.push(`/capacitores?banco_id=${banco.id}`)} className="mt-5 w-full rounded-xl bg-primary/10 py-2.5 text-primary font-medium hover:bg-primary/20">Ver Capacitores <ArrowRight size={16} className="inline" /></button>
             </motion.div>
@@ -411,14 +415,25 @@ export default function BancosPage() {
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left">
-              <thead className="bg-slate-50 text-sm font-medium text-slate-500"><tr><th className="px-6 py-4">Banco</th><th className="px-6 py-4">Cliente</th><th className="px-6 py-4">Localização</th><th className="px-6 py-4">Tensão</th><th className="px-6 py-4">Potência</th><th className="px-6 py-4 text-center">Ações</th></tr></thead>
+              <thead className="bg-slate-50 text-sm font-medium text-slate-500">
+                <tr>
+                  <th className="px-6 py-4">Banco</th>
+                  <th className="px-6 py-4">Cliente</th>
+                  <th className="px-6 py-4">Localização</th>
+                  <th className="px-6 py-4">Tensão</th>
+                  <th className="px-6 py-4">Potência Trafo</th>
+                  <th className="px-6 py-4">Potência kVAr</th>
+                  <th className="px-6 py-4 text-center">Ações</th>
+                </tr>
+              </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredBancos.map((banco) => (
                   <tr key={banco.id} className="hover:bg-slate-50">
                     <td className="px-6 py-4 font-bold text-primary">{banco.nome_banco}</td>
                     <td className="px-6 py-4">{banco.clientes?.nome}</td>
                     <td className="px-6 py-4 text-slate-500">{banco.localizacao || '-'}</td>
-                    <td className="px-6 py-4">{banco.tensao_nominal || '-'} V</td>
+                    <td className="px-6 py-4">{banco.tensao_nominal ? `${banco.tensao_nominal} V` : '-'}</td>
+                    <td className="px-6 py-4 font-semibold text-amber-600">{banco.potencia_trafo_kva ? `${banco.potencia_trafo_kva} kVA` : '-'}</td>
                     <td className="px-6 py-4 font-bold text-primary">{banco.potencia_total_kvar?.toFixed(1) || 0} kVAr</td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex justify-center gap-2">
@@ -463,23 +478,31 @@ export default function BancosPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Banco *</label>
-                  <input required type="text" className="w-full rounded-lg border border-slate-200 px-4 py-2" value={formData.nome_banco} onChange={(e) => setFormData({...formData, nome_banco: e.target.value})} />
+                  <input required type="text" placeholder="Ex: QGBT Principal ou Trafo 01" className="w-full rounded-lg border border-slate-200 px-4 py-2" value={formData.nome_banco} onChange={(e) => setFormData({...formData, nome_banco: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Localização</label>
-                  <input type="text" className="w-full rounded-lg border border-slate-200 px-4 py-2" value={formData.localizacao} onChange={(e) => setFormData({...formData, localizacao: e.target.value})} />
+                  <input type="text" placeholder="Ex: Barracão de Produção" className="w-full rounded-lg border border-slate-200 px-4 py-2" value={formData.localizacao} onChange={(e) => setFormData({...formData, localizacao: e.target.value})} />
                 </div>
+                
+                {/* Linha com Tensão e Potência do Trafo */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Tensão Nominal (V)</label>
-                    <input type="number" className="w-full rounded-lg border border-slate-200 px-4 py-2" value={formData.tensao_nominal} onChange={(e) => setFormData({...formData, tensao_nominal: e.target.value})} />
+                    <input type="number" placeholder="Ex: 380" className="w-full rounded-lg border border-slate-200 px-4 py-2" value={formData.tensao_nominal} onChange={(e) => setFormData({...formData, tensao_nominal: e.target.value})} />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Potência Total (kVAr)</label>
-                    <input type="number" className="w-full rounded-lg border border-slate-200 px-4 py-2 bg-slate-50" value={formData.potencia_total_kvar} disabled />
-                    <p className="text-[10px] text-slate-400 mt-1">Calculada automaticamente</p>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Potência do Trafo (kVA)</label>
+                    <input type="number" placeholder="Ex: 500" className="w-full rounded-lg border border-slate-200 px-4 py-2" value={formData.potencia_trafo_kva} onChange={(e) => setFormData({...formData, potencia_trafo_kva: e.target.value})} />
                   </div>
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Potência Total (kVAr)</label>
+                  <input type="number" className="w-full rounded-lg border border-slate-200 px-4 py-2 bg-slate-50" value={formData.potencia_total_kvar} disabled />
+                  <p className="text-[10px] text-slate-400 mt-1">Calculada automaticamente pelos capacitores cadastrados</p>
+                </div>
+
                 <div className="flex justify-end gap-3 mt-8">
                   <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Cancelar</button>
                   <button type="submit" className="flex items-center gap-2 bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90"><Save size={18} /> Salvar</button>
