@@ -19,8 +19,6 @@ import { cn } from '@/lib/utils';
 // FUNÇÕES DE CÁLCULO COM SUPORTE À FREQUÊNCIA
 // ============================================================================
 
-// Corrente teórica considerando ajuste de potência pela frequência
-// Q_medida = Q_nominal * (f_medida / f_nominal)
 function calcularCorrenteTeoricaComFrequencia(
   potenciaKvarNominal: number,
   frequenciaNominal: number,
@@ -104,12 +102,11 @@ function ValidarCapacitoresContent() {
     tipo_teste: 'corrente' as 'corrente' | 'capacitancia',
   });
 
-  // Adicionado campo frequência_medida_hz no estado
   const [medicao, setMedicao] = useState({
     tensao_medida_v: '',
     corrente_medida_a: '',
     capacitancia_medida_uf: '',
-    frequencia_medida_hz: 60, // padrão Brasil
+    frequencia_medida_hz: 60,
   });
 
   const [resultado, setResultado] = useState<any>(null);
@@ -288,7 +285,6 @@ function ValidarCapacitoresContent() {
         return;
       }
 
-      // Frequência nominal do capacitor (se não tiver no banco, assume 60)
       const freqNominal = cap.frequencia_hz || 60;
 
       const correnteTeorica = calcularCorrenteTeoricaComFrequencia(

@@ -332,10 +332,12 @@ export default function ManutencaoPage() {
         )
         .order("created_at", { ascending: false });
 
-      const ultimasMedicoes = new Map();
+      // Mantém a medição mais recente de cada tipo para cada capacitor.
+      const ultimasPorTipo = new Map<string, any>();
       medicoesData?.forEach((med) => {
-        if (!ultimasMedicoes.has(med.capacitor_id))
-          ultimasMedicoes.set(med.capacitor_id, med);
+        if (!med.capacitor_id || !med.tipo_teste) return;
+        const key = `${med.capacitor_id}:${med.tipo_teste}`;
+        if (!ultimasPorTipo.has(key)) ultimasPorTipo.set(key, med);
       });
 
       const { data: clientesData } = await supabase
@@ -347,46 +349,58 @@ export default function ManutencaoPage() {
 
       const processedData: CapacitorInfo[] = [];
       for (const cap of todosCapacitores || []) {
-        const ultimaMedicao = ultimasMedicoes.get(cap.id);
-        const temMedicao = !!ultimaMedicao;
-        let desvio = 0,
-          status = "sem_medicao";
-        if (temMedicao) {
-          desvio = ultimaMedicao.desvio_percentual || 0;
+        const medicoesAtuais = [...ultimasPorTipo.values()].filter(
+          (med) => med.capacitor_id === cap.id,
+        );
+        const temMedicao = medicoesAtuais.length > 0;
+        const avaliadas = medicoesAtuais.map((med) => {
+          let desvio = med.desvio_percentual || 0;
+          let status = med.status_validacao || "atencao";
           if (
-            ultimaMedicao.tipo_teste === "corrente" &&
-            ultimaMedicao.corrente_medida_a &&
+            med.tipo_teste === "corrente" &&
+            med.corrente_medida_a &&
             cap.tensao_nominal_v &&
             cap.potencia_kvar
           ) {
-            const correnteTeorica = calcularCorrenteTeorica(
+            const teorico = calcularCorrenteTeorica(
               cap.potencia_kvar,
               cap.tensao_nominal_v,
             );
-            if (correnteTeorica > 0) {
-              desvio =
-                ((ultimaMedicao.corrente_medida_a - correnteTeorica) /
-                  correnteTeorica) *
-                100;
+            if (teorico > 0) {
+              desvio = ((med.corrente_medida_a - teorico) / teorico) * 100;
               status = getStatusValidacao(desvio);
-            } else status = ultimaMedicao.status_validacao || "atencao";
+            }
           } else if (
-            ultimaMedicao.tipo_teste === "capacitancia" &&
-            ultimaMedicao.capacitancia_medida_uf &&
+            med.tipo_teste === "capacitancia" &&
+            med.capacitancia_medida_uf &&
             cap.capacitancia_nominal_uf
           ) {
-            const capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(
+            const teorico = calcularCapacitanciaTeoricaDelta(
               cap.capacitancia_nominal_uf,
             );
-            if (capacitanciaTeorica > 0) {
-              desvio =
-                ((ultimaMedicao.capacitancia_medida_uf - capacitanciaTeorica) /
-                  capacitanciaTeorica) *
-                100;
+            if (teorico > 0) {
+              desvio = ((med.capacitancia_medida_uf - teorico) / teorico) * 100;
               status = getStatusValidacao(desvio);
-            } else status = ultimaMedicao.status_validacao || "atencao";
-          } else status = ultimaMedicao.status_validacao || "atencao";
-        }
+            }
+          }
+          return { ...med, desvio_calculado: desvio, status_calculado: status };
+        });
+        const severidade: Record<string, number> = {
+          aprovado: 0,
+          atencao: 1,
+          reprovado: 2,
+        };
+        const estadoAtual = avaliadas.sort(
+          (a, b) =>
+            (severidade[b.status_calculado] ?? 1) -
+              (severidade[a.status_calculado] ?? 1) ||
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        )[0];
+        const ultimaData = avaliadas
+          .map((med) => med.created_at)
+          .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+        const desvio = estadoAtual?.desvio_calculado ?? 0;
+        const status = estadoAtual?.status_calculado ?? "sem_medicao";
         const bancoInfo = bancosMap.get(cap.banco_id);
         const clienteId = bancoInfo?.cliente_id;
         const clienteNome = clientesMap.get(clienteId) || "N/A";
@@ -402,9 +416,9 @@ export default function ManutencaoPage() {
           capacitancia_nominal_uf: cap.capacitancia_nominal_uf || 0,
           status_validacao: status,
           ultimo_desvio: desvio,
-          ultima_data: ultimaMedicao?.created_at || "",
+          ultima_data: ultimaData || "",
           tem_medicao: temMedicao,
-          data_ultima_medicao: ultimaMedicao?.created_at,
+          data_ultima_medicao: ultimaData,
         });
       }
       setCapacitores(processedData);
@@ -1064,7 +1078,7 @@ export default function ManutencaoPage() {
                       ) : (
                         <button
                           onClick={() =>
-                            router.push(`/medicoes?capacitor_id=${cap.id}`)
+                            router.push(`/historico?capacitor_id=${cap.id}`)
                           }
                           className="px-3 py-1 bg-primary/10 text-primary text-xs rounded-lg hover:bg-primary/20 transition-colors"
                         >

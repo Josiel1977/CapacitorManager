@@ -56,6 +56,7 @@ function calcularTendencia(medicoes: any[]) {
 }
 
 export default function HistoricoPage() {
+  const [capacitorIdFiltro, setCapacitorIdFiltro] = useState('');
   const [medicoes, setMedicoes] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +69,8 @@ export default function HistoricoPage() {
   });
 
   useEffect(() => {
+    const capacitorId = new URLSearchParams(window.location.search).get('capacitor_id') || '';
+    setCapacitorIdFiltro(capacitorId);
     fetchData();
   }, []);
 
@@ -150,6 +153,7 @@ export default function HistoricoPage() {
   };
 
   const filteredMedicoes = medicoes.filter(m => {
+    const matchCapacitor = !capacitorIdFiltro || m.capacitor_id === capacitorIdFiltro;
     const matchCliente = !filters.cliente_id || m.cliente_id === filters.cliente_id;
     const matchTipo = !filters.tipo_teste || m.tipo_teste === filters.tipo_teste;
     const matchStatus = !filters.status || m.status_validacao === filters.status;
@@ -160,7 +164,7 @@ export default function HistoricoPage() {
     const dataLimite = getDataLimite();
     const matchPeriodo = !dataLimite || new Date(m.created_at) >= dataLimite;
     
-    return matchCliente && matchTipo && matchStatus && matchSearch && matchPeriodo;
+    return matchCapacitor && matchCliente && matchTipo && matchStatus && matchSearch && matchPeriodo;
   });
 
   const medicoesPorCapacitor = filteredMedicoes.reduce((acc: any, med) => {
@@ -248,6 +252,9 @@ export default function HistoricoPage() {
       <header>
         <h1 className="text-3xl font-bold text-primary">Histórico de Medições</h1>
         <p className="text-slate-500">Consulte, compare e analise a evolução dos capacitores</p>
+        <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          Os números desta tela representam <strong>medições históricas</strong>. O estado atual de cada capacitor considera somente o teste mais recente de cada tipo e está consolidado no Dashboard e em Manutenção Preditiva.
+        </div>
       </header>
 
       <div className="rounded-xl bg-white p-6 shadow-sm">

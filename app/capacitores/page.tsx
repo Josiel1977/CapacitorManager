@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, Suspense } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { Plus, Search, Edit2, Trash2, X, Save, Zap, ChevronDown, ArrowLeft, Loader2, Filter } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, X, Save, Zap, ChevronDown, ArrowLeft, Loader2, Filter, LayoutGrid, List, Eye } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseNumber, cn } from '@/lib/utils';
@@ -25,6 +25,7 @@ function CapacitoresContent() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [bancoFiltro, setBancoFiltro] = useState<string>(bancoIdFromUrl || 'todos');
+  const [viewMode, setViewMode] = useState<'cards' | 'lista'>('cards'); // Estado de visualização (Cards ou Lista)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCapacitor, setEditingCapacitor] = useState<any>(null);
   const [bancoSelecionadoInfo, setBancoSelecionadoInfo] = useState<any>(null);
@@ -235,6 +236,7 @@ function CapacitoresContent() {
           .update(dataCapacitor)
           .eq('id', editingCapacitor.id);
         if (error) throw error;
+        await recalcularPotenciaBanco(formData.banco_id);
         Swal.fire('Sucesso', 'Capacitor atualizado com sucesso!', 'success');
       } else {
         const { error } = await supabase
@@ -371,7 +373,7 @@ function CapacitoresContent() {
       )}
 
       <div className="rounded-xl bg-white p-5 shadow-sm border border-slate-100">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
           <div className="lg:col-span-4">
             <label className="mb-1 block text-xs font-medium text-slate-500">Filtrar por Banco</label>
             <div className="relative">
@@ -397,7 +399,7 @@ function CapacitoresContent() {
             </div>
           </div>
 
-          <div className="lg:col-span-5">
+          <div className="lg:col-span-4">
             <label className="mb-1 block text-xs font-medium text-slate-500">Buscar</label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -411,7 +413,7 @@ function CapacitoresContent() {
             </div>
           </div>
 
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-2">
             <label className="mb-1 block text-xs font-medium text-slate-500">Estatísticas</label>
             <div className="bg-primary/5 rounded-lg p-2 text-center">
               <p className="text-xs text-slate-500">Potência Total</p>
@@ -422,89 +424,180 @@ function CapacitoresContent() {
               )}
             </div>
           </div>
+
+          {/* Botões de Alternância de Visualização (Cards vs Lista) */}
+          <div className="lg:col-span-2 flex flex-col justify-end">
+            <label className="mb-1 block text-xs font-medium text-slate-500">Visualização</label>
+            <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+              <button 
+                onClick={() => setViewMode('cards')} 
+                className={cn("flex-1 py-2 rounded-md transition-colors flex items-center justify-center gap-1 text-xs font-medium", viewMode === 'cards' ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                title="Visualização em Cards"
+              >
+                <LayoutGrid size={16} /> Cards
+              </button>
+              <button 
+                onClick={() => setViewMode('lista')} 
+                className={cn("flex-1 py-2 rounded-md transition-colors flex items-center justify-center gap-1 text-xs font-medium", viewMode === 'lista' ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                title="Visualização em Lista"
+              >
+                <List size={16} /> Lista
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {filteredCapacitores.map((capacitor) => (
-          <motion.div 
-            key={capacitor.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={cn(
-              "group relative rounded-xl p-6 shadow-sm border transition-all hover:shadow-md",
-              !capacitor.temMedicao ? "bg-amber-50/30 border-amber-200" : "bg-white border-slate-100"
-            )}
-          >
-            <div className="mb-4 flex items-start justify-between">
-              <div className="rounded-lg bg-primary/10 p-2 text-primary">
-                <Zap size={24} />
-              </div>
-              <div className="flex gap-1">
-                <button 
-                  onClick={() => handleOpenModal(capacitor)}
-                  className="rounded p-1.5 text-blue-600 hover:bg-blue-50 transition-colors"
-                  title="Editar"
-                >
-                  <Edit2 size={16} />
-                </button>
-                <button 
-                  onClick={() => handleDelete(capacitor.id, capacitor.banco_id)}
-                  className="rounded p-1.5 text-red-600 hover:bg-red-50 transition-colors"
-                  title="Excluir"
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            </div>
-            <h3 className="text-lg font-bold text-primary">{capacitor.codigo_identificacao}</h3>
-            <p className="mb-3 text-sm text-secondary">
-              {capacitor.bancos_capacitores?.nome_banco}
-            </p>
-            <p className="text-xs text-slate-500 mb-3">
-              Cliente: {capacitor.bancos_capacitores?.clientes?.nome}
-            </p>
-            
-            <div className="space-y-2 text-sm text-slate-600">
-              <div className="flex justify-between">
-                <span>⚡ Potência:</span>
-                <span className="font-medium">{capacitor.potencia_kvar} kVAr</span>
-              </div>
-              <div className="flex justify-between">
-                <span>🔋 Tensão:</span>
-                <span className="font-medium">{capacitor.tensao_nominal_v} V</span>
-              </div>
-              {capacitor.capacitancia_nominal_uf && (
-                <div className="flex justify-between">
-                  <span>📏 Capacitância:</span>
-                  <span className="font-medium">{capacitor.capacitancia_nominal_uf} µF</span>
-                </div>
+      {/* Exibição em Cards ou Lista */}
+      {viewMode === 'cards' ? (
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {filteredCapacitores.map((capacitor) => (
+            <motion.div 
+              key={capacitor.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={cn(
+                "group relative rounded-xl p-6 shadow-sm border transition-all hover:shadow-md",
+                !capacitor.temMedicao ? "bg-amber-50/30 border-amber-200" : "bg-white border-slate-100"
               )}
-            </div>
-
-            {!capacitor.temMedicao ? (
-              <div className="mt-4">
-                <span className="text-xs bg-amber-200 text-amber-800 px-2 py-1 rounded-full inline-flex items-center gap-1">
-                  ⚠️ Sem medição
-                </span>
-                <button 
-                  onClick={() => router.push(`/Validar-Capacitores?capacitor_id=${capacitor.id}`)}
-                  className="mt-2 w-full text-center text-xs text-primary hover:underline"
-                >
-                  + Realizar primeira medição →
-                </button>
+            >
+              <div className="mb-4 flex items-start justify-between">
+                <div className="rounded-lg bg-primary/10 p-2 text-primary">
+                  <Zap size={24} />
+                </div>
+                <div className="flex gap-1">
+                  <button 
+                    onClick={() => handleOpenModal(capacitor)}
+                    className="rounded p-1.5 text-blue-600 hover:bg-blue-50 transition-colors"
+                    title="Editar"
+                  >
+                    <Edit2 size={16} />
+                  </button>
+                  <button 
+                    onClick={() => handleDelete(capacitor.id, capacitor.banco_id)}
+                    className="rounded p-1.5 text-red-600 hover:bg-red-50 transition-colors"
+                    title="Excluir"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
-            ) : (
-              <button 
-                onClick={() => router.push(`/medicoes?capacitor_id=${capacitor.id}`)}
-                className="mt-5 w-full text-center text-xs text-primary hover:underline"
-              >
-                Ver medições →
-              </button>
-            )}
-          </motion.div>
-        ))}
-      </div>
+              <h3 className="text-lg font-bold text-primary">{capacitor.codigo_identificacao}</h3>
+              <p className="mb-3 text-sm text-secondary">
+                {capacitor.bancos_capacitores?.nome_banco}
+              </p>
+              <p className="text-xs text-slate-500 mb-3">
+                Cliente: {capacitor.bancos_capacitores?.clientes?.nome}
+              </p>
+              
+              <div className="space-y-2 text-sm text-slate-600">
+                <div className="flex justify-between">
+                  <span>⚡ Potência:</span>
+                  <span className="font-medium">{capacitor.potencia_kvar} kVAr</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>🔋 Tensão:</span>
+                  <span className="font-medium">{capacitor.tensao_nominal_v} V</span>
+                </div>
+                {capacitor.capacitancia_nominal_uf && (
+                  <div className="flex justify-between">
+                    <span>📏 Capacitância:</span>
+                    <span className="font-medium">{capacitor.capacitancia_nominal_uf} µF</span>
+                  </div>
+                )}
+              </div>
+
+              {!capacitor.temMedicao ? (
+                <div className="mt-4">
+                  <span className="text-xs bg-amber-200 text-amber-800 px-2 py-1 rounded-full inline-flex items-center gap-1">
+                    ⚠️ Sem medição
+                  </span>
+                  <button 
+                    onClick={() => router.push(`/Validar-Capacitores?capacitor_id=${capacitor.id}`)}
+                    className="mt-2 w-full text-center text-xs text-primary hover:underline"
+                  >
+                    + Realizar primeira medição →
+                  </button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => router.push(`/medicoes?capacitor_id=${capacitor.id}`)}
+                  className="mt-5 w-full text-center text-xs text-primary hover:underline"
+                >
+                  Ver medições →
+                </button>
+              )}
+            </motion.div>
+          ))}
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
+                <tr>
+                  <th className="px-6 py-4">Identificação</th>
+                  <th className="px-6 py-4">Cliente / Banco</th>
+                  <th className="px-6 py-4">Potência</th>
+                  <th className="px-6 py-4">Tensão</th>
+                  <th className="px-6 py-4">Capacitância</th>
+                  <th className="px-6 py-4">Status Medição</th>
+                  <th className="px-6 py-4 text-center">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {filteredCapacitores.map((capacitor) => (
+                  <tr key={capacitor.id} className="hover:bg-slate-50">
+                    <td className="px-6 py-4 font-bold text-primary flex items-center gap-2">
+                      <Zap size={16} className="text-primary" />
+                      {capacitor.codigo_identificacao}
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="font-medium text-slate-800">{capacitor.bancos_capacitores?.clientes?.nome}</p>
+                      <p className="text-xs text-secondary">{capacitor.bancos_capacitores?.nome_banco}</p>
+                    </td>
+                    <td className="px-6 py-4 font-medium">{capacitor.potencia_kvar} kVAr</td>
+                    <td className="px-6 py-4">{capacitor.tensao_nominal_v} V</td>
+                    <td className="px-6 py-4">{capacitor.capacitancia_nominal_uf ? `${capacitor.capacitancia_nominal_uf} µF` : '-'}</td>
+                    <td className="px-6 py-4">
+                      {capacitor.temMedicao ? (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Medido</span>
+                      ) : (
+                        <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full">Sem medição</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <button 
+                          onClick={() => router.push(capacitor.temMedicao ? `/medicoes?capacitor_id=${capacitor.id}` : `/Validar-Capacitores?capacitor_id=${capacitor.id}`)}
+                          className="p-1.5 text-primary hover:bg-primary/10 rounded-lg"
+                          title="Ver Medições / Validar"
+                        >
+                          <Eye size={18} />
+                        </button>
+                        <button 
+                          onClick={() => handleOpenModal(capacitor)}
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"
+                          title="Editar"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                        <button 
+                          onClick={() => handleDelete(capacitor.id, capacitor.banco_id)}
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg"
+                          title="Excluir"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {filteredCapacitores.length === 0 && !loading && (
         <div className="py-12 text-center text-slate-400 bg-white rounded-xl border border-slate-100">
