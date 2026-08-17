@@ -52,3 +52,5 @@ coverage/
 # Relatórios gerados (opcional)
 *.pdf
 *.png
+.vercel
+.env*.local
