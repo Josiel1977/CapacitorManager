@@ -19,7 +19,7 @@ const publicMenuItems = [
   { name: 'Demonstração', href: '/demo', icon: Play },
   { name: 'Como Usar', href: '/como-usar', icon: BookOpen },
   { name: 'Central de Ajuda', href: '/ajuda', icon: HelpCircle },
-  { name: 'Solicitar Demo', href: '/signup', icon: Star },
+  { name: 'Solicitar Demonstração', href: '/contato', icon: Star },
   { name: 'Privacidade', href: '/privacidade', icon: Shield }, // ← Agora Shield está importado
 ];
 
