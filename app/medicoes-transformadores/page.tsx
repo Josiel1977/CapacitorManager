@@ -6,9 +6,12 @@ import Swal from "sweetalert2";
 import { supabase } from "@/lib/supabase";
 import { analyzeTransformerMeasurements } from "@/lib/transformer-measurement-analysis";
 import { parseEmbrasulReport } from "@/lib/embrasul-report-parser";
-import { reconstructPdfText } from "@/lib/equatorial-invoice-parser";
+import { parseEquatorialInvoiceText, reconstructPdfText } from "@/lib/equatorial-invoice-parser";
+import { detectElectricalDocumentType } from "@/lib/electrical-document-type";
 import { recommendCapacitorBank, type RecommendationMode } from "@/lib/capacitor-recommendation";
 import { parseEmbrasulSeriesText } from "@/lib/embrasul-series-parser";
+import { createAuditContentHash } from "@/lib/audit-hash";
+import { useAuth } from "@/lib/AuthContext";
 
 interface Transformer {
   id: string;
@@ -56,7 +59,8 @@ const numberOrNull = (value: string) => {
 const fmt = (value: number | null, digits = 1) => value == null ? "—" : value.toLocaleString("pt-BR", { maximumFractionDigits: digits });
 
 export default function TransformerMeasurementsPage() {
-  const [tenantId, setTenantId] = useState<string | null>(null);
+  const { user, profile, isLoading: isAuthLoading, isProfileLoading } = useAuth();
+  const tenantId = profile?.tenant_id || null;
   const [transformers, setTransformers] = useState<Transformer[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
@@ -72,6 +76,10 @@ export default function TransformerMeasurementsPage() {
   const [recommendationMode, setRecommendationMode] = useState<RecommendationMode>("otimizar_existente");
   const [targetPowerFactor, setTargetPowerFactor] = useState("0.92");
   const [installedBankKvar, setInstalledBankKvar] = useState("5");
+  const [representativeCampaignConfirmed, setRepresentativeCampaignConfirmed] = useState(false);
+  const [harmonicStudyValidated, setHarmonicStudyValidated] = useState(false);
+  const [protectionStudyValidated, setProtectionStudyValidated] = useState(false);
+  const [savingRecommendation, setSavingRecommendation] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selected = transformers.find((item) => item.id === selectedId) ?? null;
@@ -99,20 +107,17 @@ export default function TransformerMeasurementsPage() {
   }, []);
 
   useEffect(() => {
+    if (isAuthLoading || isProfileLoading) return;
     const load = async () => {
       try {
         setLoading(true);
         setError(null);
-        const { data: authData, error: authError } = await supabase.auth.getUser();
-        if (authError || !authData.user) throw new Error("Sessão não encontrada. Faça login novamente.");
-        const { data: profile, error: profileError } = await supabase
-          .from("profiles").select("tenant_id").eq("id", authData.user.id).single();
-        if (profileError || !profile?.tenant_id) throw new Error("Usuário sem empresa vinculada.");
-        setTenantId(profile.tenant_id);
+        if (!user) throw new Error("Sessão não encontrada. Faça login novamente.");
+        if (!tenantId) throw new Error("Usuário sem empresa vinculada.");
         const { data, error: transformerError } = await supabase
           .from("transformadores")
           .select("id, potencia_kva, quantidade, tensao_v")
-          .eq("tenant_id", profile.tenant_id)
+          .eq("tenant_id", tenantId)
           .order("potencia_kva", { ascending: true });
         if (transformerError) throw transformerError;
         const rows = (data ?? []) as Transformer[];
@@ -125,11 +130,17 @@ export default function TransformerMeasurementsPage() {
       }
     };
     void load();
-  }, []);
+  }, [user, tenantId, isAuthLoading, isProfileLoading]);
 
   useEffect(() => {
     loadMeasurements(selectedId).catch((cause) => setError(cause instanceof Error ? cause.message : "Falha ao carregar medições."));
   }, [selectedId, loadMeasurements]);
+
+  useEffect(() => {
+    setRepresentativeCampaignConfirmed(false);
+    setHarmonicStudyValidated(false);
+    setProtectionStudyValidated(false);
+  }, [selectedId]);
 
   const saveTransformer = async (createNew = false) => {
     if (!tenantId) return;
@@ -195,6 +206,7 @@ export default function TransformerMeasurementsPage() {
     transformerKva: selectedTotalKva,
     samples: measurements.map((item) => ({
       timestamp: item.measured_at,
+      intervalMinutes: item.interval_minutes,
       activePowerKw: item.active_power_kw ?? 0,
       reactivePowerKvar: item.reactive_power_kvar ?? 0,
       powerFactor: item.power_factor,
@@ -205,7 +217,109 @@ export default function TransformerMeasurementsPage() {
       totalKvar: numberOrNull(installedBankKvar) ?? 0,
       fixedKvar: fixedCapacitorConnected ? numberOrNull(fixedCapacitorKvar) ?? 0 : 0,
     } : undefined,
-  }), [measurements, recommendationMode, safeTargetPowerFactor, selectedTotalKva, installedBankKvar, fixedCapacitorConnected, fixedCapacitorKvar]);
+    engineeringApproval: {
+      representativeCampaignConfirmed,
+      harmonicStudyValidated,
+      protectionStudyValidated,
+    },
+  }), [measurements, recommendationMode, safeTargetPowerFactor, selectedTotalKva, installedBankKvar, fixedCapacitorConnected, fixedCapacitorKvar, representativeCampaignConfirmed, harmonicStudyValidated, protectionStudyValidated]);
+
+  const saveRecommendationRun = async () => {
+    if (!tenantId || !selectedId || !user) {
+      await Swal.fire("Sessão inválida", "Faça login novamente antes de salvar a memória técnica.", "warning");
+      return;
+    }
+    if (!measurements.length) {
+      await Swal.fire("Sem medições", "Registre ou importe a campanha antes de salvar a memória técnica.", "warning");
+      return;
+    }
+
+    const engineeringConfirmations = {
+      representative_campaign_confirmed: representativeCampaignConfirmed,
+      harmonic_study_validated: harmonicStudyValidated,
+      protection_study_validated: protectionStudyValidated,
+    };
+    const inputsSnapshot = {
+      method: "temporal_measurements",
+      transformer_id: selectedId,
+      transformer_total_kva: selectedTotalKva,
+      mode: recommendationMode,
+      target_power_factor: safeTargetPowerFactor,
+      existing_bank: recommendationMode === "otimizar_existente" ? {
+        total_kvar: numberOrNull(installedBankKvar) ?? 0,
+        fixed_kvar: fixedCapacitorConnected ? numberOrNull(fixedCapacitorKvar) ?? 0 : 0,
+      } : null,
+      engineering_confirmations: engineeringConfirmations,
+      measurements: measurements.map((item) => ({
+        id: item.id,
+        measured_at: item.measured_at,
+        interval_minutes: item.interval_minutes,
+        active_power_kw: item.active_power_kw,
+        reactive_power_kvar: item.reactive_power_kvar,
+        apparent_power_kva: item.apparent_power_kva,
+        power_factor: item.power_factor,
+        thdv_percent: item.thdv_percent,
+        thdi_percent: item.thdi_percent,
+        source: item.source,
+        source_device: item.source_device,
+      })),
+    };
+
+    try {
+      setSavingRecommendation(true);
+      const contentHash = await createAuditContentHash({
+        engine_version: recommendation.engineVersion,
+        inputs: inputsSnapshot,
+        result: recommendation,
+      });
+      const confidenceLevel = recommendation.confidence === "representativa"
+        ? "representative"
+        : recommendation.confidence === "preliminar" ? "preliminary" : "insufficient";
+      const releaseLevel = recommendation.releaseLevel === "especificacao_condicionada"
+        ? "conditional_specification"
+        : recommendation.releaseLevel === "pre_dimensionamento" ? "pre_sizing" : "blocked";
+      const { error: insertError } = await supabase.from("dimensioning_runs").insert({
+        tenant_id: tenantId,
+        transformer_id: selectedId,
+        engine_version: recommendation.engineVersion,
+        source_method: "temporal_measurements",
+        release_level: releaseLevel,
+        status: recommendation.releaseLevel === "bloqueado" ? "blocked" : "completed",
+        confidence_level: confidenceLevel,
+        target_power_factor: safeTargetPowerFactor,
+        percentile: 0.9,
+        theoretical_kvar: recommendation.p90RequiredKvar ?? 0,
+        commercial_kvar: recommendation.recommendedKvar ?? 0,
+        formula: recommendation.formula,
+        inputs_snapshot: inputsSnapshot,
+        result_snapshot: recommendation,
+        excluded_invoices: [],
+        warnings: [...recommendation.releaseReasons, ...recommendation.warnings],
+        engineering_confirmations: engineeringConfirmations,
+        content_hash: contentHash,
+      });
+      if (insertError?.code === "23505") {
+        await Swal.fire("Memória já registrada", "Esta mesma campanha, configuração e decisão técnica já possuem registro imutável.", "info");
+        return;
+      }
+      if (insertError) throw insertError;
+      await Swal.fire(
+        "Memória técnica salva",
+        recommendation.specificationAllowed
+          ? "A especificação condicionada e suas confirmações foram registradas com hash de integridade."
+          : "O diagnóstico e suas limitações foram registrados sem liberar compra ou instalação.",
+        "success",
+      );
+    } catch (cause) {
+      await Swal.fire(
+        "Não foi possível salvar",
+        cause instanceof Error ? cause.message : "Aplique a migração RC23 e tente novamente.",
+        "error",
+      );
+    } finally {
+      setSavingRecommendation(false);
+    }
+  };
 
   const saveMeasurement = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -271,6 +385,27 @@ export default function TransformerMeasurementsPage() {
         const page = await pdf.getPage(pageNumber);
         const content = await page.getTextContent();
         text += reconstructPdfText(content.items as any[]) + "\n";
+      }
+      const documentType = detectElectricalDocumentType(text, file.name);
+      if (documentType === "equatorial_invoice") {
+        const invoice = parseEquatorialInvoiceText(text, file.name);
+        await Swal.fire({
+          title: "Fatura Equatorial identificada",
+          html: `<div class="text-left text-sm">
+            <p><b>Referência:</b> ${invoice.mes_referencia || "não identificada"}</p>
+            <p><b>Valor:</b> ${invoice.total_pagar.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p>
+            <p><b>Reativo excedente:</b> ${(invoice.reativo_ponta_kvarh + invoice.reativo_fora_ponta_kvarh).toLocaleString("pt-BR")} kVArh</p>
+            <hr class="my-3"/>
+            <p>Esta é uma <b>fatura mensal</b>, não um relatório de analisador. Ela não contém as médias instantâneas P, Q e S necessárias para registrar uma medição do transformador.</p>
+            <p class="mt-2">Use este PDF na <b>Demo de fatura</b> ou em <b>Auditoria de fatura</b>. Para esta tela, envie o PDF ou a série TXT/CSV do Embrasul.</p>
+          </div>`,
+          icon: "info",
+          confirmButtonText: "Entendi",
+        });
+        return;
+      }
+      if (documentType !== "embrasul_report") {
+        throw new Error("Documento não reconhecido. Envie o relatório PDF do analisador Embrasul; faturas Equatorial devem ser usadas na Demo ou na Auditoria de fatura.");
       }
       const parsed = parseEmbrasulReport(text, {
         fixedCapacitorConnected,
@@ -419,13 +554,13 @@ export default function TransformerMeasurementsPage() {
           </section>
 
           <section className="rounded-xl border border-blue-200 bg-blue-50 p-5">
-            <h2 className="flex items-center gap-2 font-bold text-blue-950"><FileUp size={19} /> Importar relatório Embrasul</h2>
+            <h2 className="flex items-center gap-2 font-bold text-blue-950"><FileUp size={19} /> Importar relatório de analisador Embrasul</h2>
             <p className="mt-1 text-sm text-blue-800">Informe a condição real do capacitor durante a campanha. O sistema não ignora o reativo capacitivo: ele contextualiza a medição.</p>
             <div className="mt-4 grid gap-3 md:grid-cols-4">
               <label className="text-sm text-blue-950"><span className="mb-1 block font-medium">Capacitor fixo durante a medição</span><select value={fixedCapacitorConnected ? "ligado" : "desligado"} onChange={(e) => setFixedCapacitorConnected(e.target.value === "ligado")} className="input"><option value="ligado">Ligado</option><option value="desligado">Desligado</option></select></label>
               <label className="text-sm text-blue-950"><span className="mb-1 block font-medium">Potência fixa (kVAr)</span><input value={fixedCapacitorKvar} disabled={!fixedCapacitorConnected} onChange={(e) => setFixedCapacitorKvar(e.target.value)} className="input disabled:bg-slate-100" /></label>
               <label className="flex cursor-pointer items-center justify-center gap-2 self-end rounded-lg bg-blue-700 px-4 py-3 font-semibold text-white">
-                {importing ? <Loader2 className="animate-spin" size={18} /> : <FileUp size={18} />} Selecionar PDF
+                {importing ? <Loader2 className="animate-spin" size={18} /> : <FileUp size={18} />} PDF Embrasul
                 <input type="file" accept="application/pdf" className="hidden" disabled={importing} onChange={(e) => { void importEmbrasulPdf(e.target.files?.[0]); e.currentTarget.value = ""; }} />
               </label>
               <label className="flex cursor-pointer items-center justify-center gap-2 self-end rounded-lg bg-violet-700 px-4 py-3 font-semibold text-white">
@@ -433,7 +568,7 @@ export default function TransformerMeasurementsPage() {
                 <input type="file" accept=".txt,.csv,.md,text/plain,text/csv,text/markdown" className="hidden" disabled={importingSeries} onChange={(e) => { void importEmbrasulSeries(e.target.files?.[0]); e.currentTarget.value = ""; }} />
               </label>
             </div>
-            <p className="mt-3 text-xs text-blue-700">PDF importa apenas a média para diagnóstico. TXT/CSV/Markdown Embrasul importa cada intervalo e pode liberar o dimensionamento quando houver campanha representativa.</p>
+            <p className="mt-3 text-xs text-blue-700">PDF importa apenas a média para diagnóstico. TXT/CSV/Markdown importa cada intervalo e permite pré-dimensionamento; a especificação condicionada exige ao menos sete dias representativos, THDv/THDi e validações registradas. Faturas Equatorial devem ser enviadas na <a href="/auditoria" className="font-bold underline">Auditoria de fatura</a>.</p>
           </section>
 
           <section className="grid gap-4 md:grid-cols-4">
@@ -446,7 +581,7 @@ export default function TransformerMeasurementsPage() {
           <section className="rounded-xl border border-violet-200 bg-violet-50 p-5 shadow-sm">
             <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
               <div><h2 className="flex items-center gap-2 font-bold text-violet-950"><ShieldCheck size={19} /> Recomendação técnica do banco</h2><p className="mt-1 text-sm text-violet-800">Motor auditável v{recommendation.engineVersion}. A recomendação considera somente as medições do transformador/conjunto selecionado.</p></div>
-              <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold uppercase ${recommendation.specificationAllowed ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{recommendation.specificationAllowed ? "especificação liberada" : "diagnóstico preliminar"}</span>
+              <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold uppercase ${recommendation.specificationAllowed ? "bg-emerald-100 text-emerald-800" : recommendation.releaseLevel === "bloqueado" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>{recommendation.specificationAllowed ? "especificação condicionada" : recommendation.releaseLevel === "bloqueado" ? "recomendação bloqueada" : "pré-dimensionamento"}</span>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-4">
               <label className="text-sm text-violet-950"><span className="mb-1 block font-medium">Objetivo da análise</span><select value={recommendationMode} onChange={(e) => setRecommendationMode(e.target.value as RecommendationMode)} className="input"><option value="novo_banco">Projetar banco novo</option><option value="otimizar_existente">Otimizar banco existente</option></select></label>
@@ -455,16 +590,20 @@ export default function TransformerMeasurementsPage() {
               <div className="rounded-lg bg-white p-3 text-sm"><span className="block text-xs font-semibold uppercase text-slate-500">Decisão</span><strong className="mt-1 block text-violet-950">{recommendationLabel(recommendation.decision)}</strong><span className="text-xs text-slate-500">Confiança: {recommendation.confidence}</span></div>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Metric title="Potência indicada" value={recommendation.recommendedKvar == null ? "Não liberada" : `${fmt(recommendation.recommendedKvar)} kVAr`} detail={recommendation.p90RequiredKvar == null ? "P90 indisponível" : `necessidade P90: ${fmt(recommendation.p90RequiredKvar)} kVAr`} />
-              <Metric title="Estágios sugeridos" value={recommendation.suggestedStagesKvar.length ? recommendation.suggestedStagesKvar.map((value) => fmt(value)).join(" + ") : "—"} detail={recommendation.suggestedStagesKvar.length ? "valores comerciais em kVAr" : "aguardando campanha válida"} />
-              <Metric title="Campanha" value={`${recommendation.validSamples} amostra(s)`} detail={recommendation.coverageHours == null ? "cobertura não determinada" : `${fmt(recommendation.coverageHours)} horas de cobertura`} />
-              <Metric title="Comportamento capacitivo" value={`${fmt(recommendation.capacitivePercent)}%`} detail={`${recommendation.capacitiveSamples} capacitiva(s) · ${recommendation.inductiveSamples} indutiva(s)`} />
+              <Metric title="Referência preliminar" value={recommendation.recommendedKvar == null ? "Não liberada" : `${fmt(recommendation.recommendedKvar)} kVAr`} detail={recommendation.recommendedRangeKvar == null ? "faixa indisponível" : `P50/P90/P95 comerciais: ${fmt(recommendation.recommendedRangeKvar.minimum)}/${fmt(recommendation.recommendedRangeKvar.reference)}/${fmt(recommendation.recommendedRangeKvar.maximum)} kVAr`} />
+              <Metric title="Estágios ilustrativos" value={recommendation.suggestedStagesKvar.length ? recommendation.suggestedStagesKvar.map((value) => fmt(value)).join(" + ") : "—"} detail={recommendation.suggestedStagesKvar.length ? "validar controlador e carga mínima" : "aguardando campanha válida"} />
+              <Metric title="Qualidade temporal" value={`${recommendation.validSamples} amostra(s)`} detail={`${recommendation.coverageHours == null ? "—" : fmt(recommendation.coverageHours)} h · ${recommendation.distinctDays} dias · densidade ${recommendation.sampleDensityPercent == null ? "—" : fmt(recommendation.sampleDensityPercent)}%`} />
+              <Metric title="Cobertura harmônica" value={`${fmt(recommendation.harmonicCoveragePercent)}%`} detail={`intervalo mediano ${recommendation.medianIntervalMinutes == null ? "—" : fmt(recommendation.medianIntervalMinutes)} min`} />
             </div>
+            <div className="mt-4 rounded-lg border border-violet-200 bg-white p-4"><h3 className="mb-3 text-sm font-bold text-violet-950">Validações do responsável técnico</h3><div className="grid gap-3 md:grid-cols-3"><label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={representativeCampaignConfirmed} onChange={(e) => setRepresentativeCampaignConfirmed(e.target.checked)} className="mt-0.5" /><span>Ciclo operacional representativo confirmado</span></label><label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={harmonicStudyValidated} onChange={(e) => setHarmonicStudyValidated(e.target.checked)} className="mt-0.5" /><span>Harmônicos, ressonância e dessintonia validados</span></label><label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={protectionStudyValidated} onChange={(e) => setProtectionStudyValidated(e.target.checked)} className="mt-0.5" /><span>Proteção, cabos, manobra e ventilação validados</span></label></div><p className="mt-2 text-[11px] text-amber-700">Marque apenas quando houver evidência técnica arquivada. As confirmações não compensam dados insuficientes.</p></div>
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <div className="rounded-lg border border-violet-200 bg-white p-4"><h3 className="mb-2 text-sm font-bold text-violet-950">Ações recomendadas</h3>{recommendation.actions.map((action) => <p key={action} className="mb-2 flex gap-2 text-sm text-slate-700"><CheckCircle2 className="mt-0.5 shrink-0 text-violet-600" size={16} />{action}</p>)}</div>
-              <div className="rounded-lg border border-amber-200 bg-white p-4"><h3 className="mb-2 text-sm font-bold text-amber-900">Alertas e limitações</h3>{recommendation.warnings.length ? recommendation.warnings.map((warning) => <p key={warning} className="mb-2 flex gap-2 text-sm text-amber-800"><AlertTriangle className="mt-0.5 shrink-0" size={16} />{warning}</p>) : <p className="text-sm text-emerald-700">Nenhuma limitação adicional identificada pelo motor.</p>}</div>
+              <div className="rounded-lg border border-amber-200 bg-white p-4"><h3 className="mb-2 text-sm font-bold text-amber-900">Alertas, limitações e pendências</h3>{[...recommendation.releaseReasons, ...recommendation.warnings].length ? [...recommendation.releaseReasons, ...recommendation.warnings].map((warning) => <p key={warning} className="mb-2 flex gap-2 text-sm text-amber-800"><AlertTriangle className="mt-0.5 shrink-0" size={16} />{warning}</p>) : <p className="text-sm text-emerald-700">Validações atendidas pelo motor e confirmadas pelo responsável.</p>}</div>
             </div>
-            <p className="mt-3 text-xs text-violet-700">Fórmula: {recommendation.formula}</p>
+            <div className="mt-4 flex flex-col gap-3 border-t border-violet-200 pt-4 md:flex-row md:items-center md:justify-between">
+              <p className="text-xs text-violet-700">Fórmula: {recommendation.formula}</p>
+              <button type="button" disabled={savingRecommendation || !measurements.length} onClick={() => void saveRecommendationRun()} className="flex shrink-0 items-center justify-center gap-2 rounded-lg bg-violet-800 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">{savingRecommendation ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />} Salvar memória técnica</button>
+            </div>
           </section>
 
           <section className="grid gap-6 lg:grid-cols-2">

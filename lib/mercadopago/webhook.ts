@@ -30,8 +30,8 @@ function getPlanName(planId: string | undefined): PlanName | null {
 export function verifyMercadoPagoSignature(request: Request, dataId: string): boolean {
   const secret = process.env.MP_WEBHOOK_SECRET;
   if (!secret) {
-    console.warn('[Mercado Pago] MP_WEBHOOK_SECRET ainda não configurado; validação de assinatura pendente.');
-    return true;
+    console.error('[Mercado Pago] MP_WEBHOOK_SECRET não configurado.');
+    return false;
   }
 
   const signature = request.headers.get('x-signature');
@@ -46,7 +46,7 @@ export function verifyMercadoPagoSignature(request: Request, dataId: string): bo
   );
   if (!parts.ts || !parts.v1) return false;
 
-  const manifest = `id:${dataId};request-id:${requestId};ts:${parts.ts};`;
+  const manifest = `id:${dataId.toLowerCase()};request-id:${requestId};ts:${parts.ts};`;
   const expected = createHmac('sha256', secret).update(manifest).digest('hex');
 
   const receivedBuffer = Buffer.from(parts.v1, 'utf8');
@@ -65,91 +65,144 @@ async function mercadoPagoGet(path: string) {
   return body;
 }
 
-async function registerEvent(eventKey: string, payload: WebhookPayload): Promise<'new' | 'duplicate' | 'unavailable'> {
+async function registerEvent(eventKey: string, payload: WebhookPayload): Promise<'process' | 'duplicate'> {
   const supabase = getSupabaseAdmin();
   const { error } = await supabase.from('payment_webhook_events').insert({
     provider: 'mercadopago',
     event_key: eventKey,
     event_type: payload.type || payload.action || 'unknown',
     payload,
+    status: 'processing',
+    attempt_count: 1,
+    updated_at: new Date().toISOString(),
   });
 
-  if (!error) return 'new';
-  if (error.code === '23505') return 'duplicate';
-  // Compatibilidade durante a implantação, antes da migração da tabela.
-  if (error.code === '42P01' || error.code === 'PGRST205') {
-    console.warn('[Mercado Pago] Tabela de idempotência ainda não criada.');
-    return 'unavailable';
+  if (!error) return 'process';
+  if (error.code === '23505') {
+    const { data: existing, error: readError } = await supabase
+      .from('payment_webhook_events')
+      .select('status, attempt_count')
+      .eq('event_key', eventKey)
+      .single();
+    if (readError) throw readError;
+    if (existing.status !== 'failed') return 'duplicate';
+    const { data: claimed, error: retryError } = await supabase
+      .from('payment_webhook_events')
+      .update({
+        status: 'processing',
+        attempt_count: (existing.attempt_count || 1) + 1,
+        last_error: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('event_key', eventKey)
+      .eq('status', 'failed')
+      .select('id')
+      .maybeSingle();
+    if (retryError) throw retryError;
+    if (!claimed) return 'duplicate';
+    return 'process';
   }
   throw error;
 }
 
+async function finishEvent(eventKey: string, status: 'processed' | 'failed', error?: unknown) {
+  const message = error instanceof Error ? error.message.slice(0, 500) : error ? 'Erro não identificado' : null;
+  const { error: updateError } = await getSupabaseAdmin()
+    .from('payment_webhook_events')
+    .update({
+      status,
+      processed_at: status === 'processed' ? new Date().toISOString() : null,
+      last_error: message,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('event_key', eventKey);
+  if (updateError) console.error('[Mercado Pago] Não foi possível finalizar registro do evento:', updateError);
+}
+
+async function updateSubscriptionState(subscription: Record<string, unknown>, paymentStatus: string) {
+  const subscriptionId = typeof subscription.id === 'string' ? subscription.id : '';
+  const tenantId = typeof subscription.external_reference === 'string' ? subscription.external_reference : '';
+  const configuredPlanId = typeof subscription.preapproval_plan_id === 'string'
+    ? subscription.preapproval_plan_id
+    : typeof subscription.plan_id === 'string' ? subscription.plan_id : undefined;
+  const plan = getPlanName(configuredPlanId);
+  if (!subscriptionId || !tenantId || !plan) throw new Error('Assinatura sem empresa ou plano reconhecido.');
+
+  const supabase = getSupabaseAdmin();
+  const { data: updatedTenant, error: tenantError } = await supabase
+    .from('tenants')
+    .update({ plano: plan, payment_status: paymentStatus, mp_subscription_id: subscriptionId, updated_at: new Date().toISOString() })
+    .eq('id', tenantId)
+    .eq('mp_subscription_id', subscriptionId)
+    .select('id')
+    .maybeSingle();
+  if (tenantError) throw tenantError;
+  if (!updatedTenant) throw new Error('Assinatura não corresponde à empresa registrada.');
+
+  const profileStatus = paymentStatus === 'active' ? 'active' : paymentStatus === 'pending' ? 'inactive' : paymentStatus;
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .update({ plan, subscription_status: profileStatus })
+    .eq('tenant_id', tenantId);
+  if (profileError) throw profileError;
+}
+
 export async function processMercadoPagoWebhook(request: Request): Promise<Response> {
+  let eventKey: string | null = null;
   try {
     const payload = await request.json() as WebhookPayload;
-    const dataId = String(payload.data?.id || '');
+    const bodyDataId = String(payload.data?.id || '');
+    const signedDataId = new URL(request.url).searchParams.get('data.id') || '';
 
-    if (!payload.type || !dataId) {
+    if (!payload.type || !bodyDataId || !signedDataId || bodyDataId.toLowerCase() !== signedDataId.toLowerCase()) {
       return Response.json({ error: 'Evento inválido' }, { status: 400 });
     }
-    if (!verifyMercadoPagoSignature(request, dataId)) {
+    if (!verifyMercadoPagoSignature(request, signedDataId)) {
       return Response.json({ error: 'Assinatura inválida' }, { status: 401 });
     }
 
-    const eventKey = `${payload.type}:${payload.action || 'event'}:${dataId}:${payload.id || ''}`;
+    const dataId = bodyDataId;
+    eventKey = `${payload.type}:${payload.action || 'event'}:${dataId}:${payload.id || ''}`;
     const registration = await registerEvent(eventKey, payload);
     if (registration === 'duplicate') {
       return Response.json({ received: true, duplicate: true });
     }
 
-    const supabase = getSupabaseAdmin();
-
     if (payload.type === 'subscription_authorized_payment') {
+      const invoice = await mercadoPagoGet(`/authorized_payments/${dataId}`);
+      const subscriptionId = typeof invoice.preapproval_id === 'string' ? invoice.preapproval_id : '';
+      if (!subscriptionId) throw new Error('Cobrança sem assinatura vinculada.');
+      const subscription = await mercadoPagoGet(`/preapproval/${subscriptionId}`);
+      const paymentStatus = invoice.payment?.status === 'approved'
+        ? 'active'
+        : invoice.payment?.status === 'rejected' ? 'past_due' : 'pending';
+      await updateSubscriptionState(subscription, paymentStatus);
+    } else if (payload.type === 'subscription_preapproval') {
       const subscription = await mercadoPagoGet(`/preapproval/${dataId}`);
-      const tenantId = subscription.external_reference as string | undefined;
-      const plan = getPlanName(subscription.plan_id);
-
-      if (!tenantId || !plan) throw new Error('Assinatura sem tenant ou plano reconhecido.');
-
-      const { error: tenantError } = await supabase
-        .from('tenants')
-        .update({
-          plano: plan,
-          payment_status: 'active',
-          mp_subscription_id: subscription.id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', tenantId);
-      if (tenantError) throw tenantError;
-
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ plan, subscription_status: 'active' })
-        .eq('tenant_id', tenantId);
-      if (profileError) throw profileError;
+      const subscriptionStatus = subscription.status === 'cancelled' || subscription.status === 'paused'
+        ? 'cancelled'
+        : 'pending';
+      await updateSubscriptionState(subscription, subscriptionStatus);
     } else if (payload.type === 'payment') {
       const payment = await mercadoPagoGet(`/v1/payments/${dataId}`);
       const subscriptionId = payment.preapproval_id as string | undefined;
       if (subscriptionId) {
-        const status = payment.status === 'approved' ? 'active' : payment.status === 'rejected' ? 'past_due' : null;
-        if (status) {
-          const update: Record<string, string> = { payment_status: status, updated_at: new Date().toISOString() };
-          const plan = getPlanName(payment.preapproval_plan_id);
-          if (plan) update.plano = plan;
-          const { error } = await supabase.from('tenants').update(update).eq('mp_subscription_id', subscriptionId);
-          if (error) throw error;
-        }
+        const subscription = await mercadoPagoGet(`/preapproval/${subscriptionId}`);
+        const status = payment.status === 'approved' ? 'active' : payment.status === 'rejected' ? 'past_due' : 'pending';
+        await updateSubscriptionState(subscription, status);
       }
     } else if (payload.type === 'subscription_payment_failed' || payload.type === 'subscription_cancelled') {
-      const { error } = await supabase
+      const { error } = await getSupabaseAdmin()
         .from('tenants')
         .update({ payment_status: 'past_due', updated_at: new Date().toISOString() })
         .eq('mp_subscription_id', dataId);
       if (error) throw error;
     }
 
+    await finishEvent(eventKey, 'processed');
     return Response.json({ received: true });
   } catch (error) {
+    if (eventKey) await finishEvent(eventKey, 'failed', error);
     console.error('[Mercado Pago] Falha ao processar webhook:', error);
     return Response.json({ error: 'Falha ao processar notificação' }, { status: 500 });
   }

@@ -1,80 +1,41 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { PDFParse } from 'pdf-parse';
+import { parseEquatorialInvoiceText } from '@/lib/equatorial-invoice-parser';
+import { buildInvoiceAuditResult } from '@/lib/invoice-audit-result';
+import { enforceRateLimit } from '@/lib/server/rate-limit';
 
-// Importação segura do pdf-parse para ambiente Node.js / Next.js
-const pdfParse = require('pdf-parse');
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-);
+export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 export async function POST(request: Request) {
+  let parser: PDFParse | undefined;
   try {
+    const allowed = await enforceRateLimit({ endpoint: 'invoice-audit', request, maxRequests: 5, windowSeconds: 3600 });
+    if (!allowed) return NextResponse.json({ error: 'Limite temporário atingido. Aguarde antes de enviar outra fatura.' }, { status: 429 });
+
     const formData = await request.formData();
-    const file = formData.get('fatura') as File;
-
-    if (!file) {
-      return NextResponse.json(
-        { error: 'Nenhum arquivo enviado.' }, 
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
+    const file = formData.get('fatura');
+    if (!(file instanceof File)) return NextResponse.json({ error: 'Selecione uma fatura em PDF.' }, { status: 400 });
+    if (file.size === 0 || file.size > 8 * 1024 * 1024) return NextResponse.json({ error: 'O PDF deve ter até 8 MB.' }, { status: 413 });
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      return NextResponse.json({ error: 'Formato não suportado. Envie um PDF.' }, { status: 415 });
     }
 
-    // Tenta ler o PDF de forma local
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      await pdfParse(buffer);
-    } catch (pdfErr) {
-      console.warn('Aviso: Leitura do PDF em segundo plano encontrou restrições, mas prosseguirá com o mapeamento:', pdfErr);
+    parser = new PDFParse({ data: Buffer.from(await file.arrayBuffer()) });
+    const extracted = await parser.getText();
+    const parsed = parseEquatorialInvoiceText(extracted.text, file.name);
+    const hasUsefulData = parsed.total_pagar > 0 || parsed.consumo_ponta_kwh > 0 || parsed.consumo_fora_ponta_kwh > 0 || (parsed.penalidade_reativa_informada ?? 0) > 0;
+    if (!hasUsefulData) {
+      return NextResponse.json({ error: 'Não foi possível identificar os campos da fatura. Confirme se o PDF contém texto e é do modelo Equatorial Pará suportado.' }, { status: 422 });
     }
 
-    // Dados extraídos e estruturados da fatura real[cite: 1]
-    const dadosExtraidos = {
-      razaoSocial: "PREMAZON PREMOLDADOS DE CONCRETO LTDA",
-      cnpj: "01.532.081/0001-33",
-      endereco: "RD PA 150 , S/N , ALCA VIARIA KM 2 5 AO LADO DA VOTORANTIN",
-      cepLocal: "67200-000 - ALCA VIARIA - MARITUBA - PA",
-      unidadeConsumidora: "1.409.697.013-04",
-      reativoForaPontaKvar: "4.925,27",
-      reativoPontaKvar: "365,08",
-      valorTotalFatura: "6.984,32"
-    };
-
-    // Tentativa opcional de salvamento no Supabase
-    try {
-      await supabase
-        .from('auditorias_faturas')
-        .insert([{
-          razao_social: dadosExtraidos.razaoSocial,
-          cnpj: dadosExtraidos.cnpj,
-          endereco: dadosExtraidos.endereco,
-          unidade_consumidora: dadosExtraidos.unidadeConsumidora,
-          reativo_fp: dadosExtraidos.reativoForaPontaKvar,
-          reativo_ponta: dadosExtraidos.reativoPontaKvar,
-          valor_total: dadosExtraidos.valorTotalFatura
-        }]);
-    } catch (dbErr) {
-      console.warn('Aviso do Supabase (não bloqueante):', dbErr);
-    }
-
-    // Retorna explicitamente um JSON bem formatado
-    return NextResponse.json(
-      {
-        status: 'sucesso',
-        origem: 'Extrator Local Nativo',
-        dados: dadosExtraidos
-      },
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    );
-
-  } catch (error: any) {
-    console.error('Erro crítico na rota:', error);
-    // Garante que mesmo em caso de falha grave, o retorno seja um JSON estruturado
-    return NextResponse.json(
-      { error: error.message || 'Erro interno ao processar a fatura.' },
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
+    const result = buildInvoiceAuditResult(parsed);
+    return NextResponse.json({ success: true, data: result, status: 'sucesso', dados: result });
+  } catch (error) {
+    console.warn('[Auditoria] Falha ao processar PDF:', error);
+    const detail = process.env.NODE_ENV === 'development' && error instanceof Error ? ` ${error.message}` : '';
+    return NextResponse.json({ error: `Não foi possível processar esta fatura.${detail}` }, { status: 500 });
+  } finally {
+    if (parser) await parser.destroy().catch(() => undefined);
   }
 }

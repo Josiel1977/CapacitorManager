@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { supabase } from '@/lib/supabase';
 import { 
@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/AuthContext';
+import { withTimeout } from '@/lib/with-timeout';
 
 // ============================================================================
 // TIPOS
@@ -69,36 +71,33 @@ function calcularTendenciaManutencao(medicoes: any[]): 'degradando' | 'estavel' 
     if (!medicoes || medicoes.length < 2) return 'estavel';
     
     const medicoesOrdenadas = [...medicoes].sort((a, b) => 
-        new Date(a.data_medicao).getTime() - new Date(b.data_medicao).getTime()
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
     
-    const primeiro = Math.abs(medicoesOrdenadas[0].desvio_percent || 0);
-    const ultimo = Math.abs(medicoesOrdenadas[medicoesOrdenadas.length - 1].desvio_percent || 0);
+    const primeiro = Math.abs(Number(medicoesOrdenadas[0].desvio_percentual) || 0);
+    const ultimo = Math.abs(Number(medicoesOrdenadas[medicoesOrdenadas.length - 1].desvio_percentual) || 0);
     
     if (ultimo > primeiro * 1.05) return 'degradando';
     if (ultimo < primeiro * 0.95) return 'melhorando';
     return 'estavel';
 }
 
-function calcularPrevisaoSubstituicao(desvioAtual: number, degradacaoAnual: number, limiteAtencao: number): string {
-    const desvioAbs = Math.abs(desvioAtual);
-    const desvioRestante = limiteAtencao - desvioAbs;
-    
-    if (desvioRestante <= 0) return 'Imediata';
-    
-    const degradacaoMensal = degradacaoAnual / 12;
-    const mesesRestantes = desvioRestante / degradacaoMensal;
-    
-    if (mesesRestantes <= 1) return 'Urgente (menos de 1 mês)';
-    if (mesesRestantes <= 3) return 'Curto prazo (1-3 meses)';
-    if (mesesRestantes <= 6) return 'Médio prazo (3-6 meses)';
-    return 'Longo prazo (mais de 6 meses)';
+function recomendarCondutaManutencao(
+  status: 'critical' | 'warning' | 'ok',
+  tendencia: 'degradando' | 'estavel' | 'melhorando',
+): string {
+    if (status === 'critical') return 'Reteste e avaliação técnica imediata';
+    if (status === 'warning' && tendencia === 'degradando') return 'Priorizar reteste e acompanhar tendência';
+    if (status === 'warning') return 'Programar nova medição';
+    return 'Manter monitoramento periódico';
 }
 
 // ============================================================================
 // COMPONENTE PRINCIPAL
 // ============================================================================
 export default function ConfiguracoesPage() {
+  const { user, profile } = useAuth();
+  const tenantId = profile?.tenant_id || null;
   const [activeTab, setActiveTab] = useState<'tolerancias' | 'manutencao' | 'conexao' | 'lixeira'>('tolerancias');
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [tolerancias, setTolerancias] = useState<ToleranciasConfig>({
@@ -123,6 +122,10 @@ export default function ConfiguracoesPage() {
   const [alertasCapacitores, setAlertasCapacitores] = useState<CapacitorAlerta[]>([]);
   const [totalCapacitores, setTotalCapacitores] = useState(0);
   const [loadingAlertas, setLoadingAlertas] = useState(false);
+  const [loadingTolerancias, setLoadingTolerancias] = useState(false);
+  const [configSchemaReady, setConfigSchemaReady] = useState(true);
+  const [configMessage, setConfigMessage] = useState<string | null>(null);
+  const toleranciasRequestInFlight = useRef(false);
 
   // ============================================================================
   // EFEITOS
@@ -137,18 +140,39 @@ export default function ConfiguracoesPage() {
     if (activeTab === 'manutencao') {
       fetchAlertasCapacitores();
     }
-  }, [activeTab]);
+  }, [activeTab, user, tenantId]);
 
   // ============================================================================
   // FUNÇÕES DE TOLERÂNCIAS
   // ============================================================================
   async function fetchTolerancias() {
+    if (!user || !tenantId || toleranciasRequestInFlight.current) return;
+    toleranciasRequestInFlight.current = true;
+    setLoadingTolerancias(true);
+    setConfigMessage(null);
     try {
-      const { data, error } = await supabase
-        .from('configuracoes')
-        .select('*')
-        .eq('id', 'global')
-        .single();
+      const { data, error } = await withTimeout(
+        supabase
+          .from('configuracoes')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .maybeSingle(),
+        8_000,
+        'Tempo limite ao consultar as tolerâncias.',
+      );
+      if (error) {
+        const schemaMissing = error.code === '42703'
+          || /tenant_id|column.*does not exist|schema cache/i.test(error.message || '');
+        if (schemaMissing) {
+          setConfigSchemaReady(false);
+          setConfigMessage('A migração das configurações por empresa ainda não foi aplicada. Os valores padrão permanecem disponíveis somente para consulta.');
+          console.warn('[Configurações] Migração de configuracoes.tenant_id pendente.');
+          return;
+        }
+        throw error;
+      }
+
+      setConfigSchemaReady(true);
       
       if (data) {
         setTolerancias({
@@ -164,16 +188,34 @@ export default function ConfiguracoesPage() {
           tempo_operacao_dias: data.tempo_operacao_dias ?? 365,
           degradacao_anual_percent: data.degradacao_anual_percent ?? 3
         });
+      } else {
+        setTolerancias((current) => ({ ...current, id: tenantId }));
       }
     } catch (error) {
-      console.error('Erro ao buscar tolerâncias:', error);
+      const message = error instanceof Error ? error.message : 'Não foi possível carregar as tolerâncias.';
+      setConfigMessage(message);
+      console.warn(`[Configurações] ${message}`);
+    } finally {
+      setLoadingTolerancias(false);
+      toleranciasRequestInFlight.current = false;
     }
   }
 
   async function saveTolerancias() {
+    if (!configSchemaReady) {
+      await Swal.fire({
+        title: 'Migração necessária',
+        text: 'Aplique a migração de configurações por empresa antes de salvar.',
+        icon: 'warning',
+        confirmButtonColor: '#0a2b3c',
+      });
+      return;
+    }
     setSavingTolerancias(true);
     try {
-      const payload = { ...tolerancias };
+      if (!user) throw new Error('Sessão não encontrada.');
+      if (!tenantId) throw new Error('Empresa não encontrada.');
+      const payload = { ...tolerancias, id: tenantId, tenant_id: tenantId };
       const { error } = await supabase
         .from('configuracoes')
         .upsert(payload, { onConflict: 'id' });
@@ -244,14 +286,7 @@ export default function ConfiguracoesPage() {
             nome_banco,
             clientes (id, nome)
           ),
-          medicoes (
-            id,
-            data_medicao,
-            valor_medido,
-            valor_nominal,
-            tipo_medicao,
-            desvio_percent
-          )
+          medicoes (*)
         `)
         .eq('ativo', true);
 
@@ -264,20 +299,23 @@ export default function ConfiguracoesPage() {
         total++;
         
         const medicoesOrdenadas = cap.medicoes?.sort((a: any, b: any) => 
-          new Date(b.data_medicao).getTime() - new Date(a.data_medicao).getTime()
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         ) || [];
         
         const ultimaMedicao = medicoesOrdenadas[0];
         if (!ultimaMedicao) continue;
 
-        const desvio = ultimaMedicao.desvio_percent || 0;
+        const desvio = Number(ultimaMedicao.desvio_percentual) || 0;
         const status = getStatusManutencao(desvio, tolerancias);
         const tendencia = calcularTendenciaManutencao(medicoesOrdenadas);
-        const previsao = calcularPrevisaoSubstituicao(
-          desvio, 
-          tolerancias.degradacao_anual_percent,
-          Math.abs(tolerancias.tolerancia_max_atencao)
-        );
+        const previsao = recomendarCondutaManutencao(status, tendencia);
+        const testeCorrente = ultimaMedicao.tipo_teste === 'corrente';
+        const valorMedido = testeCorrente
+          ? Number(ultimaMedicao.corrente_medida_a) || 0
+          : Number(ultimaMedicao.capacitancia_medida_uf) || 0;
+        const valorNominal = testeCorrente
+          ? Number(ultimaMedicao.corrente_teorica_a) || 0
+          : Number(ultimaMedicao.capacitancia_teorica_uf) || Number(cap.capacitancia_nominal_uf) || 0;
 
         if (status !== 'ok') {
           alertas.push({
@@ -285,8 +323,8 @@ export default function ConfiguracoesPage() {
             codigo: cap.codigo_identificacao,
             banco: cap.bancos_capacitores?.nome_banco || 'N/A',
             cliente: cap.bancos_capacitores?.clientes?.nome || 'N/A',
-            valor_medido: ultimaMedicao.valor_medido,
-            valor_nominal: ultimaMedicao.valor_nominal,
+            valor_medido: valorMedido,
+            valor_nominal: valorNominal,
             desvio_percent: desvio,
             status,
             tendencia,
@@ -336,9 +374,11 @@ export default function ConfiguracoesPage() {
   // ============================================================================
   async function fetchTrash() {
     try {
-      const { data: c } = await supabase.from('clientes').select('*').eq('ativo', false);
-      const { data: b } = await supabase.from('bancos_capacitores').select('*, clientes(nome)').eq('ativo', false);
-      const { data: cap } = await supabase.from('capacitores').select('*, bancos_capacitores(nome_banco)').eq('ativo', false);
+      const [{ data: c }, { data: b }, { data: cap }] = await Promise.all([
+        supabase.from('clientes').select('*').eq('ativo', false),
+        supabase.from('bancos_capacitores').select('*, clientes(nome)').eq('ativo', false),
+        supabase.from('capacitores').select('*, bancos_capacitores(nome_banco)').eq('ativo', false),
+      ]);
       
       setTrashItems({
         clientes: c || [],
@@ -489,6 +529,9 @@ export default function ConfiguracoesPage() {
             onSave={saveTolerancias}
             onReset={resetTolerancias}
             saving={savingTolerancias}
+            loading={loadingTolerancias}
+            schemaReady={configSchemaReady}
+            message={configMessage}
             variants={itemVariants}
           />
         )}
@@ -544,9 +587,14 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   );
 }
 
-function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving, variants }: any) {
+function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving, loading, schemaReady, message, variants }: any) {
   return (
     <motion.div variants={variants} className="space-y-6">
+      {message && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${schemaReady ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>
+          {message}
+        </div>
+      )}
       <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
         <div className="mb-6 flex items-center gap-3">
           <div className="rounded-xl bg-primary/10 p-2 text-primary">
@@ -683,11 +731,11 @@ function ToleranciasTab({ tolerancias, setTolerancias, onSave, onReset, saving, 
           </button>
           <button 
             onClick={onSave} 
-            disabled={saving} 
+            disabled={saving || loading || !schemaReady} 
             className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2 font-medium text-white transition-all hover:bg-primary/90 disabled:opacity-50"
           >
-            {saving ? <RefreshCw className="animate-spin" size={18} /> : <Save size={18} />}
-            Salvar Configurações
+            {saving || loading ? <RefreshCw className="animate-spin" size={18} /> : <Save size={18} />}
+            {loading ? 'Carregando…' : 'Salvar Configurações'}
           </button>
         </div>
       </div>
@@ -724,7 +772,7 @@ function ManutencaoPreditivaTab({ alertas, totalCapacitores, aprovados, loading,
           <p><strong>Cliente:</strong> ${capacitor.cliente}</p>
           <p><strong>Desvio:</strong> ${capacitor.desvio_percent > 0 ? '+' : ''}${capacitor.desvio_percent}%</p>
           <p><strong>Status:</strong> ${capacitor.status === 'critical' ? 'CRÍTICO' : 'ATENÇÃO'}</p>
-          <p><strong>Previsão:</strong> ${capacitor.previsao_substituicao}</p>
+          <p><strong>Conduta recomendada:</strong> ${capacitor.previsao_substituicao}</p>
           <hr style="margin: 15px 0;">
           <label><strong>Prioridade:</strong></label>
           <select id="prioridade" style="width: 100%; padding: 8px; margin-top: 5px; border-radius: 8px; border: 1px solid #ddd;">
@@ -836,7 +884,7 @@ function ManutencaoPreditivaTab({ alertas, totalCapacitores, aprovados, loading,
                   <th className="px-5 py-3">Desvio</th>
                   <th className="px-5 py-3">Status</th>
                   <th className="px-5 py-3">Tendência</th>
-                  <th className="px-5 py-3">Previsão</th>
+                  <th className="px-5 py-3">Conduta recomendada</th>
                   <th className="px-5 py-3 text-center">Ação</th>
                  </tr>
               </thead>
@@ -1048,4 +1096,3 @@ function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
-

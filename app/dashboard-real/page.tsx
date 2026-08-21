@@ -31,6 +31,8 @@ import {
 } from "chart.js";
 import { Bar, Pie } from "react-chartjs-2";
 import { cn } from "@/lib/utils";
+import { calculateDeltaCapacitance, calculateExpectedCapacitorCurrent, classifyDeviation } from "@/lib/domain/capacitorAnalysis";
+import { withTimeout } from "@/lib/with-timeout";
 
 ChartJS.register(
   CategoryScale,
@@ -41,21 +43,6 @@ ChartJS.register(
   Legend,
   ArcElement,
 );
-
-// Funções de cálculo
-function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
-  if (!tensaoNominal || tensaoNominal === 0) return 0;
-  return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
-}
-function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
-  return capacitanciaNominalFase * 1.5;
-}
-function getStatusValidacao(desvio: number): string {
-  if (desvio >= -5 && desvio <= 10) return "aprovado";
-  if (desvio >= -10 && desvio < -5) return "atencao";
-  if (desvio > 10 && desvio <= 15) return "atencao";
-  return "reprovado";
-}
 
 export default function DashboardReal() {
   const [stats, setStats] = useState({
@@ -75,55 +62,32 @@ export default function DashboardReal() {
   const [fatorEficiencia, setFatorEficiencia] = useState(0.65);
 
   useEffect(() => {
-    fetchConfig();
     fetchStats();
   }, []);
 
-  async function fetchConfig() {
-    try {
-      const { data: maxData } = await supabase
-        .from("parametros_sistema")
-        .select("valor")
-        .eq("chave", "economia_max_mensal")
-        .single();
-      if (maxData?.valor) setMaxEconomiaMensal(parseFloat(maxData.valor));
-
-      const { data: eficData } = await supabase
-        .from("parametros_sistema")
-        .select("valor")
-        .eq("chave", "fator_eficiencia_capacitores")
-        .single();
-      if (eficData?.valor) setFatorEficiencia(parseFloat(eficData.valor));
-    } catch (err) {
-      console.warn("Usando valores padrão (tabela parametros_sistema não configurada)");
-    }
-  }
-
-  async function recalcularMedicao(med: any) {
+  function recalcularMedicao(med: any) {
     let desvio = med.desvio_percentual;
     let status = med.status_validacao;
-    let capacitor = med.capacitores;
-    if (!capacitor && med.capacitor_id) {
-      const { data } = await supabase
-        .from("capacitores")
-        .select("*")
-        .eq("id", med.capacitor_id)
-        .single();
-      capacitor = data;
-    }
+    const capacitor = med.capacitores;
     if (capacitor) {
       const tensao = capacitor.tensao_nominal_v;
       if (med.tipo_teste === "corrente" && med.corrente_medida_a) {
-        const teorico = calcularCorrenteTeorica(capacitor.potencia_kvar, tensao);
+        const teorico = calculateExpectedCapacitorCurrent(
+          capacitor.potencia_kvar,
+          tensao,
+          med.tensao_medida_v || tensao,
+          60,
+          med.frequencia_medida_hz || 60,
+        );
         if (teorico > 0) {
           desvio = ((med.corrente_medida_a - teorico) / teorico) * 100;
-          status = getStatusValidacao(desvio);
+          status = classifyDeviation(desvio);
         }
       } else if (med.tipo_teste === "capacitancia" && med.capacitancia_medida_uf) {
-        const teorico = calcularCapacitanciaTeoricaDelta(capacitor.capacitancia_nominal_uf);
+        const teorico = calculateDeltaCapacitance(capacitor.capacitancia_nominal_uf);
         if (teorico > 0) {
           desvio = ((med.capacitancia_medida_uf - teorico) / teorico) * 100;
-          status = getStatusValidacao(desvio);
+          status = classifyDeviation(desvio);
         }
       }
     }
@@ -139,21 +103,45 @@ export default function DashboardReal() {
   async function fetchStats() {
     try {
       setLoading(true);
-      const { count: clientesCount } = await supabase
-        .from("clientes")
-        .select("*", { count: "exact", head: true });
-      const { count: bancosCount } = await supabase
-        .from("bancos_capacitores")
-        .select("*", { count: "exact", head: true });
-      const { count: capacitoresCount } = await supabase
-        .from("capacitores")
-        .select("*", { count: "exact", head: true });
-      const { data: medicoesData } = await supabase
-        .from("medicoes")
-        .select(
-          `*, capacitores!inner(id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v), clientes(id, nome)`,
-        )
-        .order("created_at", { ascending: false });
+      const [clientesResult, bancosResult, capacitoresResult, medicoesResult, parametrosResult] = await withTimeout(
+        Promise.all([
+          supabase.from("clientes").select("id", { count: "exact", head: true }),
+          supabase.from("bancos_capacitores").select("id", { count: "exact", head: true }),
+          supabase.from("capacitores").select("id", { count: "exact", head: true }),
+          supabase
+            .from("medicoes")
+            .select(
+              `*, capacitores!inner(id, codigo_identificacao, potencia_kvar, capacitancia_nominal_uf, tensao_nominal_v), clientes(id, nome)`,
+            )
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("parametros_sistema")
+            .select("chave, valor")
+            .in("chave", ["economia_max_mensal", "fator_eficiencia_capacitores"]),
+        ]),
+        12_000,
+        "Tempo limite ao carregar o dashboard.",
+      );
+
+      const firstError = clientesResult.error
+        || bancosResult.error
+        || capacitoresResult.error
+        || medicoesResult.error;
+      if (firstError) throw firstError;
+
+      const clientesCount = clientesResult.count;
+      const bancosCount = bancosResult.count;
+      const capacitoresCount = capacitoresResult.count;
+      const medicoesData = medicoesResult.data;
+      const parametros = new Map<string, number>(
+        (parametrosResult.data || []).map((item) => [item.chave, Number(item.valor)] as const),
+      );
+      const configuredMax = parametros.get("economia_max_mensal");
+      const configuredEfficiency = parametros.get("fator_eficiencia_capacitores");
+      const currentMaxEconomia = Number.isFinite(configuredMax) ? configuredMax! : 2500;
+      const currentFatorEficiencia = Number.isFinite(configuredEfficiency) ? configuredEfficiency! : 0.65;
+      setMaxEconomiaMensal(currentMaxEconomia);
+      setFatorEficiencia(currentFatorEficiencia);
 
       if (!medicoesData || medicoesData.length === 0) {
         setStats({
@@ -172,7 +160,7 @@ export default function DashboardReal() {
         return;
       }
 
-      const processed = await Promise.all(medicoesData.map(recalcularMedicao));
+      const processed = medicoesData.map(recalcularMedicao);
       // Estado atual por ativo: usa a medição mais recente de cada tipo de teste
       // e conta cada capacitor uma única vez.
       const statusCounts = countCurrentCapacitorStatuses(processed);
@@ -183,7 +171,7 @@ export default function DashboardReal() {
         ? statusCounts.aprovado / totalCapacitoresAvaliados
         : 0;
 
-      const economiaEstimada = maxEconomiaMensal * percAprovado * fatorEficiencia;
+      const economiaEstimada = currentMaxEconomia * percAprovado * currentFatorEficiencia;
 
       const eficienciaGeral = totalCapacitoresAvaliados
         ? (statusCounts.aprovado / totalCapacitoresAvaliados) * 100
@@ -202,7 +190,8 @@ export default function DashboardReal() {
       });
       setRecentMedicoes(processed.slice(0, 5));
     } catch (err) {
-      console.error(err);
+      const message = err instanceof Error ? err.message : 'Não foi possível carregar o dashboard.';
+      console.warn(`[Dashboard] ${message}`);
     } finally {
       setLoading(false);
     }

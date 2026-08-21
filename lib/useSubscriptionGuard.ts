@@ -1,15 +1,14 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/AuthContext';
-import { supabase } from '@/lib/supabaseClient';
 import Swal from 'sweetalert2';
 
 export function useSubscriptionGuard(redirectTo: string = '/planos') {
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { user, profile, isAuthenticated, isLoading, isProfileLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || isProfileLoading) return;
 
     if (!isAuthenticated || !user) {
       router.push('/login');
@@ -17,14 +16,7 @@ export function useSubscriptionGuard(redirectTo: string = '/planos') {
     }
 
     const checkAccess = async () => {
-      // Busca perfil completo (role e subscription_status)
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('role, subscription_status')
-        .eq('id', user.id)
-        .single();
-
-      if (error || !profile) {
+      if (!profile) {
         router.push('/login');
         return;
       }
@@ -48,5 +40,5 @@ export function useSubscriptionGuard(redirectTo: string = '/planos') {
     };
 
     checkAccess();
-  }, [user, isAuthenticated, isLoading, router, redirectTo]);
+  }, [user, profile, isAuthenticated, isLoading, isProfileLoading, router, redirectTo]);
 }

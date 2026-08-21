@@ -15,8 +15,8 @@ import { cn } from '@/lib/utils';
 
 export default function BancosPage() {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const [tenantId, setTenantId] = useState<string | null>(null);
+  const { profile, isAuthenticated, isLoading: authLoading, isProfileLoading } = useAuth();
+  const tenantId = profile?.tenant_id || null;
   const [bancos, setBancos] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,71 +43,52 @@ export default function BancosPage() {
     }
   }, [isAuthenticated, authLoading, router]);
 
-  // Obtém tenant_id do perfil
-  useEffect(() => {
-    const fetchTenant = async () => {
-      if (!user) return;
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('tenant_id')
-        .eq('id', user.id)
-        .single();
-      if (error || !profile?.tenant_id) {
-        console.error('Perfil sem tenant', error);
-        Swal.fire('Erro', 'Perfil não configurado. Contate o suporte.', 'error');
-        return;
-      }
-      setTenantId(profile.tenant_id);
-    };
-    if (isAuthenticated) fetchTenant();
-  }, [user, isAuthenticated]);
-
   // Carrega dados do tenant e calcula a potência real dos bancos via capacitores cadastrados
   const fetchData = async () => {
     if (!tenantId) return;
     setLoading(true);
     try {
-      const { data: bancosData, error: bancosError } = await supabase
-        .from('bancos_capacitores')
-        .select('*, clientes(id, nome)')
-        .eq('tenant_id', tenantId)
-        .eq('ativo', true)
-        .order('nome_banco');
+      const [bancosResult, clientesResult, capacitorsResult] = await Promise.all([
+        supabase
+          .from('bancos_capacitores')
+          .select('*, clientes(id, nome)')
+          .eq('tenant_id', tenantId)
+          .eq('ativo', true)
+          .order('nome_banco'),
+        supabase
+          .from('clientes')
+          .select('id, nome')
+          .eq('tenant_id', tenantId)
+          .eq('ativo', true)
+          .order('nome'),
+        supabase
+          .from('capacitores')
+          .select('banco_id, potencia_kvar')
+          .eq('tenant_id', tenantId)
+          .eq('ativo', true),
+      ]);
+      const { data: bancosData, error: bancosError } = bancosResult;
       if (bancosError) throw bancosError;
 
-      // Para cada banco, calcula a potência somando os capacitores ativos vinculados
-      const bancosComPotenciaCalculada = await Promise.all(
-        (bancosData || []).map(async (banco) => {
-          const { data: caps } = await supabase
-            .from('capacitores')
-            .select('potencia_kvar')
-            .eq('banco_id', banco.id)
-            .eq('ativo', true);
+      if (capacitorsResult.error) throw capacitorsResult.error;
 
-          const somaCapacitores = caps && caps.length > 0
-            ? caps.reduce((acc, cap) => acc + (cap.potencia_kvar || 0), 0)
-            : null;
-
-          // Se o banco não tiver override manual salvo ou se preferir priorizar o calculado, usa o somatório
-          const potenciaEfetiva = somaCapacitores !== null && somaCapacitores > 0 
-            ? somaCapacitores 
-            : (banco.potencia_total_kvar || 0);
-
-          return {
-            ...banco,
-            potencia_calculada: potenciaEfetiva
-          };
-        })
-      );
+      const powerByBank = new Map<string, number>();
+      (capacitorsResult.data || []).forEach((capacitor) => {
+        powerByBank.set(
+          capacitor.banco_id,
+          (powerByBank.get(capacitor.banco_id) || 0) + (Number(capacitor.potencia_kvar) || 0),
+        );
+      });
+      const bancosComPotenciaCalculada = (bancosData || []).map((banco) => ({
+        ...banco,
+        potencia_calculada: (powerByBank.get(banco.id) || 0) > 0
+          ? powerByBank.get(banco.id)
+          : (banco.potencia_total_kvar || 0),
+      }));
 
       setBancos(bancosComPotenciaCalculada);
 
-      const { data: clientesData, error: clientesError } = await supabase
-        .from('clientes')
-        .select('id, nome')
-        .eq('tenant_id', tenantId)
-        .eq('ativo', true)
-        .order('nome');
+      const { data: clientesData, error: clientesError } = clientesResult;
       if (clientesError) throw clientesError;
       setClientes(clientesData || []);
     } catch (error) {
@@ -119,8 +100,12 @@ export default function BancosPage() {
   };
 
   useEffect(() => {
-    if (tenantId) fetchData();
-  }, [tenantId]);
+    if (tenantId) {
+      fetchData();
+    } else if (!authLoading && !isProfileLoading) {
+      setLoading(false);
+    }
+  }, [tenantId, authLoading, isProfileLoading]);
 
   // Recalcular eficiência média
   const calcularEficienciaMedia = async () => {
@@ -311,7 +296,7 @@ export default function BancosPage() {
     }
   }
 
-  if (authLoading || loading) {
+  if (authLoading || isProfileLoading || loading) {
     return <div className="flex justify-center items-center h-64">Carregando...</div>;
   }
   if (!isAuthenticated) return null;

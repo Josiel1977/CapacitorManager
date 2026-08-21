@@ -161,6 +161,9 @@ export default function EnergyWisePage() {
 
   return (
     <div className="space-y-8 pb-12 max-w-7xl mx-auto">
+      <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+        <strong>Protótipo demonstrativo:</strong> esta tela usa dados simulados e ainda não se conecta a inversores, Modbus ou APIs de fabricantes. Não informe credenciais reais nem inclua a telemetria solar na proposta comercial vigente.
+      </div>
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 p-6 rounded-2xl border border-slate-800 text-white shadow-xl">
         <div className="flex items-center gap-4">
@@ -277,7 +280,8 @@ export default function EnergyWisePage() {
                       </label>
                       <input
                         type="password"
-                        defaultValue="************************"
+                        disabled
+                        placeholder="Integração ainda não disponível"
                         className="w-full p-2 border rounded-lg bg-white"
                       />
                     </div>
@@ -365,7 +369,7 @@ export default function EnergyWisePage() {
                     </>
                   ) : (
                     <>
-                      <Server size={18} /> Iniciar Telemetria
+                      <Server size={18} /> Simular Telemetria
                     </>
                   )}
                 </button>

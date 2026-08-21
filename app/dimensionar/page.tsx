@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useRef, useEffect, Suspense, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { useDropzone } from "react-dropzone";
 import {
   Calculator, Zap, DollarSign, CheckCircle2, Loader2, AlertTriangle,
@@ -9,17 +8,18 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
-import jsPDF from "jspdf";
-import { toPng } from "html-to-image";
 import { supabase } from "@/lib/supabase";
 import { parseEquatorialInvoiceText, reconstructPdfText } from "@/lib/equatorial-invoice-parser";
+import { useAuth } from "@/lib/AuthContext";
 import {
   calculateAuditableSizing,
+  buildCommercialStages,
   MINIMUM_INVOICES,
   RECOMMENDED_INVOICES,
   SIZING_ENGINE_VERSION,
   type ConfidenceLevel,
 } from "@/lib/capacitor-sizing";
+import { createAuditContentHash } from "@/lib/audit-hash";
 
 export const dynamic = 'force-dynamic';
 
@@ -56,14 +56,6 @@ const FORNECEDORES_RECOMENDADOS = [
   { nome: "ABB", site: "new.abb.com/br", especialidade: "Tecnologia suíça" },
   { nome: "Siemens", site: "www.siemens.com/br", especialidade: "Automação e energia" },
 ];
-
-const CONFIG_CAPACITORES = {
-  tensao_padrao_380v: "440V",
-  tensao_padrao_220v: "260V",
-  minimo_kvar_grupo_a: 20,
-  minimo_kvar_grupo_b: 10,
-  dessintonia_padrao: 7,
-};
 
 interface Transformador {
   id: string;
@@ -107,6 +99,8 @@ interface ResultadoDimensionamento {
   versao_motor: string;
   data_calculo: string;
   kvar_teorico_percentil: number;
+  faixa_pre_dimensionamento_kvar: { p50: number; p90: number; p95: number };
+  especificacao_liberada: boolean;
   percentil_utilizado: number;
   faturas_excluidas: Array<{ id: string; month: string; reason: string }>;
   banco_automatico_kvar: number;
@@ -158,19 +152,6 @@ const formatMoney = (valor: number) =>
 const formatNumber = (valor: number, dec = 2) =>
   new Intl.NumberFormat("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec }).format(valor);
 
-const canonicalJson = (value: unknown): string => {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
-};
-
-const sha256Hex = async (value: unknown) => {
-  const bytes = new TextEncoder().encode(canonicalJson(value));
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-};
-
 const parseMesReferencia = (mesRef: string) => {
   const [m, a] = mesRef.split("/");
   const mes = Number(m), ano = Number(a);
@@ -184,6 +165,7 @@ const calcularFatorPotencia = (ativo: number, reativo: number) => {
 };
 
 const calcularMultaDaFatura = (fat: Fatura) => {
+  if (fat.penalidade_reativa_informada != null) return fat.penalidade_reativa_informada;
   const reativo = fat.reativo_ponta_kvarh + fat.reativo_fora_ponta_kvarh;
   const tarifa = TARIFAS_REATIVO[fat.concessionaria] ?? TARIFAS_REATIVO.DEFAULT;
   return reativo * tarifa;
@@ -204,23 +186,20 @@ const distribuirKvarPorTrafo = (
 ): DistribuicaoTrafo[] => {
   const potenciaTotal = transformadores.reduce((acc, t) => acc + t.potencia_kva * t.quantidade, 0);
   if (potenciaTotal <= 0 || kvarTotal <= 0) return [];
-  return transformadores.map((trafo) => {
+  const totalUnits = Math.round(kvarTotal / 2.5);
+  const ideals = transformadores.map((trafo) => totalUnits * ((trafo.potencia_kva * trafo.quantidade) / potenciaTotal));
+  const allocations = ideals.map(Math.floor);
+  let remaining = totalUnits - allocations.reduce((sum, value) => sum + value, 0);
+  const order = ideals.map((value, index) => ({ index, fraction: value - Math.floor(value) })).sort((a, b) => b.fraction - a.fraction);
+  for (let index = 0; index < remaining; index += 1) allocations[order[index % order.length].index] += 1;
+
+  return transformadores.map((trafo, index) => {
     const potenciaTrafo = trafo.potencia_kva * trafo.quantidade;
     const percentual = potenciaTrafo / potenciaTotal;
     const kvarRecomendado = kvarTotal * percentual;
-    const kvarComercial = Math.ceil(kvarRecomendado / 10) * 10;
-    let estagiosProporcionais = estagiosGlobais.map((s) => s * percentual);
-    estagiosProporcionais = estagiosProporcionais.map((s) => Math.max(2.5, Math.ceil(s / 2.5) * 2.5));
-    let soma = estagiosProporcionais.reduce((a, b) => a + b, 0);
-    const diff = kvarComercial - soma;
-    if (Math.abs(diff) > 0.01) {
-      estagiosProporcionais[estagiosProporcionais.length - 1] += diff;
-      estagiosProporcionais[estagiosProporcionais.length - 1] = Math.max(
-        2.5,
-        Math.ceil(estagiosProporcionais[estagiosProporcionais.length - 1] / 2.5) * 2.5,
-      );
-    }
-    const configuracao = estagiosProporcionais.map((s) => `${s.toFixed(1)}`).join(" + ") + " kVAr";
+    const kvarComercial = allocations[index] * 2.5;
+    const estagiosProporcionais = buildCommercialStages(kvarComercial, Math.max(1, estagiosGlobais.length));
+    const configuracao = estagiosProporcionais.length ? `${estagiosProporcionais.map((s) => s.toFixed(1)).join(" + ")} kVAr` : 'Sem alocação';
     const precoEstimado = calcularPrecoMercado(kvarComercial);
     return {
       trafo_kva: potenciaTrafo,
@@ -419,7 +398,7 @@ export default function DimensionarPage() {
 }
 
 function DimensionarContent() {
-  const router = useRouter();
+  const { user, profile, isLoading: isAuthLoading, isProfileLoading } = useAuth();
   const reportRef = useRef<HTMLDivElement>(null);
   const [transformadores, setTransformadores] = useState<Transformador[]>([]);
   const [faturas, setFaturas] = useState<Fatura[]>([]);
@@ -432,61 +411,55 @@ function DimensionarContent() {
   const [carregando, setCarregando] = useState(true);
   const [fatorCarga, setFatorCarga] = useState(0.65);
   const [numeroEstagios, setNumeroEstagios] = useState(6);
-  const [tenantId, setTenantId] = useState<string | null>(null);
+  const tenantId = profile?.tenant_id || null;
   const [demandaPersonalizadaKw, setDemandaPersonalizadaKw] = useState(0);
   const [margemSeguranca, setMargemSeguranca] = useState(0);
+  const [dadosCoincidentesConfirmados, setDadosCoincidentesConfirmados] = useState(false);
   const [empresaNome, setEmpresaNome] = useState("Sua Empresa");
   const [importandoPDF, setImportandoPDF] = useState(false);
 
-  // Autenticação e carregamento de dados (mantido)
+  // A sessão e o perfil já são carregados uma única vez pelo AuthProvider.
   useEffect(() => {
     let mounted = true;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === "SIGNED_IN" && session && mounted) {
-        setTenantId(null);
-        setCarregando(true);
-        const { data: profile } = await supabase.from("profiles").select("tenant_id").eq("id", session.user.id).single();
-        if (profile?.tenant_id) {
-          setTenantId(profile.tenant_id);
-          const { data: tenantData } = await supabase.from("tenants").select("name").eq("id", profile.tenant_id).single();
-          if (tenantData?.name) setEmpresaNome(tenantData.name);
-          await carregarDados(profile.tenant_id);
-        } else Swal.fire("Erro", "Perfil não configurado.", "error");
-        setCarregando(false);
-      } else if (event === "SIGNED_OUT" && mounted) {
-        setCarregando(false);
-        setTenantId(null);
-        setFaturas([]);
-        setTransformadores([]);
-      }
+    if (isAuthLoading || isProfileLoading) return () => { mounted = false; };
+    if (!user || !tenantId) {
+      setFaturas([]);
+      setTransformadores([]);
+      setCarregando(false);
+      return () => { mounted = false; };
+    }
+
+    setCarregando(true);
+    void Promise.all([
+      supabase.from("tenants").select("name").eq("id", tenantId).maybeSingle(),
+      carregarDados(tenantId),
+    ]).then(([tenantResult]) => {
+      if (mounted && tenantResult.data?.name) setEmpresaNome(tenantResult.data.name);
+    }).catch((error) => {
+      if (mounted) Swal.fire("Erro", error?.message || "Falha ao carregar dados.", "error");
+    }).finally(() => {
+      if (mounted) setCarregando(false);
     });
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session && mounted) {
-        const { data: profile } = await supabase.from("profiles").select("tenant_id").eq("id", session.user.id).single();
-        if (profile?.tenant_id) {
-          setTenantId(profile.tenant_id);
-          const { data: tenantData } = await supabase.from("tenants").select("name").eq("id", profile.tenant_id).single();
-          if (tenantData?.name) setEmpresaNome(tenantData.name);
-          await carregarDados(profile.tenant_id);
-        } else Swal.fire("Erro", "Perfil não configurado.", "error");
-      } else if (mounted) setCarregando(false);
-    })();
-    return () => { mounted = false; subscription.unsubscribe(); };
-  }, [router]);
+
+    return () => { mounted = false; };
+  }, [user, tenantId, isAuthLoading, isProfileLoading]);
 
   const carregarDados = async (tenant: string) => {
     try {
-      const { data: trafosDB } = await supabase.from("transformadores").select("*").eq("tenant_id", tenant).order("created_at");
+      const [trafosResult, faturasResult] = await Promise.all([
+        supabase.from("transformadores").select("*").eq("tenant_id", tenant).order("created_at"),
+        supabase.from("faturas").select("*").eq("tenant_id", tenant).order("mes_referencia", { ascending: false }),
+      ]);
+      if (trafosResult.error) throw trafosResult.error;
+      if (faturasResult.error) throw faturasResult.error;
+      const trafosDB = trafosResult.data;
       if (trafosDB?.length) setTransformadores(trafosDB);
       else setTransformadores([]);
-      const { data: faturasDB } = await supabase.from("faturas").select("*").eq("tenant_id", tenant).order("mes_referencia", { ascending: false });
+      const faturasDB = faturasResult.data;
       if (faturasDB?.length) setFaturas(faturasDB);
       else setFaturas([]);
     } catch (error: any) {
       Swal.fire("Erro", error.message || "Falha ao carregar dados.", "error");
-    } finally {
-      setCarregando(false);
     }
   };
 
@@ -643,12 +616,22 @@ function DimensionarContent() {
       const alertas: string[] = [];
       const concessionarias = [...new Set(faturas.map((f) => f.concessionaria))];
       if (concessionarias.length > 1) alertas.push(`⚠️ Faturas de diferentes concessionárias: ${concessionarias.join(", ")}`);
+      const demandSource = demandaPersonalizadaKw > 0
+        ? "manual_measurement" as const
+        : faturas.every((f) => Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw) > 0)
+          ? "invoice" as const
+          : "transformer_estimate" as const;
+      const powerFactorSource = faturas.every((f) => f.fonte_dados === "manual")
+        ? "manual_measurement" as const
+        : "invoice" as const;
       const audit = calculateAuditableSizing(faturas.map((f) => ({
         id: f.id,
         month: f.mes_referencia,
         demandKw: demandaPersonalizadaKw > 0
           ? demandaPersonalizadaKw
-          : Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw),
+          : Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw) > 0
+            ? Math.max(f.demanda_ponta_kw, f.demanda_fora_ponta_kw)
+            : potenciaTotalTransformadores * fatorCarga,
         measuredPowerFactor: f.fp_calculado,
         excessReactiveKvarh: f.reativo_origem === "excedente_faturado"
           ? f.reativo_ponta_kvarh + f.reativo_fora_ponta_kvarh
@@ -662,15 +645,21 @@ function DimensionarContent() {
         controllerStages: numeroEstagios,
         installedTransformerKva: potenciaTotalTransformadores,
         transformerSafetyLimit: 0.4,
+        savingsRealizationPercent: 90,
+        demandSource,
+        powerFactorSource,
+        coincidentDemandAndPowerFactor: dadosCoincidentesConfirmados,
       });
 
       alertas.push(...audit.warnings.map((warning) => `⚠️ ${warning}`));
       if (transformadores.length > 1) {
         alertas.push("⚠️ A distribuição entre transformadores é preliminar até que a carga medida de cada unidade seja informada.");
       }
-      const nivelConfiabilidade: ConfidenceLevel = transformadores.length > 1 && audit.confidence === "validated"
-        ? "preliminary"
-        : audit.confidence;
+      if (faturas.some((f) => f.penalidade_reativa_informada == null && f.tarifa_reativa_aplicada == null)) {
+        alertas.push('⚠️ Algumas cobranças foram estimadas com tarifa de referência. Confirme a tarifa vigente na fatura antes de emitir proposta.');
+      }
+      alertas.push('⚠️ Tensão nominal dos capacitores, ligação, grau IP e eventual dessintonia exigem levantamento da rede e estudo de harmônicas.');
+      const nivelConfiabilidade: ConfidenceLevel = audit.confidence;
       const piorAudit = [...audit.monthly].sort((a, b) => a.powerFactor - b.powerFactor)[0];
       const piorMes = piorAudit ? faturas.find((f) => f.id === piorAudit.id) ?? null : null;
       const fpAtual = piorAudit?.powerFactor ?? targetFP;
@@ -683,7 +672,7 @@ function DimensionarContent() {
       const precisaCapacitor = nivelConfiabilidade !== "insufficient" && kvarAutomatico > 0;
       const motivo = nivelConfiabilidade === "insufficient"
         ? "⛔ Dimensionamento não liberado: faltam faturas válidas com demanda e fator de potência confiável."
-        : `Percentil ${(audit.percentile * 100).toFixed(0)} = ${audit.theoreticalKvar.toFixed(1)} kVAr | Meta = ${(targetFP * 100).toFixed(0)}% → comercial = ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios utilizados).`;
+        : `Faixa P50/P90/P95 = ${audit.p50Kvar.toFixed(1)} / ${audit.p90Kvar.toFixed(1)} / ${audit.p95Kvar.toFixed(1)} kVAr | referência comercial preliminar = ${kvarAutomatico.toFixed(1)} kVAr.`;
 
       const investimentoTotal = calcularPrecoMercado(kvarAutomatico);
       const payback = economiaMensal > 0 ? Math.ceil(investimentoTotal / economiaMensal) : 99;
@@ -696,7 +685,9 @@ function DimensionarContent() {
       const roi5AnosPercent = investimentoTotal > 0 ? (projecao5Anos / investimentoTotal) * 100 : 0;
       const precoPorKvar = kvarAutomatico > 0 ? investimentoTotal / kvarAutomatico : 0;
       const distribuicaoPorTrafo = distribuirKvarPorTrafo(transformadores, estagios, kvarAutomatico);
-      const tensaoCapacitores = transformadores[0]?.tensao_v === 380 ? CONFIG_CAPACITORES.tensao_padrao_380v : CONFIG_CAPACITORES.tensao_padrao_220v;
+      const tensaoCapacitores = transformadores.length === 1
+        ? `${transformadores[0].tensao_v} V — validar categoria e placa`
+        : 'Definir por transformador após levantamento';
       const mediaFpPorMes = audit.monthly.map((f) => ({ mes: f.month, fp: f.powerFactor * 100, multa: f.estimatedReactiveCharge })).sort((a, b) => a.fp - b.fp);
       const grupoTarifario = potenciaTotalTransformadores >= 75 ? "A" : "B";
 
@@ -705,6 +696,8 @@ function DimensionarContent() {
         versao_motor: audit.engineVersion,
         data_calculo: audit.calculatedAt,
         kvar_teorico_percentil: audit.theoreticalKvar,
+        faixa_pre_dimensionamento_kvar: { p50: audit.p50Kvar, p90: audit.p90Kvar, p95: audit.p95Kvar },
+        especificacao_liberada: audit.specificationAllowed,
         percentil_utilizado: audit.percentile,
         faturas_excluidas: audit.excludedInvoices,
         banco_automatico_kvar: kvarAutomatico,
@@ -715,7 +708,7 @@ function DimensionarContent() {
         investimento_estimado_total: investimentoTotal,
         payback_meses: payback,
         fp_atual_percent: fpAtual * 100,
-        fp_projetado_percent: precisaCapacitor ? targetFP * 100 : fpAtual * 100,
+        fp_projetado_percent: precisaCapacitor ? audit.projectedPowerFactor * 100 : fpAtual * 100,
         multa_atual_mensal_real: audit.estimatedMonthlyReactiveCharge,
         potencia_ativa_utilizada_kw: potenciaAtivaFinal,
         precisa_capacitor: precisaCapacitor,
@@ -747,6 +740,11 @@ function DimensionarContent() {
           target_power_factor: targetFP,
           percentile: audit.percentile,
           future_load_margin_percent: margemSeguranca,
+          load_factor: fatorCarga,
+          custom_demand_kw: demandaPersonalizadaKw,
+          demand_source: demandSource,
+          power_factor_source: powerFactorSource,
+          coincident_demand_and_power_factor: dadosCoincidentesConfirmados,
           controller_stages: numeroEstagios,
           transformer_installed_kva: potenciaTotalTransformadores,
           invoices: faturas.map((f) => ({
@@ -763,10 +761,12 @@ function DimensionarContent() {
             concessionaire: f.concessionaria,
           })),
         };
-        const contentHash = await sha256Hex(auditContent);
+        const contentHash = await createAuditContentHash(auditContent);
         const { error: auditError } = await supabase.from("dimensioning_runs").insert({
           tenant_id: tenantId,
           engine_version: audit.engineVersion,
+          source_method: "invoice_history",
+          release_level: nivelConfiabilidade === "insufficient" ? "blocked" : "pre_sizing",
           status: nivelConfiabilidade === "insufficient" ? "blocked" : "completed",
           confidence_level: nivelConfiabilidade,
           target_power_factor: targetFP,
@@ -778,10 +778,13 @@ function DimensionarContent() {
           result_snapshot: audit,
           excluded_invoices: audit.excludedInvoices,
           warnings: alertas,
+          engineering_confirmations: {
+            coincident_demand_and_power_factor: dadosCoincidentesConfirmados,
+          },
           content_hash: contentHash,
         });
         if (auditError && auditError.code !== "23505") {
-          alertas.push("⚠️ Resultado calculado, mas a memória auditável não foi gravada. Aplique a migração 202608110003.");
+          alertas.push("⚠️ Resultado calculado, mas a memória auditável não foi gravada. Aplique as migrações 202608110003 e 202608210002.");
           console.error("Falha ao persistir dimensionamento auditável:", auditError);
         } else if (auditError?.code === "23505") {
           alertas.push("ℹ️ Esta mesma combinação de entradas já possui uma memória auditável registrada.");
@@ -791,9 +794,9 @@ function DimensionarContent() {
       setResult(resultadoFinal);
 
       Swal.fire({
-        title: nivelConfiabilidade === "insufficient" ? "⛔ Dados insuficientes" : precisaCapacitor ? "✅ Dimensionamento calculado" : "✅ Análise concluída",
+        title: nivelConfiabilidade === "insufficient" ? "⛔ Dados insuficientes" : precisaCapacitor ? "Pré-dimensionamento calculado" : "Análise concluída",
         html: `<div class="text-center"><p class="text-lg font-bold">FP no pior mês: ${(fpAtual * 100).toFixed(1)}%</p>${
-          precisaCapacitor ? `<p class="text-primary font-bold mt-2">🔋 Resultado ${nivelConfiabilidade === "validated" ? "validado" : "preliminar"}:<br/>• Banco automático: ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios)</p>` : `<p class="text-amber-600 mt-2">${motivo}</p>`
+          precisaCapacitor ? `<p class="text-primary font-bold mt-2">🔋 Referência preliminar:<br/>• ${kvarAutomatico.toFixed(1)} kVAr (${estagios.length} estágios ilustrativos)</p>` : `<p class="text-amber-600 mt-2">${motivo}</p>`
         }<p class="text-xs text-slate-500 mt-2">Motor: ${SIZING_ENGINE_VERSION}</p><p class="text-xs text-slate-500">Penalidade estimada média: ${formatMoney(audit.estimatedMonthlyReactiveCharge)}/mês</p><p class="text-xs text-slate-500">Investimento estimado: ${formatMoney(investimentoTotal)}</p></div>`,
         icon: nivelConfiabilidade === "insufficient" ? "warning" : precisaCapacitor ? "success" : "info",
         timer: 6000,
@@ -810,6 +813,10 @@ function DimensionarContent() {
     if (!reportRef.current) return;
     try {
       Swal.fire({ title: "Gerando PDF...", didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+      const [{ default: jsPDF }, { toPng }] = await Promise.all([
+        import("jspdf"),
+        import("html-to-image"),
+      ]);
       const element = reportRef.current;
       const dataUrl = await toPng(element, { quality: 1.0, backgroundColor: "#ffffff", pixelRatio: 2 });
       const pdf = new jsPDF("p", "mm", "a4");
@@ -849,8 +856,8 @@ function DimensionarContent() {
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
       <header className="text-center">
-        <h1 className="text-3xl font-bold text-primary">Dimensionamento de Banco de Capacitores</h1>
-        <p className="text-slate-500 mt-2">Análise baseada em faturas - {empresaNome}</p>
+        <h1 className="text-3xl font-bold text-primary">Pré-dimensionamento por Faturas</h1>
+        <p className="text-slate-500 mt-2">Triagem técnica e cenário econômico — {empresaNome}</p>
         <p className="text-xs text-slate-400 mt-1">
           Infraestrutura: {transformadores.map((t) => `${t.quantidade}x${t.potencia_kva}kVA`).join(" + ")} | {transformadores[0]?.tensao_v || 380}V
         </p>
@@ -901,9 +908,10 @@ function DimensionarContent() {
                 <div><label className="text-xs text-slate-600">Margem de Segurança (%)</label><input type="number" step="5" value={margemSeguranca || ""} onChange={(e) => setMargemSeguranca(parseFloat(e.target.value) || 0)} placeholder="Ex: 15" className="w-full border rounded px-3 py-2 text-sm mt-1" /><p className="text-[10px] text-slate-500 mt-1">Acrescenta um percentual à potência ativa final (recomendado 10-20% para cargas futuras).</p></div>
                 <div><label className="text-xs text-slate-600">Fator de Carga (carga média / potência instalada)</label><input type="range" min="0.3" max="0.9" step="0.05" value={fatorCarga} onChange={(e) => setFatorCarga(parseFloat(e.target.value))} className="w-full" /><div className="flex justify-between text-xs"><span>0.3</span><span className="font-bold">{fatorCarga.toFixed(2)}</span><span>0.9</span></div><p className="text-[10px] text-slate-500">Usado apenas quando a demanda personalizada não é fornecida.</p></div>
                 <div><label className="text-xs text-slate-600">Número de estágios automáticos (6 a 12)</label><input type="range" min="6" max="12" step="1" value={numeroEstagios} onChange={(e) => setNumeroEstagios(parseInt(e.target.value))} className="w-full" /><div className="flex justify-between text-xs"><span>6</span><span className="font-bold">{numeroEstagios}</span><span>12</span></div></div>
+                <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><input type="checkbox" checked={dadosCoincidentesConfirmados} onChange={(e) => setDadosCoincidentesConfirmados(e.target.checked)} className="mt-0.5" /><span><strong>Demanda e FP são coincidentes.</strong><br />Marque somente se ambos pertencem ao mesmo intervalo de integração e foram verificados na fonte.</span></label>
               </div>
             </details>
-            <button onClick={calcularDimensionamento} disabled={calculando || faturas.length < MINIMUM_INVOICES} className="w-full bg-primary text-white py-3 rounded-xl font-bold disabled:opacity-50 flex justify-center gap-2">{calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />} Calcular Dimensionamento</button>
+            <button onClick={calcularDimensionamento} disabled={calculando || faturas.length < MINIMUM_INVOICES} className="w-full bg-primary text-white py-3 rounded-xl font-bold disabled:opacity-50 flex justify-center gap-2">{calculando ? <Loader2 className="animate-spin" size={20} /> : <Zap size={20} />} Calcular pré-dimensionamento</button>
             <p className="text-[11px] text-slate-500 text-center mt-2">Mínimo: {MINIMUM_INVOICES} faturas válidas. Recomendado: {RECOMMENDED_INVOICES} a 12.</p>
           </div>
         </div>
@@ -913,26 +921,26 @@ function DimensionarContent() {
           {result ? (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
               <div ref={reportRef} className="bg-white rounded-2xl overflow-hidden shadow-sm border">
-                <div className="bg-slate-900 p-6 text-white text-center"><Zap size={32} className="mx-auto text-secondary mb-2" /><h2 className="text-2xl font-black">CapacitorManager</h2><p className="text-slate-400 text-sm">Memorial de Dimensionamento</p><p className="text-slate-500 text-xs">Gerado em {new Date().toLocaleDateString("pt-BR")}</p></div>
+                <div className="bg-slate-900 p-6 text-white text-center"><Zap size={32} className="mx-auto text-secondary mb-2" /><h2 className="text-2xl font-black">CapacitorManager</h2><p className="text-slate-400 text-sm">Memorial de Pré-dimensionamento por Faturas</p><p className="text-slate-500 text-xs">Gerado em {new Date().toLocaleDateString("pt-BR")}</p></div>
                 <div className="p-6 space-y-6">
-                  <div className={`rounded-xl border p-3 text-center ${result.nivel_confiabilidade === "validated" ? "border-green-200 bg-green-50 text-green-800" : result.nivel_confiabilidade === "preliminary" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-red-200 bg-red-50 text-red-800"}`}>
-                    <p className="text-sm font-black uppercase">{result.nivel_confiabilidade === "validated" ? "Dimensionamento validado" : result.nivel_confiabilidade === "preliminary" ? "Estimativa preliminar" : "Dados insuficientes — recomendação bloqueada"}</p>
+                  <div className={`rounded-xl border p-3 text-center ${result.nivel_confiabilidade === "preliminary" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-red-200 bg-red-50 text-red-800"}`}>
+                    <p className="text-sm font-black uppercase">{result.nivel_confiabilidade === "preliminary" ? "Pré-dimensionamento — não libera compra/instalação" : "Dados insuficientes — recomendação bloqueada"}</p>
                     <p className="text-[10px] mt-1">Motor {result.versao_motor} • Percentil {(result.percentil_utilizado * 100).toFixed(0)} • {result.quantidade_faturas_analisadas} faturas válidas • {result.faturas_excluidas.length} excluídas</p>
                   </div>
                   {result.nivel_confiabilidade === "insufficient" ? (
                     <div className="text-center py-8"><AlertTriangle size={40} className="mx-auto text-red-600 mb-2" /><p className="text-xl font-bold text-red-700">Dimensionamento não liberado</p><p className="text-sm mt-2">{result.motivo_recomendacao}</p>{result.alertas.map((a, i) => (<div key={i} className="bg-amber-50 p-3 rounded-xl text-xs text-amber-700 mt-3">{a}</div>))}</div>
                   ) : result.precisa_capacitor ? (
                     <>
-                      <div className="text-center border-b pb-4"><p className="text-sm text-slate-500">Solução calculada</p><p className="text-3xl font-bold text-primary">{formatNumber(result.banco_automatico_kvar, 1)} kVAr</p><p className="text-xs text-slate-400">Banco automático com {result.estagios_automaticos.length} estágios utilizados</p><p className="text-xs text-slate-400">{result.quantidade_faturas_analisadas} faturas • Método: {result.metodo_calculo_utilizado}</p><p className="text-xs text-slate-400">Potência ativa usada: {result.potencia_ativa_utilizada_kw.toFixed(1)} kW</p></div>
+                      <div className="text-center border-b pb-4"><p className="text-sm text-slate-500">Referência comercial preliminar</p><p className="text-3xl font-bold text-primary">{formatNumber(result.banco_automatico_kvar, 1)} kVAr</p><p className="text-xs text-slate-500 mt-1">Faixa P50–P95: {formatNumber(result.faixa_pre_dimensionamento_kvar.p50, 1)} a {formatNumber(result.faixa_pre_dimensionamento_kvar.p95, 1)} kVAr • P90: {formatNumber(result.faixa_pre_dimensionamento_kvar.p90, 1)} kVAr</p><p className="text-xs text-slate-400">Cenário ilustrativo com {result.estagios_automaticos.length} estágios</p><p className="text-xs text-slate-400">{result.quantidade_faturas_analisadas} faturas • Método: {result.metodo_calculo_utilizado}</p><p className="text-xs text-slate-400">Potência ativa usada: {result.potencia_ativa_utilizada_kw.toFixed(1)} kW</p></div>
                       {result.alertas.map((a, i) => (<div key={i} className="bg-amber-50 p-3 rounded-xl text-xs text-amber-700 flex gap-2"><AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />{a}</div>))}
-                      <div className="bg-blue-50 p-4 rounded-xl"><p className="text-sm font-bold text-blue-700">📌 {result.motivo_recomendacao}</p><p className="text-xs mt-2">FP atual: {result.fp_atual_percent.toFixed(1)}% → FP-alvo selecionado: {result.fp_projetado_percent.toFixed(0)}%</p><div className="mt-3"><BarraFP fp={result.fp_atual_percent} /><div className="flex justify-between text-[10px] mt-1"><span>Atual: {result.fp_atual_percent.toFixed(1)}%</span><span>Alvo: {result.fp_projetado_percent.toFixed(0)}%</span></div></div></div>
+                      <div className="bg-blue-50 p-4 rounded-xl"><p className="text-sm font-bold text-blue-700">📌 {result.motivo_recomendacao}</p><p className="text-xs mt-2">FP atual: {result.fp_atual_percent.toFixed(1)}% → FP projetado: {result.fp_projetado_percent.toFixed(1)}%</p><div className="mt-3"><BarraFP fp={result.fp_atual_percent} /><div className="flex justify-between text-[10px] mt-1"><span>Atual: {result.fp_atual_percent.toFixed(1)}%</span><span>Projetado: {result.fp_projetado_percent.toFixed(1)}%</span></div></div></div>
                       <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs font-bold flex gap-2"><Activity size={14} /> Evolução do FP e Multa por Mês</p><div className="space-y-2 max-h-48 overflow-y-auto">{result.media_fp_por_mes.map((item, idx) => (<div key={idx} className="flex items-center gap-2 text-xs"><span className="w-14 font-medium">{item.mes}</span><div className="flex-1"><div className="w-full bg-slate-200 rounded-full h-1.5"><div className={`${item.fp >= 92 ? "bg-green-500" : item.fp >= 80 ? "bg-amber-500" : "bg-red-500"} h-1.5 rounded-full`} style={{ width: `${Math.min(100, item.fp)}%` }} /></div></div><span className="w-10 text-right font-bold">{item.fp.toFixed(1)}%</span><span className="w-20 text-right text-red-500 text-[10px]">{formatMoney(item.multa)}</span></div>))}</div></div>
                       {result.pior_mes && (<div className="bg-amber-50 p-4 rounded-xl"><p className="text-xs font-bold">Pior Mês: {result.pior_mes.mes_referencia}</p><p className="text-sm mt-1">FP: {result.pior_mes.fp_calculado ? (result.pior_mes.fp_calculado * 100).toFixed(1) : "0"}% • Multa: {formatMoney(calcularMultaDaFatura(result.pior_mes as Fatura))}</p></div>)}
                       <div className="bg-indigo-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><Factory size={14} /> Distribuição do Banco entre Transformadores</p>{result.distribuicao_por_trafo.map((dist, idx) => (<div key={idx} className="bg-white rounded-lg p-3 mt-2 border"><div className="flex justify-between"><span className="font-bold text-sm">Transformador {formatNumber(dist.trafo_kva, 0)} kVA</span><span className="text-xs text-slate-500">{dist.percentual.toFixed(1)}% da carga</span></div><div className="grid grid-cols-2 gap-1 text-sm mt-2"><div>Recomendado: {formatNumber(dist.kvar_recomendado, 1)} kVAr</div><div>Comercial: {formatNumber(dist.kvar_comercial, 0)} kVAr</div><div className="col-span-2 text-xs text-slate-600">Configuração de estágios: {dist.configuracao_estagios}</div><div className="col-span-2 font-medium">Investimento: {formatMoney(dist.preco_estimado)}</div></div></div>))}</div>
                       <div className="bg-emerald-50 p-4 rounded-xl"><p className="text-xs font-bold flex gap-2"><DollarSign size={14} /> Análise Financeira Real</p><div className="grid grid-cols-2 gap-2 text-center mt-2"><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Investimento Total</p><p className="font-bold text-lg">{formatMoney(result.investimento_estimado_total)}</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Custo por kVAr</p><p className="font-bold">{formatMoney(result.preco_por_kvar)}/kVAr</p></div></div><div className="grid grid-cols-3 gap-2 text-center mt-2"><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Payback</p><p className="font-bold text-green-600">{result.payback_meses} meses</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Economia/ano</p><p className="font-bold">{formatMoney(result.economia_anual)}</p></div><div className="bg-white rounded p-2 border"><p className="text-[10px] text-slate-500">Retorno 5 anos</p><p className={`font-bold ${result.retorno_5_anos > 0 ? "text-green-700" : "text-red-700"}`}>{formatMoney(result.retorno_5_anos)}</p></div></div></div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3"><div className="bg-red-50 border border-red-200 rounded-xl p-4"><p className="text-xs font-bold text-red-700">a) Prejuízo acumulado</p><p className="text-xl font-black text-red-700 mt-1">{formatMoney(result.prejuizo_acumulado)}</p><p className="text-[10px] text-red-600 mt-1">Soma das multas das faturas analisadas.</p></div><div className="bg-blue-50 border border-blue-200 rounded-xl p-4"><p className="text-xs font-bold text-blue-700">b) Projeção de economia</p><div className="text-[11px] mt-2 space-y-1"><p><strong>1 ano:</strong> {formatMoney(result.projecao_1_ano)}</p><p><strong>3 anos:</strong> {formatMoney(result.projecao_3_anos)}</p><p><strong>5 anos:</strong> {formatMoney(result.projecao_5_anos)}</p></div></div><div className="bg-green-50 border border-green-200 rounded-xl p-4"><p className="text-xs font-bold text-green-700">c) ROI em 5 anos</p><p className={`text-xl font-black mt-1 ${result.roi_5_anos_percent >= 0 ? "text-green-700" : "text-red-700"}`}>{formatNumber(result.roi_5_anos_percent, 1)}%</p><p className="text-[10px] text-green-700 mt-1">Indicador de viabilidade financeira do projeto.</p></div></div>
                       <div className="bg-white border rounded-xl p-4"><p className="text-xs font-bold">Resumo executivo (proposta comercial)</p><p className="text-sm mt-2 text-slate-700">Com base no diagnóstico do fator de potência e no histórico de multas, recomenda-se a implantação de banco de capacitores automático para mitigar perdas financeiras recorrentes. A solução projeta redução relevante das penalidades por energia reativa, com retorno estimado em <strong>{result.payback_meses} meses</strong> e ROI de <strong>{formatNumber(result.roi_5_anos_percent, 1)}%</strong> em 5 anos.</p></div>
-                      <div className="bg-slate-50 p-4 rounded-xl"><h4 className="font-bold text-sm mb-2">Especificações Técnicas</h4><div className="grid grid-cols-2 gap-2 text-xs"><div>• Tensão: {result.tensao_capacitores} (Δ)</div><div>• Reatores: {result.fator_dessintonia}%</div><div>• Controlador: Automático</div><div>• Grau IP: Mínimo IP54</div><div className="col-span-2 text-[10px] text-slate-500 mt-1">• Compatível com rede 3~ 380V • Conformidade NBR 14922/2022</div></div></div>
+                      <div className="bg-slate-50 p-4 rounded-xl"><h4 className="font-bold text-sm mb-2">Premissas técnicas pendentes</h4><div className="grid grid-cols-2 gap-2 text-xs"><div>• Tensão: {result.tensao_capacitores}</div><div>• Dessintonia: a definir por estudo de harmônicas</div><div>• Controlador: automático, etapas calculadas</div><div>• Invólucro/IP: definir conforme ambiente</div><div className="col-span-2 text-[10px] text-slate-500 mt-1">• Ligação, proteção, manobra e conformidade devem ser especificadas e verificadas pelo responsável técnico.</div></div></div>
                     </>
                   ) : (<div className="text-center py-8"><CheckCircle2 size={40} className="mx-auto text-green-600 mb-2" /><p className="text-xl font-bold text-green-700">Instalação Regularizada</p><p className="text-sm mt-2">{result.motivo_recomendacao}</p></div>)}
                   <div className="text-center text-[10px] text-slate-400 border-t pt-4"><p>Memória rastreável • Motor {result.versao_motor} • Resultado condicionado à qualidade dos dados informados</p></div>

@@ -1,7 +1,7 @@
 // components/Sidebar.tsx (trecho corrigido - início do arquivo)
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { CreditCard } from 'lucide-react';
@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/AuthContext';
-import { supabase } from '@/lib/supabaseClient';
 
 // Itens públicos (sempre visíveis)
 const publicMenuItems = [
@@ -47,45 +46,14 @@ const privateMenuItems = [
 export default function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, isAuthenticated, isLoading, logout } = useAuth();
+  const { profile, isAuthenticated, isLoading, isProfileLoading, logout } = useAuth();
   const [isOpen, setIsOpen] = React.useState(false);
-  const [subscriptionActive, setSubscriptionActive] = useState(false);
-  const [checking, setChecking] = useState(true);
-
-  useEffect(() => {
-    const checkAccess = async () => {
-      if (!isAuthenticated || !user) {
-        setSubscriptionActive(false);
-        setChecking(false);
-        return;
-      }
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role, subscription_status')
-        .eq('id', user.id)
-        .single();
-
-      if (profile?.role === 'admin') {
-        // Admin tem acesso total, independente de assinatura
-        setSubscriptionActive(true);
-      } else {
-        setSubscriptionActive(profile?.subscription_status === 'active');
-      }
-      setChecking(false);
-    };
-    checkAccess();
-  }, [isAuthenticated, user]);
-
-  if (isLoading || checking) {
-    return <div className="fixed inset-y-0 left-0 z-40 w-64 bg-primary text-white p-4">Carregando...</div>;
-  }
+  const subscriptionActive = profile?.role === 'admin' || profile?.subscription_status === 'active';
 
   const handleLogout = () => {
     logout();
     router.push('/');
   };
-
-  const handleLogin = () => router.push('/login');
 
   return (
     <>
@@ -98,12 +66,12 @@ export default function Sidebar() {
       </button>
 
       <aside className={cn(
-        "fixed inset-y-0 left-0 z-40 w-64 transform bg-primary text-white transition-transform duration-300 ease-in-out md:relative md:translate-x-0 overflow-y-auto",
+        "fixed inset-y-0 left-0 z-40 h-dvh w-64 shrink-0 transform overflow-hidden bg-primary text-white transition-transform duration-300 ease-in-out md:sticky md:inset-y-auto md:top-0 md:h-screen md:translate-x-0",
         isOpen ? "translate-x-0" : "-translate-x-full"
       )}>
         <div className="flex h-full flex-col">
           {/* Logo */}
-          <div className="flex items-center justify-center border-b border-white/10 py-6">
+          <div className="flex shrink-0 items-center justify-center border-b border-white/10 py-6">
             <div className="flex items-center gap-2">
               <Zap className="text-secondary" size={28} />
               <h1 className="text-lg font-bold tracking-tight">
@@ -113,13 +81,14 @@ export default function Sidebar() {
           </div>
 
           {/* Menu Público (sempre visível) */}
-          <nav className="flex-1 px-3 py-4 space-y-1">
+          <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-3 py-4">
             {publicMenuItems.map((item) => {
               const isActive = pathname === item.href;
               return (
                 <Link
                   key={item.name}
                   href={item.href}
+                  prefetch={false}
                   onClick={() => setIsOpen(false)}
                   className={cn(
                     "flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-200",
@@ -145,6 +114,7 @@ export default function Sidebar() {
                     <Link
                       key={item.name}
                       href={item.href}
+                      prefetch={false}
                       onClick={() => setIsOpen(false)}
                       className={cn(
                         "flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-200",
@@ -169,13 +139,20 @@ export default function Sidebar() {
               </div>
             )}
 
+            {isAuthenticated && isProfileLoading && (
+              <div className="mt-4 border-t border-white/10 px-3 pt-4 text-xs text-white/50">
+                Verificando acesso...
+              </div>
+            )}
+
             {/* Se autenticado mas sem acesso (não admin e assinatura inativa) */}
-            {isAuthenticated && !subscriptionActive && (
+            {isAuthenticated && !isProfileLoading && !subscriptionActive && (
               <div className="mt-4 space-y-1">
                 <div className="my-2 h-px bg-white/10" />
                 <p className="text-xs text-white/40 px-3">ACESSO RESTRITO</p>
                 <Link
                   href="/planos"
+                  prefetch={false}
                   onClick={() => setIsOpen(false)}
                   className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-white/70 hover:bg-white/10 hover:text-white"
                 >
@@ -194,20 +171,22 @@ export default function Sidebar() {
           </nav>
 
           {/* Botão Login (aparece apenas se NÃO estiver logado) */}
-          {!isAuthenticated && (
-            <div className="border-t border-white/10 p-4">
-              <button
-                onClick={handleLogin}
+          {!isAuthenticated && !isLoading && (
+            <div className="shrink-0 border-t border-white/10 bg-primary p-4">
+              <Link
+                href="/login"
+                prefetch={false}
+                onClick={() => setIsOpen(false)}
                 className="flex w-full items-center justify-center gap-2 rounded-lg bg-secondary text-primary font-semibold py-2 hover:bg-secondary/90 transition-colors"
               >
                 <LogIn size={16} />
                 Login
-              </button>
+              </Link>
             </div>
           )}
 
           {/* Footer */}
-          <div className="border-t border-white/10 p-4 text-center text-[9px] text-white/20">
+          <div className="shrink-0 border-t border-white/10 p-4 text-center text-[9px] text-white/20">
             © 2026 CapacitorManager v2.0
           </div>
         </div>

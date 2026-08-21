@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 const faqs = [
   {
     question: "O que é o CapacitorManager?",
-    answer: "É uma plataforma web para gestão, monitoramento e manutenção preditiva de bancos de capacitores. O sistema valida medições automaticamente com base na norma IEC 60831-1/2 e fornece recomendações inteligentes. Ideal para engenheiros eletricistas, eletrotécnicos e empresas de manutenção."
+    answer: "É uma plataforma web de apoio à gestão e análise de bancos de capacitores. Ela organiza medições, aplica faixas configuradas e gera memórias de cálculo, sempre sujeitas à conferência de profissional habilitado."
   },
   {
     question: "Preciso instalar algum software?",
@@ -22,27 +22,27 @@ const faqs = [
   },
   {
     question: "Como funciona o período de teste?",
-    answer: "Oferecemos 30 dias de teste gratuito com todas as funcionalidades. Ao final, você pode optar por um dos planos pagos ou continuar com a versão Demo limitada. Não é necessário cartão de crédito para começar."
+    answer: "A demonstração pública permite testar recursos limitados. A conta comercial é ativada após a confirmação do pagamento do plano escolhido."
   },
   {
     question: "Quais normas técnicas são utilizadas?",
-    answer: "O sistema segue rigorosamente a norma IEC 60831-1/2 para bancos de capacitores, com tolerâncias configuráveis (padrão: -5% a +10%). Você também pode personalizar os limites de aprovação."
+    answer: "A aplicação usa referências técnicas e faixas configuráveis, mas não declara conformidade automática. A edição aplicável das normas, o método de ensaio e as condições de campo devem ser validados pelo responsável técnico."
   },
   {
     question: "Posso exportar relatórios?",
-    answer: "Sim! Você pode gerar relatórios em PDF e Excel com todas as medições, análises e recomendações. Os relatórios são profissionais, com logotipo da sua empresa (personalizável nos planos Pro e Master)."
+    answer: "A versão atual gera relatórios em PDF nos módulos que exibem a opção de exportação. Recursos não mostrados na interface não fazem parte da oferta vigente."
   },
   {
     question: "O sistema tem suporte?",
-    answer: "Sim, oferecemos suporte por e-mail, WhatsApp e chat. Planos Pro e Master têm prioridade e suporte dedicado. O tempo de resposta é de até 2 horas úteis."
+    answer: "Os canais de contato publicados são e-mail e WhatsApp em horário comercial. Prazos específicos de atendimento só se aplicam quando constarem da proposta ou contrato."
   },
   {
     question: "É seguro? Meus dados estão protegidos?",
-    answer: "Sim! Utilizamos criptografia SSL/TLS, backups diários e seguimos a LGPD. Seus dados são armazenados em servidores no Brasil. Consulte nossa Política de Privacidade para mais detalhes."
+    answer: "Usamos HTTPS, autenticação e isolamento de dados por empresa. Região, retenção e cópias de segurança dependem da configuração dos provedores; consulte a Política de Privacidade e o checklist de implantação."
   },
   {
     question: "Como faço para convidar outros usuários da minha empresa?",
-    answer: "Nos planos Pro e Master, você pode adicionar múltiplos usuários com níveis de acesso (administrador, técnico, visualizador). Vá em Configurações > Usuários e convide por e-mail."
+    answer: "Convites e múltiplos perfis por empresa ainda não fazem parte da oferta publicada. Não inclua esse recurso em propostas até ele ser implementado e testado."
   }
 ];
 
@@ -104,7 +104,7 @@ export default function AjudaPage() {
       {/* Categorias com links (simulando páginas internas) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {categorias.map((cat, idx) => (
-          <Link key={cat.nome} href={`/ajuda/${cat.slug}`} className="group">
+          <Link key={cat.nome} href="/documentacao" className="group">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}

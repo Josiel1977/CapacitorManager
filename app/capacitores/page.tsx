@@ -14,10 +14,10 @@ function CapacitoresContent() {
   const searchParams = useSearchParams();
   const bancoIdFromUrl = searchParams.get('banco_id');
   
-  const { user, isLoading: authLoading } = useAuth();
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [userTenantId, setUserTenantId] = useState<string | null>(null);
-  const [loadingInitial, setLoadingInitial] = useState(true);
+  const { user, profile, isLoading: authLoading, isProfileLoading } = useAuth();
+  const isAdmin = profile?.role === 'admin';
+  const userTenantId = isAdmin ? null : profile?.tenant_id || null;
+  const loadingInitial = authLoading || isProfileLoading;
 
   const [capacitores, setCapacitores] = useState<any[]>([]);
   const [bancos, setBancos] = useState<any[]>([]);
@@ -45,40 +45,13 @@ function CapacitoresContent() {
     if (authLoading) return;
     if (!user) {
       router.push('/login');
-      return;
-    }
-    const adminEmails = [
-      'suporte@capacitormanager.com.br',
-      'eng.eletrica1977@gmail.com',
-    ];
-    const isUserAdmin = adminEmails.includes(user.email || '');
-    setIsAdmin(isUserAdmin);
-    if (!isUserAdmin) {
-      const tenant = user.user_metadata?.tenant_id;
-      if (tenant) {
-        setUserTenantId(tenant);
-        setLoadingInitial(false);
-      } else {
-        supabase
-          .from('profiles')
-          .select('tenant_id')
-          .eq('id', user.id)
-          .single()
-          .then(({ data }) => {
-            setUserTenantId(data?.tenant_id || null);
-            setLoadingInitial(false);
-          });
-      }
-    } else {
-      setUserTenantId(null);
-      setLoadingInitial(false);
     }
   }, [user, authLoading, router]);
 
   useEffect(() => {
     if (loadingInitial) return;
     fetchData();
-  }, [loadingInitial, bancoFiltro, mostrarNaoMedidos]);
+  }, [loadingInitial, bancoFiltro, mostrarNaoMedidos, isAdmin, userTenantId]);
 
   useEffect(() => {
     if (bancoIdFromUrl) {
@@ -99,6 +72,12 @@ function CapacitoresContent() {
   async function fetchData() {
     try {
       setLoading(true);
+      if (!isAdmin && !userTenantId) {
+        setCapacitores([]);
+        setBancos([]);
+        setClientes([]);
+        return;
+      }
       
       let bancosQuery = supabase
         .from('bancos_capacitores')
@@ -107,10 +86,6 @@ function CapacitoresContent() {
       if (!isAdmin && userTenantId) {
         bancosQuery = bancosQuery.eq('tenant_id', userTenantId);
       }
-      const { data: bancosData, error: bancosError } = await bancosQuery.order('nome_banco');
-      if (bancosError) throw bancosError;
-      setBancos(bancosData || []);
-
       let capacitoresQuery = supabase
         .from('capacitores')
         .select('*, bancos_capacitores(*, clientes(id, nome))')
@@ -118,14 +93,27 @@ function CapacitoresContent() {
       if (bancoFiltro !== 'todos') {
         capacitoresQuery = capacitoresQuery.eq('banco_id', bancoFiltro);
       }
-      const { data: capacitoresData, error: capacitoresError } = await capacitoresQuery.order('codigo_identificacao');
-      if (capacitoresError) throw capacitoresError;
+      let clientesQuery = supabase.from('clientes').select('id, nome').eq('ativo', true);
+      if (!isAdmin && userTenantId) {
+        clientesQuery = clientesQuery.eq('tenant_id', userTenantId);
+      }
 
-      // Buscar quais capacitores possuem medição
-      const { data: medicoesData } = await supabase
-        .from('medicoes')
-        .select('capacitor_id');
-      const capacitoresComMedicao = new Set(medicoesData?.map(m => m.capacitor_id) || []);
+      const [bancosResult, capacitoresResult, medicoesResult, clientesResult] = await Promise.all([
+        bancosQuery.order('nome_banco'),
+        capacitoresQuery.order('codigo_identificacao'),
+        supabase.from('medicoes').select('capacitor_id'),
+        clientesQuery.order('nome'),
+      ]);
+      if (bancosResult.error) throw bancosResult.error;
+      if (capacitoresResult.error) throw capacitoresResult.error;
+      if (medicoesResult.error) throw medicoesResult.error;
+      if (clientesResult.error) throw clientesResult.error;
+
+      const bancosData = bancosResult.data || [];
+      const capacitoresData = capacitoresResult.data || [];
+      const medicoesData = medicoesResult.data || [];
+      setBancos(bancosData);
+      const capacitoresComMedicao = new Set(medicoesData.map((medicao) => medicao.capacitor_id));
 
       let capacitoresComStatus = (capacitoresData || []).map(cap => ({
         ...cap,
@@ -138,12 +126,7 @@ function CapacitoresContent() {
 
       setCapacitores(capacitoresComStatus);
 
-      let clientesQuery = supabase.from('clientes').select('id, nome').eq('ativo', true);
-      if (!isAdmin && userTenantId) {
-        clientesQuery = clientesQuery.eq('tenant_id', userTenantId);
-      }
-      const { data: clientesData } = await clientesQuery.order('nome');
-      setClientes(clientesData || []);
+      setClientes(clientesResult.data || []);
 
     } catch (error) {
       console.error('Error:', error);
@@ -301,7 +284,7 @@ function CapacitoresContent() {
     router.push('/bancos');
   }
 
-  if (authLoading || loadingInitial) {
+  if (loadingInitial || loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -513,7 +496,7 @@ function CapacitoresContent() {
                     ⚠️ Sem medição
                   </span>
                   <button 
-                    onClick={() => router.push(`/Validar-Capacitores?capacitor_id=${capacitor.id}`)}
+                    onClick={() => router.push(`/medicoes?capacitor_id=${capacitor.id}`)}
                     className="mt-2 w-full text-center text-xs text-primary hover:underline"
                   >
                     + Realizar primeira medição →
@@ -569,7 +552,7 @@ function CapacitoresContent() {
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-1">
                         <button 
-                          onClick={() => router.push(capacitor.temMedicao ? `/medicoes?capacitor_id=${capacitor.id}` : `/Validar-Capacitores?capacitor_id=${capacitor.id}`)}
+                          onClick={() => router.push(`/medicoes?capacitor_id=${capacitor.id}`)}
                           className="p-1.5 text-primary hover:bg-primary/10 rounded-lg"
                           title="Ver Medições / Validar"
                         >

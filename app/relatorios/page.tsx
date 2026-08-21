@@ -1,83 +1,125 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Download, FileText, Search } from 'lucide-react';
+import TechnicalReportDocument from '@/components/TechnicalReportDocument';
+import { buildBankReportSummaries, reconcileMeasurementsToBanks } from '@/lib/bank-report';
+import { calculateCapacitorTrend, calculateDeltaCapacitance, calculateExpectedCapacitorCurrent, classifyDeviation } from '@/lib/domain/capacitorAnalysis';
 import { supabase } from '@/lib/supabase';
-import { FileText, Download, Search, Zap, CheckCircle2, AlertTriangle, XCircle, TrendingUp, TrendingDown, Activity } from 'lucide-react';
-import jsPDF from 'jspdf';
-import { toPng } from 'html-to-image';
-import Swal from 'sweetalert2';
-import { cn } from '@/lib/utils';
 
-// Funções de cálculo
-function calcularCorrenteTeorica(potenciaKvar: number, tensaoNominal: number): number {
-    if (!tensaoNominal || tensaoNominal === 0) return 0;
-    return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
-}
-
-function calcularCapacitanciaTeoricaDelta(capacitanciaNominalFase: number): number {
-    return capacitanciaNominalFase * 1.5;
-}
-
-function getStatusValidacao(desvio: number): string {
-    if (desvio >= -5 && desvio <= 10) return 'aprovado';
-    if (desvio >= -10 && desvio < -5) return 'atencao';
-    if (desvio > 10 && desvio <= 15) return 'atencao';
-    return 'reprovado';
-}
-
-// Função para calcular tendência de degradação
-function calcularTendenciaCapacitor(medicoes: any[]) {
-    if (medicoes.length < 2) return null;
-    
-    const primeira = medicoes[medicoes.length - 1];
-    const ultima = medicoes[0];
-    
-    const variacao = ultima.desvio_percentual - primeira.desvio_percentual;
-    const dias = (new Date(ultima.created_at).getTime() - new Date(primeira.created_at).getTime()) / (1000 * 3600 * 24);
-    const degradacaoPorMes = dias > 0 ? (variacao / dias) * 30 : 0;
-    
-    let previsao = null;
-    if (degradacaoPorMes > 0 && ultima.desvio_percentual < 15) {
-        const mesesRestantes = (15 - ultima.desvio_percentual) / degradacaoPorMes;
-        previsao = {
-            meses: mesesRestantes.toFixed(1),
-            data: new Date(Date.now() + mesesRestantes * 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR')
-        };
-    }
-    
-    return {
-        nome: primeira.capacitores?.codigo_identificacao,
-        banco: primeira.bancos_capacitores?.nome_banco,
-        variacao: variacao.toFixed(2),
-        degradacaoPorMes: degradacaoPorMes.toFixed(2),
-        tendencia: variacao > 0 ? 'piorando' : variacao < 0 ? 'melhorando' : 'estavel',
-        primeiraData: new Date(primeira.created_at).toLocaleDateString('pt-BR'),
-        ultimaData: new Date(ultima.created_at).toLocaleDateString('pt-BR'),
-        primeiraDesvio: primeira.desvio_percentual?.toFixed(2) || '0',
-        ultimaDesvio: ultima.desvio_percentual?.toFixed(2) || '0',
-        previsao
-    };
-}
+const PDF_PAGE_WIDTH_PX = 794;
+const PDF_PAGE_HEIGHT_PX = 1122;
 
 export default function RelatoriosPage() {
   const [clientes, setClientes] = useState<any[]>([]);
   const [selectedCliente, setSelectedCliente] = useState('');
+  const [bancos, setBancos] = useState<any[]>([]);
+  const [selectedBanco, setSelectedBanco] = useState('resumo_cliente');
+  const [reportDetail, setReportDetail] = useState<'gerencial' | 'completo'>('gerencial');
   const [reportData, setReportData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [tendencias, setTendencias] = useState<any[]>([]);
   const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetchClientes();
+    let mounted = true;
+
+    async function fetchClientes() {
+      const { data, error } = await supabase
+        .from('clientes')
+        .select('id, nome')
+        .eq('ativo', true)
+        .order('nome');
+
+      if (error) {
+        console.warn('[Relatórios] Não foi possível carregar os clientes.', error);
+        return;
+      }
+      if (mounted) setClientes(data || []);
+    }
+
+    void fetchClientes();
+    return () => { mounted = false; };
   }, []);
 
-  async function fetchClientes() {
-    const { data } = await supabase.from('clientes').select('id, nome').eq('ativo', true).order('nome');
-    setClientes(data || []);
+  useEffect(() => {
+    let mounted = true;
+
+    setSelectedBanco('resumo_cliente');
+    setReportData(null);
+    setTendencias([]);
+
+    if (!selectedCliente) {
+      setBancos([]);
+      return () => { mounted = false; };
+    }
+
+    async function fetchBancos() {
+      const { data, error } = await supabase
+        .from('bancos_capacitores')
+        .select('id, nome_banco, localizacao')
+        .eq('cliente_id', selectedCliente)
+        .eq('ativo', true)
+        .order('nome_banco');
+
+      if (error) {
+        console.warn('[Relatórios] Não foi possível carregar os bancos.', error);
+        return;
+      }
+      if (mounted) setBancos(data || []);
+    }
+
+    void fetchBancos();
+    return () => { mounted = false; };
+  }, [selectedCliente]);
+
+  async function fetchBankAssets(clienteId: string) {
+    let bankQuery = supabase
+      .from('bancos_capacitores')
+      .select(`
+        id,
+        nome_banco,
+        localizacao,
+        tensao_nominal,
+        potencia_total_kvar,
+        potencia_trafo_kva
+      `)
+      .eq('cliente_id', clienteId)
+      .eq('ativo', true)
+      .order('nome_banco');
+
+    if (selectedBanco !== 'todos' && selectedBanco !== 'resumo_cliente') {
+      bankQuery = bankQuery.eq('id', selectedBanco);
+    }
+    const { data: bankData, error: bankError } = await bankQuery;
+    if (bankError) throw bankError;
+
+    const banks = bankData || [];
+    const bankIds = banks.map((bank) => bank.id);
+    if (bankIds.length === 0) return [];
+
+    const { data: capacitorData, error: capacitorError } = await supabase
+      .from('capacitores')
+      .select('id, banco_id, codigo_identificacao, potencia_kvar, ativo')
+      .in('banco_id', bankIds)
+      .order('codigo_identificacao');
+    if (capacitorError) throw capacitorError;
+
+    const capacitorsByBank = new Map<string, any[]>();
+    (capacitorData || []).forEach((capacitor) => {
+      const current = capacitorsByBank.get(capacitor.banco_id) || [];
+      current.push(capacitor);
+      capacitorsByBank.set(capacitor.banco_id, current);
+    });
+
+    return banks.map((bank) => ({
+      ...bank,
+      capacitores: capacitorsByBank.get(bank.id) || [],
+    }));
   }
 
   async function fetchAndRecalculateMedicoes(clienteId: string) {
-    const { data: medicoes } = await supabase
+    let query = supabase
       .from('medicoes')
       .select(`
         *,
@@ -87,9 +129,11 @@ export default function RelatoriosPage() {
       .eq('cliente_id', clienteId)
       .order('created_at', { ascending: false });
 
-    if (!medicoes) return [];
+    const { data: medicoes, error } = await query;
 
-    const correctedMedicoes = medicoes.map(med => {
+    if (error) throw error;
+
+    return (medicoes || []).map((med: any) => {
       let desvio = med.desvio_percentual;
       let status = med.status_validacao;
       let correnteTeorica = med.corrente_teorica_a;
@@ -99,23 +143,30 @@ export default function RelatoriosPage() {
 
       if (med.capacitores) {
         const tensaoNominal = med.capacitores.tensao_nominal_v;
-        tensaoExibicao = tensaoNominal;
+        const tensaoMedida = med.tensao_medida_v || tensaoNominal;
+        tensaoExibicao = tensaoMedida;
 
-        if (med.tipo_teste === 'corrente' && med.corrente_medida_a) {
-          correnteTeorica = calcularCorrenteTeorica(med.capacitores.potencia_kvar, tensaoNominal);
-          teoricoLabel = `${correnteTeorica.toFixed(2)} A @ ${tensaoNominal}V`;
-          
+        if (med.tipo_teste === 'corrente' && med.corrente_medida_a !== null) {
+          correnteTeorica = calculateExpectedCapacitorCurrent(
+            med.capacitores.potencia_kvar,
+            tensaoNominal,
+            tensaoMedida,
+            60,
+            med.frequencia_medida_hz || 60,
+          );
+          teoricoLabel = `${correnteTeorica.toFixed(2)} A @ ${tensaoMedida}V`;
+
           if (correnteTeorica > 0) {
             desvio = ((med.corrente_medida_a - correnteTeorica) / correnteTeorica) * 100;
-            status = getStatusValidacao(desvio);
+            status = classifyDeviation(desvio);
           }
-        } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf) {
-          capacitanciaTeorica = calcularCapacitanciaTeoricaDelta(med.capacitores.capacitancia_nominal_uf);
+        } else if (med.tipo_teste === 'capacitancia' && med.capacitancia_medida_uf !== null) {
+          capacitanciaTeorica = calculateDeltaCapacitance(med.capacitores.capacitancia_nominal_uf);
           teoricoLabel = `${capacitanciaTeorica.toFixed(2)} µF (Δ) @ ${tensaoNominal}V`;
-          
+
           if (capacitanciaTeorica > 0) {
             desvio = ((med.capacitancia_medida_uf - capacitanciaTeorica) / capacitanciaTeorica) * 100;
-            status = getStatusValidacao(desvio);
+            status = classifyDeviation(desvio);
           }
         }
       }
@@ -127,211 +178,234 @@ export default function RelatoriosPage() {
         corrente_teorica_a: correnteTeorica,
         capacitancia_teorica_uf: capacitanciaTeorica,
         teoricoLabel,
-        tensaoNominal: tensaoExibicao
+        tensaoNominal: tensaoExibicao,
       };
     });
-
-    return correctedMedicoes;
   }
 
-  // Agrupar medições por capacitor para análise de tendência
   function agruparPorCapacitor(medicoes: any[]) {
-    const grupos: any = {};
-    medicoes.forEach(med => {
+    const grupos: Record<string, any[]> = {};
+
+    medicoes.forEach((med) => {
       const key = med.capacitores?.id;
       if (!key) return;
-      if (!grupos[key]) {
-        grupos[key] = [];
-      }
+      if (!grupos[key]) grupos[key] = [];
       grupos[key].push(med);
     });
-    
-    Object.keys(grupos).forEach(key => {
-      grupos[key].sort((a: any, b: any) => 
-        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+
+    Object.values(grupos).forEach((grupo) => {
+      grupo.sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       );
     });
-    
+
     return grupos;
   }
 
   async function generatePreview() {
     if (!selectedCliente) return;
-    
+
     setLoading(true);
     try {
-      const { data: cliente } = await supabase.from('clientes').select('*').eq('id', selectedCliente).single();
-      const medicoesCorrigidas = await fetchAndRecalculateMedicoes(selectedCliente);
+      const reportMode = selectedBanco === 'resumo_cliente'
+        ? 'cliente'
+        : selectedBanco === 'todos' ? 'todos' : 'banco';
+      const { data: cliente, error } = await supabase
+        .from('clientes')
+        .select('*')
+        .eq('id', selectedCliente)
+        .single();
+      if (error) throw error;
 
-      // CORREÇÃO AQUI: Agrupar por capacitor e pegar apenas a última medição de cada
-      const ultimasPorCapacitor = new Map();
-      (medicoesCorrigidas || []).forEach(med => {
-        const capacitorId = med.capacitores?.id;
-        if (!capacitorId) return;
-        
-        const existente = ultimasPorCapacitor.get(capacitorId);
-        if (!existente || new Date(med.created_at) > new Date(existente.created_at)) {
-          ultimasPorCapacitor.set(capacitorId, med);
-        }
-      });
-      
-      // Contar status apenas das últimas medições
-      const stats = { aprovado: 0, atencao: 0, reprovado: 0 };
-      for (const med of ultimasPorCapacitor.values()) {
-        const status = med.status_validacao;
-        if (status === 'aprovado') stats.aprovado++;
-        else if (status === 'atencao') stats.atencao++;
-        else if (status === 'reprovado') stats.reprovado++;
-      }
+      const [bankAssets, medicoesCorrigidas] = await Promise.all([
+        fetchBankAssets(selectedCliente),
+        fetchAndRecalculateMedicoes(selectedCliente),
+      ]);
+      const medicoesReconciliadas = reconcileMeasurementsToBanks(
+        bankAssets,
+        medicoesCorrigidas,
+      );
+      const medicoesDoEscopo = reportMode === 'banco'
+        ? medicoesReconciliadas.filter((medicao) => medicao.banco_id === selectedBanco)
+        : medicoesReconciliadas;
 
-      const grupos = agruparPorCapacitor(medicoesCorrigidas);
-      const tendenciasCalculadas = Object.values(grupos)
-        .map((meds: any) => calcularTendenciaCapacitor(meds))
-        .filter(t => t !== null);
-      
+      const tendenciasCalculadas = reportMode === 'cliente'
+        ? []
+        : Object.values(agruparPorCapacitor(medicoesDoEscopo))
+          .map((meds) => calculateCapacitorTrend(meds))
+          .filter((tendencia) => tendencia !== null);
+      const bankSummaries = buildBankReportSummaries(
+        bankAssets,
+        medicoesDoEscopo,
+        tendenciasCalculadas,
+      );
+      const stats = bankSummaries.reduce(
+        (totals, bank) => ({
+          aprovado: totals.aprovado + bank.stats.aprovado,
+          atencao: totals.atencao + bank.stats.atencao,
+          reprovado: totals.reprovado + bank.stats.reprovado,
+        }),
+        { aprovado: 0, atencao: 0, reprovado: 0 },
+      );
+
       setTendencias(tendenciasCalculadas);
-
       setReportData({
         cliente,
-        medicoes: medicoesCorrigidas || [],
-        stats,  // agora stats representa a situação ATUAL dos capacitores
+        medicoes: reportMode === 'cliente' ? [] : medicoesDoEscopo,
+        bancos: bankSummaries,
+        stats,
+        reportMode,
+        reportDetail: reportMode === 'cliente' ? 'gerencial' : reportDetail,
+        scope: reportMode === 'cliente'
+          ? 'Resumo geral do cliente'
+          : reportMode === 'todos' ? 'Todos os bancos — detalhado' : bankSummaries[0]?.nomeBanco,
         date: new Date().toLocaleDateString('pt-BR'),
-        time: new Date().toLocaleTimeString('pt-BR')
+        time: new Date().toLocaleTimeString('pt-BR'),
       });
     } catch (error) {
-      console.error('Error:', error);
-      Swal.fire('Erro', 'Não foi possível gerar o relatório', 'error');
+      console.warn('[Relatórios] Não foi possível gerar a prévia.', error);
+      const { default: Swal } = await import('sweetalert2');
+      await Swal.fire('Erro', 'Não foi possível gerar o relatório.', 'error');
     } finally {
       setLoading(false);
     }
   }
 
   async function downloadPDF() {
-    if (!reportRef.current) return;
+    if (!reportRef.current || !reportData) return;
+
+    const [{ default: jsPDF }, { toPng }, { default: Swal }] = await Promise.all([
+      import('jspdf'),
+      import('html-to-image'),
+      import('sweetalert2'),
+    ]);
 
     try {
       Swal.fire({
         title: 'Gerando PDF...',
-        text: 'Por favor, aguarde.',
+        text: 'Preparando as páginas do relatório.',
         allowOutsideClick: false,
-        didOpen: () => {
-          Swal.showLoading();
-        }
+        didOpen: () => Swal.showLoading(),
       });
 
-      const dataUrl = await toPng(reportRef.current, {
-        quality: 1.0,
-        backgroundColor: '#ffffff',
-        pixelRatio: 3,
-        style: {
-          width: '794px',
-          maxWidth: '794px',
-          padding: '48px',
-          margin: '0',
-          boxShadow: 'none'
-        }
-      });
-      
+      if (document.fonts?.ready) await document.fonts.ready;
+
+      const pages = Array.from(
+        reportRef.current.querySelectorAll<HTMLElement>('[data-pdf-page]'),
+      );
+      if (!pages.length) throw new Error('Nenhuma página foi encontrada para exportação.');
+
       const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      
-      const img = new Image();
-      img.src = dataUrl;
-      await new Promise((resolve) => {
-        img.onload = resolve;
-      });
 
-      const imgWidth = img.width;
-      const imgHeight = img.height;
-      const contentHeight = (imgHeight * pdfWidth) / imgWidth;
-      
-      let heightLeft = contentHeight;
-      let position = 0;
+      for (let index = 0; index < pages.length; index++) {
+        Swal.update({
+          text: `Processando página ${index + 1} de ${pages.length}.`,
+        });
 
-      // Add first page
-      pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, contentHeight);
-      heightLeft -= pdfHeight;
+        const dataUrl = await toPng(pages[index], {
+          backgroundColor: '#ffffff',
+          cacheBust: true,
+          pixelRatio: 2,
+          width: PDF_PAGE_WIDTH_PX,
+          height: PDF_PAGE_HEIGHT_PX,
+        });
 
-      // Add subsequent pages if content is longer than one page
-      while (heightLeft >= 0) {
-        position = heightLeft - contentHeight;
-        pdf.addPage();
-        pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, contentHeight);
-        heightLeft -= pdfHeight;
+        if (index > 0) pdf.addPage('a4', 'p');
+        pdf.addImage(dataUrl, 'PNG', 0, 0, 210, 297, undefined, 'FAST');
       }
 
-      pdf.save(`Relatorio_Tecnico_${reportData.cliente.nome.replace(/\s+/g, '_')}.pdf`);
-      
+      const clientName = reportData.cliente.nome.replace(/\s+/g, '_');
+      const filename = reportData.reportMode === 'cliente'
+        ? `Relatorio_Geral_${clientName}.pdf`
+        : reportData.reportMode === 'banco'
+          ? `Relatorio_Banco_${String(reportData.scope).replace(/\s+/g, '_')}_${clientName}.pdf`
+          : `Relatorio_Tecnico_${clientName}.pdf`;
+      pdf.save(filename);
       Swal.close();
-      Swal.fire('Sucesso', 'Relatório exportado com sucesso!', 'success');
+      await Swal.fire('Sucesso', 'Relatório exportado em páginas A4 completas.', 'success');
     } catch (error) {
-      console.error('PDF Error:', error);
+      console.warn('[Relatórios] Falha ao gerar o PDF.', error);
       Swal.close();
-      Swal.fire('Erro', 'Falha ao gerar o PDF.', 'error');
+      await Swal.fire('Erro', 'Falha ao gerar o PDF. Tente novamente.', 'error');
     }
-  }
-
-  function formatDesvio(desvio: number): string {
-    if (desvio === null || desvio === undefined) return '---';
-    return `${desvio > 0 ? '+' : ''}${desvio.toFixed(2)}%`;
-  }
-
-  function getValorTeorico(med: any): string {
-    if (med.tipo_teste === 'corrente') {
-      return med.corrente_teorica_a ? `${med.corrente_teorica_a.toFixed(2)} A` : '---';
-    } else {
-      return med.capacitancia_teorica_uf ? `${med.capacitancia_teorica_uf.toFixed(2)} µF` : '---';
-    }
-  }
-
-  function getValorMedido(med: any): string {
-    if (med.tipo_teste === 'corrente') {
-      return med.corrente_medida_a ? `${med.corrente_medida_a.toFixed(2)} A` : '---';
-    } else {
-      return med.capacitancia_medida_uf ? `${med.capacitancia_medida_uf.toFixed(2)} µF` : '---';
-    }
-  }
-
-  function getTendenciaIcon(tendencia: string) {
-    if (tendencia === 'piorando') return <TrendingUp size={14} className="text-red-600" />;
-    if (tendencia === 'melhorando') return <TrendingDown size={14} className="text-green-600" />;
-    return <Activity size={14} className="text-slate-400" />;
   }
 
   return (
     <div className="space-y-8">
       <header>
         <h1 className="text-3xl font-bold text-slate-800">Relatórios Técnicos</h1>
-        <p className="text-slate-500">Gere relatórios profissionais com análise de tendência</p>
+        <p className="text-slate-500">Visão consolidada da instalação e detalhamento operacional por banco</p>
       </header>
 
-      <div className="rounded-xl bg-white p-4 sm:p-6 shadow-sm border border-slate-200">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-          <div className="flex-1">
-            <label className="mb-1 block text-sm font-medium text-slate-700">Selecione o Cliente</label>
-            <select 
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Selecione o cliente</label>
+            <select
               className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-slate-400"
               value={selectedCliente}
-              onChange={(e) => setSelectedCliente(e.target.value)}
+              onChange={(event) => setSelectedCliente(event.target.value)}
             >
               <option value="">Selecione um cliente...</option>
-              {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              {clientes.map((cliente) => (
+                <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>
+              ))}
             </select>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button 
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Escopo por banco</label>
+            <select
+              className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-slate-400 disabled:bg-slate-50"
+              value={selectedBanco}
+              disabled={!selectedCliente}
+              onChange={(event) => {
+                setSelectedBanco(event.target.value);
+                setReportData(null);
+              }}
+            >
+              <option value="resumo_cliente">Geral do cliente — resumo executivo</option>
+              <option value="todos">Todos os bancos — detalhado</option>
+              {bancos.map((banco) => (
+                <option key={banco.id} value={banco.id}>
+                  {banco.nome_banco}{banco.localizacao ? ` — ${banco.localizacao}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Nível de detalhamento</label>
+            <select
+              className="w-full rounded-lg border border-slate-200 px-4 py-2 outline-none focus:border-slate-400"
+              value={selectedBanco === 'resumo_cliente' ? 'gerencial' : reportDetail}
+              disabled={selectedBanco === 'resumo_cliente'}
+              onChange={(event) => {
+                setReportDetail(event.target.value as 'gerencial' | 'completo');
+                setReportData(null);
+              }}
+            >
+              <option value="gerencial">Gerencial — última condição (recomendado)</option>
+              <option value="completo">Completo — inclui histórico de medições</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row lg:col-span-3 lg:justify-end">
+            <button
+              type="button"
               onClick={generatePreview}
               disabled={!selectedCliente || loading}
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-800 px-6 py-2 text-white hover:bg-slate-700 disabled:opacity-50 transition-colors"
+              className="flex items-center justify-center gap-2 rounded-lg bg-slate-800 px-6 py-2 text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
             >
               <Search size={20} />
-              Gerar Prévia
+              {loading ? 'Gerando...' : 'Gerar prévia'}
             </button>
+
             {reportData && (
-              <button 
+              <button
+                type="button"
                 onClick={downloadPDF}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-600 px-6 py-2 font-bold text-white hover:bg-slate-500 transition-colors"
+                className="flex items-center justify-center gap-2 rounded-lg bg-slate-600 px-6 py-2 font-bold text-white transition-colors hover:bg-slate-500"
               >
                 <Download size={20} />
                 Exportar PDF
@@ -342,257 +416,17 @@ export default function RelatoriosPage() {
       </div>
 
       {reportData ? (
-        <div className="flex justify-center overflow-x-auto pb-8">
-          <div 
-            id="report-container"
-            ref={reportRef}
-            className="bg-white p-12 shadow-2xl"
-            style={{ width: '794px', minHeight: '1122px' }}
-          >
-            {/* Header - Dark & Yellow Theme */}
-            <div className="mb-12 flex flex-row items-center justify-between border-b-4 pb-8 gap-4" style={{ borderColor: '#EAB308', backgroundColor: '#0f172a', margin: '-48px -48px 48px -48px', padding: '48px' }}>
-              <div className="flex items-center gap-4">
-                <div className="rounded-2xl p-3 text-primary" style={{ backgroundColor: '#EAB308' }}>
-                  <Zap size={40} className="text-slate-900" />
-                </div>
-                <div>
-                  <h2 className="text-3xl sm:text-4xl font-black tracking-tighter uppercase" style={{ color: '#ffffff' }}>
-                    CAPACITOR<span style={{ color: '#EAB308' }}>MANAGER</span>
-                  </h2>
-                  <p className="text-xs sm:text-sm font-bold uppercase tracking-widest text-slate-400">Relatório Técnico de Manutenção Especializada</p>
-                </div>
-              </div>
-              <div className="text-left sm:text-right">
-                <p className="text-[10px] sm:text-sm font-bold text-slate-500">DATA DE EMISSÃO</p>
-                <p className="text-base sm:text-lg font-bold text-white">{reportData.date}</p>
-                <p className="text-[10px] sm:text-xs text-[#EAB308]">{reportData.time}</p>
-              </div>
-            </div>
-
-            {/* Client Info - Cores mais profissionais */}
-            <div className="mb-8 sm:mb-12 grid grid-cols-1 md:grid-cols-2 gap-8 rounded-xl p-4 sm:p-8" style={{ backgroundColor: '#f8fafc' }}>
-              <div>
-                <h3 className="mb-4 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">DADOS DO CLIENTE</h3>
-                <p className="text-lg sm:text-xl font-bold" style={{ color: '#1e293b' }}>{reportData.cliente.nome}</p>
-                <p className="text-sm text-slate-600">{reportData.cliente.cnpj_cpf || 'CNPJ não informado'}</p>
-                <p className="text-sm text-slate-600">{reportData.cliente.contato_responsavel || ''}</p>
-                <p className="text-sm text-slate-600">{reportData.cliente.telefone || ''}</p>
-              </div>
-              <div className="grid grid-cols-3 gap-2 sm:gap-4">
-                <div className="text-center">
-                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">APROVADOS</p>
-                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#059669' }}>{reportData.stats.aprovado}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">ATENÇÃO</p>
-                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#d97706' }}>{reportData.stats.atencao}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-400">REPROVADOS</p>
-                  <p className="text-xl sm:text-2xl font-black" style={{ color: '#dc2626' }}>{reportData.stats.reprovado}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Análise de Tendência por Capacitor */}
-            {tendencias.length > 0 && (
-              <div className="mb-8 sm:mb-12">
-                <h3 className="mb-6 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">📊 ANÁLISE DE TENDÊNCIA POR CAPACITOR</h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left min-w-[600px]">
-                    <thead>
-                      <tr className="border-b-2 border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
-                        <th className="pb-4">CAPACITOR</th>
-                        <th className="pb-4">BANCO</th>
-                        <th className="pb-4">1ª MEDIÇÃO</th>
-                        <th className="pb-4">ÚLTIMA</th>
-                        <th className="pb-4">VARIAÇÃO</th>
-                        <th className="pb-4">TENDÊNCIA</th>
-                        <th className="pb-4">PREVISÃO</th>
-                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {tendencias.map((t, idx) => (
-                        <tr key={idx} className="text-[10px] sm:text-xs">
-                          <td className="py-4 font-bold text-slate-800">{t.nome}</td>
-                          <td className="py-4 text-slate-600">{t.banco}</td>
-                          <td className="py-4 text-slate-500">{t.primeiraDesvio}%<br/><span className="text-slate-400">{t.primeiraData}</span></td>
-                          <td className="py-4 text-slate-500">{t.ultimaDesvio}%<br/><span className="text-slate-400">{t.ultimaData}</span></td>
-                          <td className="py-4 font-bold" style={{ color: parseFloat(t.variacao) > 0 ? '#dc2626' : parseFloat(t.variacao) < 0 ? '#10b981' : '#64748b' }}>
-                            {parseFloat(t.variacao) > 0 ? '+' : ''}{t.variacao}%
-                          </td>
-                          <td className="py-4">
-                            <div className="flex items-center gap-1">
-                              {getTendenciaIcon(t.tendencia)}
-                              <span className={t.tendencia === 'piorando' ? 'text-red-600' : t.tendencia === 'melhorando' ? 'text-green-600' : 'text-slate-500'}>
-                                {t.tendencia === 'piorando' ? 'Degradando' : t.tendencia === 'melhorando' ? 'Melhorando' : 'Estável'}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="py-4">
-                            {t.previsao ? (
-                              <span className="text-amber-600 font-medium">
-                                ~{t.previsao.meses} meses<br/>
-                                <span className="text-slate-400 text-[8px]">{t.previsao.data}</span>
-                              </span>
-                            ) : (
-                              <span className="text-green-600">OK</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* Measurements Table */}
-            <div className="mb-8 sm:mb-12">
-              <h3 className="mb-6 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">DETALHAMENTO DAS MEDIÇÕES</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left min-w-[700px]">
-                  <thead>
-                    <tr className="border-b-2 border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
-                      <th className="pb-4">DATA</th>
-                      <th className="pb-4">BANCO</th>
-                      <th className="pb-4">CAPACITOR</th>
-                      <th className="pb-4">TENSÃO</th>
-                      <th className="pb-4">TIPO</th>
-                      <th className="pb-4">TEÓRICO</th>
-                      <th className="pb-4">MEDIDO</th>
-                      <th className="pb-4">DESVIO</th>
-                      <th className="pb-4">STATUS</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {reportData.medicoes.map((med: any) => (
-                      <tr key={med.id} className="text-[10px] sm:text-xs">
-                        <td className="py-4 text-slate-600">{new Date(med.created_at).toLocaleDateString()}</td>
-                        <td className="py-4 font-bold text-slate-700">{med.bancos_capacitores?.nome_banco || '-'}</td>
-                        <td className="py-4 font-medium text-slate-700">{med.capacitores?.codigo_identificacao || '-'}</td>
-                        <td className="py-4">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${med.tensaoNominal === 220 ? 'bg-blue-50 text-blue-700' : med.tensaoNominal === 380 ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                            ⚡ {med.tensaoNominal}V
-                          </span>
-                        </td>
-                        <td className="py-4 capitalize text-slate-600">{med.tipo_teste === 'corrente' ? 'Corrente' : 'Capacitância'}</td>
-                        <td className="py-4 text-slate-500">{getValorTeorico(med)}</td>
-                        <td className="py-4 font-medium text-slate-700">{getValorMedido(med)}</td>
-                        <td className="py-4 font-bold" style={{ color: med.desvio_percentual > 0 ? '#dc2626' : med.desvio_percentual < 0 ? '#d97706' : '#64748b' }}>
-                          {formatDesvio(med.desvio_percentual)}
-                        </td>
-                        <td className="py-4">
-                          <StatusBadge status={med.status_validacao} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Summary - Cores mais profissionais */}
-            <div className="mb-8 rounded-lg bg-slate-50 p-4 sm:p-6">
-              <h3 className="mb-4 text-[10px] sm:text-xs font-black uppercase tracking-widest text-slate-400">RESUMO EXECUTIVO</h3>
-              <div className="grid grid-cols-2 gap-4 text-xs sm:text-sm mb-4">
-                <div>
-                  <p className="text-slate-500">Total de Medições:</p>
-                  <p className="text-xl sm:text-2xl font-bold text-slate-800">{reportData.medicoes.length}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Taxa de Aprovação (última medição):</p>
-                  <p className="text-xl sm:text-2xl font-bold text-emerald-600">
-                    {(() => {
-                      const totalCapacitores = reportData.stats.aprovado + reportData.stats.atencao + reportData.stats.reprovado;
-                      return totalCapacitores > 0 ? ((reportData.stats.aprovado / totalCapacitores) * 100).toFixed(1) : 0;
-                    })()}%
-                  </p>
-                </div>
-              </div>
-              
-              {/* Capacitores Críticos */}
-              {tendencias.filter(t => t.tendencia === 'piorando' && parseFloat(t.variacao) > 5).length > 0 && (
-                <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
-                  <p className="text-xs font-bold text-red-700 mb-2">⚠️ CAPACITORES QUE NECESSITAM ATENÇÃO:</p>
-                  <ul className="text-xs text-red-600 space-y-1">
-                    {tendencias.filter(t => t.tendencia === 'piorando' && parseFloat(t.variacao) > 5).map((t, idx) => (
-                      <li key={idx}>• {t.nome} - Variação de {t.variacao}% (previsão de substituição em {t.previsao?.meses || 'breve'} meses)</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-
-            {/* Footer - Highlighted */}
-            <div className="mt-auto border-t-4 pt-12 text-center" style={{ borderColor: '#EAB308', backgroundColor: '#f8fafc', margin: '64px -48px -48px -48px', padding: '48px' }}>
-              <div className="grid grid-cols-2 gap-12 mb-12">
-                <div className="text-center">
-                  <div className="mx-auto h-px w-48 bg-slate-400 mb-2"></div>
-                  <p className="text-[10px] font-bold text-slate-700 uppercase tracking-widest">Responsável Técnico</p>
-                  <p className="text-[8px] text-slate-500">Assinatura / Carimbo</p>
-                </div>
-                <div className="text-center">
-                  <div className="mx-auto h-px w-48 bg-slate-400 mb-2"></div>
-                  <p className="text-[10px] font-bold text-slate-700 uppercase tracking-widest">Cliente / Recebedor</p>
-                  <p className="text-[8px] text-slate-500">Assinatura / Data</p>
-                </div>
-              </div>
-              
-              <div className="pt-8 border-t border-slate-200">
-                <p className="text-xs font-bold text-slate-700">Este relatório é um documento técnico oficial gerado pelo sistema CapacitorManager.</p>
-                <p className="text-[10px] text-slate-600 mt-4 font-medium">JM ELETRO SERVICE | contato@jmeletroservice.com.br | (91) 98231-9448</p>
-                <div className="mt-4 flex justify-center gap-2">
-                  <div className="h-1 w-12 bg-[#EAB308]"></div>
-                  <div className="h-1 w-12 bg-slate-900"></div>
-                  <div className="h-1 w-12 bg-[#EAB308]"></div>
-                </div>
-              </div>
-            </div>
+        <div className="overflow-x-auto pb-8">
+          <div ref={reportRef} className="mx-auto w-max">
+            <TechnicalReportDocument reportData={reportData} trends={tendencias} />
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center rounded-xl bg-white py-24 shadow-sm text-slate-400">
+        <div className="flex flex-col items-center justify-center rounded-xl bg-white py-24 text-slate-400 shadow-sm">
           <FileText size={64} className="mb-4 opacity-10" />
           <p className="text-lg">Selecione um cliente para gerar o relatório</p>
         </div>
       )}
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const configs: any = {
-    aprovado: { 
-      icon: CheckCircle2, 
-      color: '#059669', // emerald-600
-      bg: '#ecfdf5',    // emerald-50
-      label: 'APROVADO' 
-    },
-    atencao: { 
-      icon: AlertTriangle, 
-      color: '#d97706', // amber-600
-      bg: '#fffbeb',    // amber-50
-      label: 'ATENÇÃO' 
-    },
-    reprovado: { 
-      icon: XCircle, 
-      color: '#dc2626', // red-600
-      bg: '#fef2f2',    // red-50
-      label: 'REPROVADO' 
-    },
-  };
-
-  const config = configs[status] || configs.atencao;
-  const Icon = config.icon;
-
-  return (
-    <span 
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold"
-      style={{ backgroundColor: config.bg, color: config.color }}
-    >
-      <Icon size={12} />
-      {config.label}
-    </span>
   );
 }

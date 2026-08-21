@@ -12,6 +12,8 @@ export interface ParsedEquatorialInvoice {
   fp_calculado?: number;
   reativo_origem: "excedente_faturado";
   penalidade_reativa_informada: number | null;
+  penalidade_reativa_ponta: number | null;
+  penalidade_reativa_fora_ponta: number | null;
   tarifa_reativa_aplicada: number | null;
   fonte_dados: "pdf";
 }
@@ -81,6 +83,9 @@ export function parseEquatorialInvoiceText(text: string, fileName = ""): ParsedE
     b[1] - a[1] || Number(b[0].slice(3) + b[0].slice(0, 2)) - Number(a[0].slice(3) + a[0].slice(0, 2))
   )[0]?.[0];
   const days = normalized.match(/N[ºo°]\s*de\s*Dias\s*(\d{1,2})/i);
+  const readingSequence = normalized.match(
+    /Leitura\s+Anterior.*?Leitura\s+Atual.*?N[ºo°]\s*de\s*Dias.*?Pr[oó]xima\s+Leitura.*?(\d{2}\/\d{2}\/20\d{2})\s+(\d{2}\/\d{2}\/20\d{2})\s+(\d{1,2})\s+(\d{2}\/\d{2}\/20\d{2})/i,
+  );
   const labelledTotal = normalized.match(/Total\s*a\s*Pagar\s*R\$\s*([\d.]+,\d{2})/i);
   const currencyValues = [...normalized.matchAll(/R\$\s*([\d.]+,\d{2})/gi)].map((match) => parseBR(match[1]));
   const demandOffPeak = normalized.match(/Dem\.\s*M[aá]x\.\s*F\.\s*Ponta\s*\(kW\)\s*:\s*([\d.,]+)/i);
@@ -111,10 +116,12 @@ export function parseEquatorialInvoiceText(text: string, fileName = ""): ParsedE
     reativo_ponta_kvarh: reactivePeak?.quantity ?? 0,
     reativo_fora_ponta_kvarh: reactiveOffPeak?.quantity ?? 0,
     total_pagar: parseBR(labelledTotal?.[1]) || Math.max(0, ...currencyValues),
-    dias_ciclo: days ? Number(days[1]) : 30,
+    dias_ciclo: days ? Number(days[1]) : readingSequence ? Number(readingSequence[3]) : 30,
     fp_calculado: undefined,
     reativo_origem: "excedente_faturado",
     penalidade_reativa_informada: penalty,
+    penalidade_reativa_ponta: reactivePeak?.billedAmount ?? null,
+    penalidade_reativa_fora_ponta: reactiveOffPeak?.billedAmount ?? null,
     tarifa_reativa_aplicada: weightedTariff,
     fonte_dados: "pdf",
   };

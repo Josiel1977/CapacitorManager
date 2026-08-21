@@ -30,6 +30,24 @@ test("não força banco mínimo de 20 kVAr", () => {
   }));
   const result = calculateAuditableSizing(invoices, { targetPowerFactor: 0.92 });
   assert.equal(result.commercialKvar, 2.5);
+  assert.equal(result.specificationAllowed, false);
+  assert.equal(result.releaseLevel, "pre_sizing");
+});
+
+test("faturas nunca são tratadas como especificação definitiva", () => {
+  const invoices = Array.from({ length: 12 }, (_, index) => ({
+    id: String(index), month: String(index + 1), demandKw: 100, measuredPowerFactor: 0.8,
+  }));
+  const result = calculateAuditableSizing(invoices, {
+    targetPowerFactor: 0.92,
+    demandSource: "invoice",
+    powerFactorSource: "invoice",
+    coincidentDemandAndPowerFactor: false,
+  });
+  assert.equal(result.confidence, "preliminary");
+  assert.equal(result.specificationAllowed, false);
+  assert.match(result.warnings.join(" "), /pré-dimensionamento/i);
+  assert.ok(result.p50Kvar <= result.p90Kvar && result.p90Kvar <= result.p95Kvar);
 });
 
 test("bloqueia recomendação com menos de três faturas válidas", () => {
@@ -57,6 +75,7 @@ test("limita o banco pela capacidade preventiva dos transformadores", () => {
   assert.equal(result.commercialKvar, 40);
   assert.equal(result.limitApplied, true);
   assert.equal(result.confidence, "preliminary");
+  assert.ok(result.projectedPowerFactor < 0.92);
 });
 
 test("estágios sempre somam a potência comercial", () => {
@@ -77,4 +96,13 @@ test("prioriza a penalidade informada sobre a estimativa tarifária", () => {
   }));
   const result = calculateAuditableSizing(invoices, { targetPowerFactor: 0.92 });
   assert.equal(result.estimatedMonthlyReactiveCharge, 289.45);
+  assert.equal(result.estimatedMonthlySaving, 260.51);
+});
+
+test("permite ajustar a realização prudente da economia", () => {
+  const invoices = ["01", "02", "03"].map((month) => ({
+    id: month, month, demandKw: 100, measuredPowerFactor: 0.8, informedReactiveCharge: 100,
+  }));
+  const result = calculateAuditableSizing(invoices, { targetPowerFactor: 0.92, savingsRealizationPercent: 75 });
+  assert.equal(result.estimatedMonthlySaving, 75);
 });
