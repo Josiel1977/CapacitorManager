@@ -1,5 +1,14 @@
 import type { NextConfig } from 'next';
 
+export function normalizeSupabaseOrigin(value: string | undefined): string {
+  try {
+    const url = new URL(value?.trim() ?? '');
+    return url.protocol === 'https:' ? url.origin : 'https://*.supabase.co';
+  } catch {
+    return 'https://*.supabase.co';
+  }
+}
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -11,7 +20,7 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   transpilePackages: ['motion'],
   async headers() {
-    const supabaseOrigin = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://*.supabase.co';
+    const supabaseOrigin = normalizeSupabaseOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
     // O Webpack usa eval no servidor de desenvolvimento. A exceção nunca é
     // aplicada ao build de produção.
     const scriptSrc = process.env.NODE_ENV === 'development'
