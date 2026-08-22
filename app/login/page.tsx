@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Eye, EyeOff, Lock, Mail, Zap } from 'lucide-react';
-import { useAuth } from '@/lib/AuthContext';
 
 function getSafeRedirect(): string {
   if (typeof window === 'undefined') return '/dashboard-real';
@@ -14,16 +13,17 @@ function getSafeRedirect(): string {
 }
 
 export default function LoginPage() {
-  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [redirectTo, setRedirectTo] = useState('/dashboard-real');
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const errorCode = params.get('error');
+    setRedirectTo(getSafeRedirect());
 
     if (errorCode) {
       setMessage({
@@ -46,29 +46,6 @@ export default function LoginPage() {
     }
   }, []);
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setLoading(true);
-    setMessage(null);
-
-    try {
-      await login(email, senha);
-      setMessage({ type: 'success', text: 'Login realizado. Abrindo o sistema…' });
-      window.location.assign(getSafeRedirect());
-    } catch (error) {
-      const authenticationUnavailable = error instanceof Error
-        && /tempo limite|fetch|network|conex/i.test(error.message);
-      setMessage({
-        type: 'error',
-        text: authenticationUnavailable
-          ? 'O serviço de autenticação não respondeu. Verifique sua internet e tente novamente.'
-          : 'E-mail ou senha inválidos.',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-[100] overflow-y-auto bg-gradient-to-br from-primary/10 to-secondary/10">
       <div className="flex min-h-dvh items-center justify-center p-4">
@@ -84,10 +61,13 @@ export default function LoginPage() {
           <form
             method="post"
             action="/api/auth/login"
-            onSubmit={handleSubmit}
+            onSubmit={() => {
+              setLoading(true);
+              setMessage(null);
+            }}
             className="space-y-5 p-6"
           >
-            <input type="hidden" name="redirectTo" value="/dashboard-real" />
+            <input type="hidden" name="redirectTo" value={redirectTo} />
             <div>
               <label htmlFor="login-email" className="mb-1 block text-sm font-medium text-slate-700">E-mail</label>
               <div className="relative">
