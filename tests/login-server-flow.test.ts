@@ -5,37 +5,26 @@ import { readFileSync } from 'node:fs';
 const source = (relativePath: string) =>
   readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
 
-test('login envia a credencial ao endpoint seguro do mesmo domínio', () => {
+test('login autentica diretamente no Supabase usando somente a chave pública', () => {
   const page = source('app/login/page.tsx');
-  assert.match(page, /method="post"/);
-  assert.match(page, /action="\/api\/auth\/login"/);
-  assert.match(page, /fetch\('\/api\/auth\/login'/);
-  assert.match(page, /credentials: 'same-origin'/);
+  assert.match(page, /createClient\(\)/);
+  assert.match(page, /signInWithPassword\(\{/);
+  assert.match(page, /window\.location\.replace\(redirectTo\)/);
+  assert.doesNotMatch(page, /\/api\/auth\/login/);
   assert.doesNotMatch(page, /useAuth/);
 });
 
-test('endpoint autentica no servidor e grava os cookies na resposta', () => {
-  const route = source('app/api/auth/login/route.ts');
-  assert.match(route, /signInWithPassword\(\{ email, password \}\)/);
-  assert.match(route, /response\.cookies\.set/);
-  assert.match(route, /safeRedirect/);
-});
-
-test('falhas inesperadas do login são convertidas em resposta controlada', () => {
-  const route = source('app/api/auth/login/route.ts');
-  assert.match(route, /try \{[\s\S]*request\.formData\(\)/);
-  assert.match(route, /catch \(error\)[\s\S]*loginError\(request, 'unavailable'\)/);
-  assert.match(route, /process\.env\.NEXT_PUBLIC_SUPABASE_URL\?\.trim\(\)/);
-});
-
-test('cliente mantém a tela de login quando a API não devolve JSON', () => {
+test('login trata indisponibilidade sem abandonar a página', () => {
   const page = source('app/login/page.tsx');
-  assert.match(page, /response\.json\(\)\.catch\(\(\) => null\)/);
-  assert.match(page, /loginErrorMessage\(result\?\.error \?\? 'unavailable'\)/);
+  assert.match(page, /withTimeout\(/);
+  assert.match(page, /loginErrorMessage\(code\)/);
+  assert.match(page, /finally \{[\s\S]*setLoading\(false\)/);
 });
 
-test('endpoint não devolve a senha na URL de erro', () => {
-  const route = source('app/api/auth/login/route.ts');
-  assert.doesNotMatch(route, /searchParams\.set\(['"](?:password|email)/);
-  assert.match(route, /searchParams\.set\('error', code\)/);
+test('cliente Supabase falha de forma explícita quando a configuração pública está ausente', () => {
+  const client = source('lib/supabase/client.ts');
+  assert.match(client, /NEXT_PUBLIC_SUPABASE_URL\?\.trim\(\)/);
+  assert.match(client, /NEXT_PUBLIC_SUPABASE_ANON_KEY\?\.trim\(\)/);
+  assert.match(client, /supabase_public_configuration_missing/);
+  assert.doesNotMatch(client, /SUPABASE_(?:SECRET|SERVICE_ROLE)/);
 });

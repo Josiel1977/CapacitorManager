@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Eye, EyeOff, Lock, Mail, Zap } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
+import { withTimeout } from '@/lib/with-timeout';
 
 type LoginErrorCode = 'invalid' | 'unavailable' | 'configuration';
 
@@ -63,41 +65,42 @@ export default function LoginPage() {
           </header>
 
           <form
-            method="post"
-            action="/api/auth/login"
             onSubmit={async (event) => {
               event.preventDefault();
               setLoading(true);
               setMessage(null);
 
               try {
-                const response = await fetch('/api/auth/login', {
-                  method: 'POST',
-                  body: new FormData(event.currentTarget),
-                  credentials: 'same-origin',
-                  headers: { Accept: 'application/json' },
-                });
-                const result = await response.json().catch(() => null) as {
-                  ok?: boolean;
-                  error?: LoginErrorCode;
-                  redirectTo?: string;
-                } | null;
+                const supabase = createClient();
+                const { data, error } = await withTimeout(
+                  supabase.auth.signInWithPassword({
+                    email: email.trim().toLowerCase(),
+                    password: senha,
+                  }),
+                  12_000,
+                  'Tempo limite ao fazer login.',
+                );
 
-                if (!response.ok || !result?.ok || !result.redirectTo) {
-                  setMessage({ type: 'error', text: loginErrorMessage(result?.error ?? 'unavailable') });
+                if (error || !data.session) {
+                  const code = error?.code === 'invalid_credentials' || error?.status === 400
+                    ? 'invalid'
+                    : 'unavailable';
+                  setMessage({ type: 'error', text: loginErrorMessage(code) });
                   return;
                 }
 
-                window.location.assign(result.redirectTo);
-              } catch {
-                setMessage({ type: 'error', text: loginErrorMessage('unavailable') });
+                window.location.replace(redirectTo);
+              } catch (error) {
+                const code = error instanceof Error && error.message === 'supabase_public_configuration_missing'
+                  ? 'configuration'
+                  : 'unavailable';
+                setMessage({ type: 'error', text: loginErrorMessage(code) });
               } finally {
                 setLoading(false);
               }
             }}
             className="space-y-5 p-6"
           >
-            <input type="hidden" name="redirectTo" value={redirectTo} />
             <div>
               <label htmlFor="login-email" className="mb-1 block text-sm font-medium text-slate-700">E-mail</label>
               <div className="relative">
