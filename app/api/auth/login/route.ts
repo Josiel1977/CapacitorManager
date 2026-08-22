@@ -7,7 +7,20 @@ function safeRedirect(value: FormDataEntryValue | null): string {
   return value.startsWith('/') && !value.startsWith('//') ? value : '/dashboard-real';
 }
 
-function loginError(request: NextRequest, code: 'invalid' | 'unavailable' | 'configuration') {
+type LoginErrorCode = 'invalid' | 'unavailable' | 'configuration';
+
+function wantsJson(request: NextRequest): boolean {
+  return request.headers.get('accept')?.includes('application/json') ?? false;
+}
+
+function loginError(request: NextRequest, code: LoginErrorCode) {
+  if (wantsJson(request)) {
+    return NextResponse.json(
+      { ok: false, error: code },
+      { status: code === 'invalid' ? 401 : 503, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
+
   const url = new URL('/login', request.url);
   url.searchParams.set('error', code);
   const response = NextResponse.redirect(url, 303);
@@ -16,41 +29,41 @@ function loginError(request: NextRequest, code: 'invalid' | 'unavailable' | 'con
 }
 
 export async function POST(request: NextRequest) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return loginError(request, 'configuration');
-  }
-
-  const formData = await request.formData();
-  const email = typeof formData.get('email') === 'string'
-    ? String(formData.get('email')).trim().toLowerCase()
-    : '';
-  const password = typeof formData.get('password') === 'string'
-    ? String(formData.get('password'))
-    : '';
-
-  if (!email || !password) {
-    return loginError(request, 'invalid');
-  }
-
-  const destination = new URL(safeRedirect(formData.get('redirectTo')), request.url);
-  const response = NextResponse.redirect(destination, 303);
-  response.headers.set('Cache-Control', 'no-store');
-
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll: () => request.cookies.getAll(),
-      setAll: (cookiesToSet) => {
-        cookiesToSet.forEach(({ name, value, options }) => {
-          response.cookies.set(name, value, options);
-        });
-      },
-    },
-  });
-
   try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return loginError(request, 'configuration');
+    }
+
+    const formData = await request.formData();
+    const emailValue = formData.get('email');
+    const passwordValue = formData.get('password');
+    const email = typeof emailValue === 'string' ? emailValue.trim().toLowerCase() : '';
+    const password = typeof passwordValue === 'string' ? passwordValue : '';
+
+    if (!email || !password) {
+      return loginError(request, 'invalid');
+    }
+
+    const redirectTo = safeRedirect(formData.get('redirectTo'));
+    const response = wantsJson(request)
+      ? NextResponse.json({ ok: true, redirectTo })
+      : NextResponse.redirect(new URL(redirectTo, request.url), 303);
+    response.headers.set('Cache-Control', 'no-store');
+
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+      cookies: {
+        getAll: () => request.cookies.getAll(),
+        setAll: (cookiesToSet) => {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    });
+
     const { error } = await withTimeout(
       supabase.auth.signInWithPassword({ email, password }),
       12_000,
@@ -58,7 +71,9 @@ export async function POST(request: NextRequest) {
     );
     if (error) return loginError(request, 'invalid');
     return response;
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro desconhecido';
+    console.error('[Auth login] Falha inesperada no fluxo de autenticação.', { message });
     return loginError(request, 'unavailable');
   }
 }

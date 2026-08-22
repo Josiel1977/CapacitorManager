@@ -4,6 +4,14 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Eye, EyeOff, Lock, Mail, Zap } from 'lucide-react';
 
+type LoginErrorCode = 'invalid' | 'unavailable' | 'configuration';
+
+function loginErrorMessage(code: LoginErrorCode | string | undefined): string {
+  if (code === 'unavailable') return 'O serviço de autenticação não respondeu. Tente novamente.';
+  if (code === 'configuration') return 'A autenticação deste ambiente não está configurada corretamente.';
+  return 'E-mail ou senha inválidos.';
+}
+
 function getSafeRedirect(): string {
   if (typeof window === 'undefined') return '/dashboard-real';
   const requestedRedirect = new URLSearchParams(window.location.search).get('redirectTo');
@@ -28,11 +36,7 @@ export default function LoginPage() {
     if (errorCode) {
       setMessage({
         type: 'error',
-        text: errorCode === 'unavailable'
-          ? 'O serviço de autenticação não respondeu. Tente novamente.'
-          : errorCode === 'configuration'
-            ? 'A autenticação local não está configurada corretamente.'
-            : 'E-mail ou senha inválidos.',
+        text: loginErrorMessage(errorCode),
       });
     }
 
@@ -61,9 +65,35 @@ export default function LoginPage() {
           <form
             method="post"
             action="/api/auth/login"
-            onSubmit={() => {
+            onSubmit={async (event) => {
+              event.preventDefault();
               setLoading(true);
               setMessage(null);
+
+              try {
+                const response = await fetch('/api/auth/login', {
+                  method: 'POST',
+                  body: new FormData(event.currentTarget),
+                  credentials: 'same-origin',
+                  headers: { Accept: 'application/json' },
+                });
+                const result = await response.json().catch(() => null) as {
+                  ok?: boolean;
+                  error?: LoginErrorCode;
+                  redirectTo?: string;
+                } | null;
+
+                if (!response.ok || !result?.ok || !result.redirectTo) {
+                  setMessage({ type: 'error', text: loginErrorMessage(result?.error ?? 'unavailable') });
+                  return;
+                }
+
+                window.location.assign(result.redirectTo);
+              } catch {
+                setMessage({ type: 'error', text: loginErrorMessage('unavailable') });
+              } finally {
+                setLoading(false);
+              }
             }}
             className="space-y-5 p-6"
           >
