@@ -70,11 +70,12 @@ export async function createLeadRequest(request: Request, input: LeadRequestInpu
   }
 
   let notified = false;
-  const contactFrom = process.env.CONTACT_FROM_EMAIL;
-  const contactTo = process.env.CONTACT_TO_EMAIL;
-  if (process.env.RESEND_API_KEY && contactFrom && contactTo) {
+  const contactFrom = process.env.CONTACT_FROM_EMAIL?.trim();
+  const contactTo = process.env.CONTACT_TO_EMAIL?.trim();
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  if (resendApiKey && contactFrom && contactTo) {
     try {
-      const resend = new Resend(process.env.RESEND_API_KEY);
+      const resend = new Resend(resendApiKey);
       const result = await resend.emails.send({
         from: contactFrom,
         to: [contactTo],

@@ -23,9 +23,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Revise os dados, aceite os termos e use uma senha com 12 ou mais caracteres.' }, { status: 400 });
     }
 
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
     if (!url || !anonKey || !appUrl) return NextResponse.json({ error: 'Cadastro temporariamente indisponível' }, { status: 503 });
 
     const authClient = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });

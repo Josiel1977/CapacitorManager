@@ -11,7 +11,7 @@ type WebhookPayload = {
 type PlanName = 'basico' | 'essencial' | 'pro' | 'master';
 
 function getAccessToken(): string {
-  const token = process.env.MP_ACCESS_TOKEN || process.env.MERCADO_PAGO_ACCESS_TOKEN;
+  const token = (process.env.MP_ACCESS_TOKEN || process.env.MERCADO_PAGO_ACCESS_TOKEN)?.trim();
   if (!token) throw new Error('Token do Mercado Pago não configurado.');
   return token;
 }
@@ -19,16 +19,16 @@ function getAccessToken(): string {
 function getPlanName(planId: string | undefined): PlanName | null {
   if (!planId) return null;
   const plans: Array<[string | undefined, PlanName]> = [
-    [process.env.MP_PLAN_BASICO, 'basico'],
-    [process.env.MP_PLAN_ESSENCIAL, 'essencial'],
-    [process.env.MP_PLAN_PRO, 'pro'],
-    [process.env.MP_PLAN_MASTER, 'master'],
+    [process.env.MP_PLAN_BASICO?.trim(), 'basico'],
+    [process.env.MP_PLAN_ESSENCIAL?.trim(), 'essencial'],
+    [process.env.MP_PLAN_PRO?.trim(), 'pro'],
+    [process.env.MP_PLAN_MASTER?.trim(), 'master'],
   ];
   return plans.find(([configuredId]) => configuredId === planId)?.[1] || null;
 }
 
 export function verifyMercadoPagoSignature(request: Request, dataId: string): boolean {
-  const secret = process.env.MP_WEBHOOK_SECRET;
+  const secret = process.env.MP_WEBHOOK_SECRET?.trim();
   if (!secret) {
     console.error('[Mercado Pago] MP_WEBHOOK_SECRET não configurado.');
     return false;

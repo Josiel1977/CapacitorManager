@@ -6,10 +6,10 @@ import { isPlanId, type PlanId, PLANS } from '@/lib/plans';
 import { enforceRateLimit } from '@/lib/server/rate-limit';
 
 const planMap: Record<PlanId, string | undefined> = {
-  basico: process.env.MP_PLAN_BASICO,
-  essencial: process.env.MP_PLAN_ESSENCIAL,
-  pro: process.env.MP_PLAN_PRO,
-  master: process.env.MP_PLAN_MASTER,
+  basico: process.env.MP_PLAN_BASICO?.trim(),
+  essencial: process.env.MP_PLAN_ESSENCIAL?.trim(),
+  pro: process.env.MP_PLAN_PRO?.trim(),
+  master: process.env.MP_PLAN_MASTER?.trim(),
 };
 
 export const runtime = 'nodejs';
@@ -60,8 +60,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Já existe uma assinatura ativa. Contate o suporte para alterar o plano.' }, { status: 409 });
     }
 
-    const accessToken = process.env.MP_ACCESS_TOKEN || process.env.MERCADO_PAGO_ACCESS_TOKEN;
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+    const accessToken = (process.env.MP_ACCESS_TOKEN || process.env.MERCADO_PAGO_ACCESS_TOKEN)?.trim();
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
     if (!accessToken || !appUrl) return NextResponse.json({ error: 'Cobrança temporariamente indisponível' }, { status: 503 });
 
     const mpResponse = await fetch('https://api.mercadopago.com/preapproval', {

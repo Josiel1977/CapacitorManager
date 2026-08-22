@@ -30,18 +30,21 @@ const requestAddress = (request: Request) =>
   || "unknown";
 
 export function requestActorHash(request: Request, userId?: string | null): string {
-  const salt = process.env.RATE_LIMIT_SALT;
+  const salt = process.env.RATE_LIMIT_SALT?.trim();
   if (!salt || salt.length < 32) throw new Error('RATE_LIMIT_SALT deve ter pelo menos 32 caracteres.');
   const actor = userId ? `user:${userId}` : `ip:${requestAddress(request)}`;
   return createHash("sha256").update(`${salt}:${actor}`).digest("hex");
 }
 
 export async function enforceRateLimit(options: RateLimitOptions): Promise<boolean> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const adminKey = (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)?.trim();
+  const salt = process.env.RATE_LIMIT_SALT?.trim();
   const hasServerConfiguration = Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL
-    && (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)
-    && process.env.RATE_LIMIT_SALT
-    && process.env.RATE_LIMIT_SALT.length >= 32,
+    supabaseUrl
+    && adminKey
+    && salt
+    && salt.length >= 32,
   );
 
   // O teste local não deve exigir credenciais administrativas de produção.

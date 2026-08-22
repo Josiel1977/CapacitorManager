@@ -15,11 +15,11 @@ export async function POST(request: NextRequest) {
   const email = typeof formData.get('email') === 'string'
     ? String(formData.get('email')).trim().toLowerCase()
     : '';
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
   const appUrl = process.env.NODE_ENV === 'development'
     ? request.nextUrl.origin
-    : process.env.NEXT_PUBLIC_APP_URL;
+    : process.env.NEXT_PUBLIC_APP_URL?.trim();
 
   if (email && supabaseUrl && supabaseAnonKey && appUrl) {
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
