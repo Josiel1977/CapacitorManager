@@ -118,6 +118,15 @@ set billing_exempt = true,
     updated_at = now()
 where id = '11111111-1111-1111-1111-111111111111'::uuid;
 
+-- A restrição antiga aceitava apenas admin/cliente/user e impediria a
+-- promoção controlada do administrador da plataforma.
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role in (
+    'platform_admin', 'admin', 'cliente', 'user',
+    'tecnico', 'visualizador', 'financeiro'
+  ));
+
 update public.profiles
 set role = case
       when email = 'suporte@capacitormanager.com.br' then 'platform_admin'
@@ -125,6 +134,13 @@ set role = case
     end,
     subscription_status = 'active'
 where tenant_id = '11111111-1111-1111-1111-111111111111'::uuid;
+
+-- O diagnóstico encontrou a configuração histórica "global" sem tenant.
+-- Ela pertence à operação interna já existente; nenhuma linha é apagada.
+update public.configuracoes
+set tenant_id = '11111111-1111-1111-1111-111111111111'::uuid,
+    updated_at = now()
+where tenant_id is null;
 
 -- Acesso operacional: leitura isolada; escrita condicionada ao pagamento.
 do $$
