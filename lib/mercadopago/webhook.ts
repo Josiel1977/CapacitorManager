@@ -81,11 +81,15 @@ async function registerEvent(eventKey: string, payload: WebhookPayload): Promise
   if (error.code === '23505') {
     const { data: existing, error: readError } = await supabase
       .from('payment_webhook_events')
-      .select('status, attempt_count')
+      .select('status, attempt_count, updated_at')
       .eq('event_key', eventKey)
       .single();
     if (readError) throw readError;
-    if (existing.status !== 'failed') return 'duplicate';
+    const staleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const isStaleProcessing = existing.status === 'processing'
+      && typeof existing.updated_at === 'string'
+      && existing.updated_at < staleBefore;
+    if (existing.status !== 'failed' && !isStaleProcessing) return 'duplicate';
     const { data: claimed, error: retryError } = await supabase
       .from('payment_webhook_events')
       .update({
@@ -95,7 +99,8 @@ async function registerEvent(eventKey: string, payload: WebhookPayload): Promise
         updated_at: new Date().toISOString(),
       })
       .eq('event_key', eventKey)
-      .eq('status', 'failed')
+      .eq('status', existing.status)
+      .eq('updated_at', existing.updated_at)
       .select('id')
       .maybeSingle();
     if (retryError) throw retryError;
@@ -192,11 +197,21 @@ export async function processMercadoPagoWebhook(request: Request): Promise<Respo
         await updateSubscriptionState(subscription, status);
       }
     } else if (payload.type === 'subscription_payment_failed' || payload.type === 'subscription_cancelled') {
-      const { error } = await getSupabaseAdmin()
+      const supabase = getSupabaseAdmin();
+      const paymentStatus = payload.type === 'subscription_cancelled' ? 'cancelled' : 'past_due';
+      const { data: tenant, error } = await supabase
         .from('tenants')
-        .update({ payment_status: 'past_due', updated_at: new Date().toISOString() })
-        .eq('mp_subscription_id', dataId);
+        .update({ payment_status: paymentStatus, updated_at: new Date().toISOString() })
+        .eq('mp_subscription_id', dataId)
+        .select('id')
+        .maybeSingle();
       if (error) throw error;
+      if (!tenant) throw new Error('Assinatura não corresponde à empresa registrada.');
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ subscription_status: paymentStatus })
+        .eq('tenant_id', tenant.id);
+      if (profileError) throw profileError;
     }
 
     await finishEvent(eventKey, 'processed');

@@ -19,7 +19,7 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const text = (value: unknown, max: number) =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
 
-const escapeHtml = (value: string) => value.replace(/[&<>"]+/g, (character) => ({
+const escapeHtml = (value: string) => value.replace(/[&<>"]/g, (character) => ({
   "&": "&amp;",
   "<": "&lt;",
   ">": "&gt;",

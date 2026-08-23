@@ -41,27 +41,21 @@ export async function proxy(request: NextRequest) {
   // assimétricas, a validação usa JWKS em cache e evita uma chamada remota ao
   // Auth em cada navegação protegida.
   let userId: string | null = null;
-  let authAvailable = true;
   try {
     const result = await withTimeout(
       supabase.auth.getClaims(),
       8_000,
       'Tempo limite ao validar a sessão.',
     );
-    userId = typeof result.data?.claims?.sub === 'string'
+    userId = !result.error && typeof result.data?.claims?.sub === 'string'
       ? result.data.claims.sub
       : null;
-    if (result.error) authAvailable = false;
   } catch (error) {
-    authAvailable = false;
     console.error('[Proxy] Serviço de autenticação indisponível.', error);
+    return new NextResponse('Autenticação temporariamente indisponível', { status: 503 });
   }
 
   const isConfirmationRoute = request.nextUrl.pathname.startsWith('/subscription/success');
-
-  if (isProtectedRoute && !authAvailable) {
-    return new NextResponse('Autenticação temporariamente indisponível', { status: 503 });
-  }
 
   if (isProtectedRoute && !userId) {
     const loginUrl = new URL('/login', request.url);
@@ -75,7 +69,7 @@ export async function proxy(request: NextRequest) {
       const result = await withTimeout(
         supabase
           .from('profiles')
-          .select('role, subscription_status')
+          .select('role, subscription_status, tenant_id')
           .eq('id', userId)
           .maybeSingle(),
         8_000,
@@ -91,10 +85,30 @@ export async function proxy(request: NextRequest) {
     if (!profile) {
       return NextResponse.redirect(new URL('/planos?status=perfil-pendente', request.url));
     }
-    if (request.nextUrl.pathname.startsWith('/admin') && profile.role !== 'admin') {
+    if (request.nextUrl.pathname.startsWith('/admin') && profile.role !== 'platform_admin') {
       return NextResponse.redirect(new URL('/dashboard-real', request.url));
     }
-    if (profile.role !== 'admin' && profile.subscription_status !== 'active' && !isConfirmationRoute) {
+    if (!profile.tenant_id) {
+      return NextResponse.redirect(new URL('/planos?status=perfil-pendente', request.url));
+    }
+
+    const { data: tenant, error: tenantError } = await supabase
+      .from('tenants')
+      .select('payment_status')
+      .eq('id', profile.tenant_id)
+      .maybeSingle();
+    if (tenantError) {
+      console.error('[Proxy] Não foi possível validar a empresa.', tenantError);
+      return new NextResponse('Autenticação temporariamente indisponível', { status: 503 });
+    }
+
+    const readableStatuses = ['trial', 'active', 'past_due', 'grace', 'suspended', 'cancelled', 'internal'];
+    // Compatível com o banco anterior à migração RC23: a JM já é conhecida
+    // como tenant interno, enquanto a migração passará a persistir "internal".
+    const paymentStatus = profile.tenant_id === '11111111-1111-1111-1111-111111111111'
+      ? 'internal'
+      : tenant?.payment_status;
+    if (!paymentStatus || (!readableStatuses.includes(paymentStatus) && !isConfirmationRoute)) {
       return NextResponse.redirect(new URL('/planos?status=assinatura-pendente', request.url));
     }
   }
