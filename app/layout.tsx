@@ -5,7 +5,7 @@ import { AuthProvider } from '@/lib/AuthContext';
 import AppShell from '@/components/AppShell';
 
 const inter = Inter({ 
-  subsets: ['latin'], 
+  subsets: ['latin'],
   variable: '--font-sans',
   display: 'swap',
 });
@@ -55,7 +55,7 @@ export const metadata: Metadata = {
     canonical: 'https://www.capacitormanager.com.br',
   },
   icons: {
-    icon: '/favicon.ico',
+    icon: '/icon.svg',
   },
 };
 
