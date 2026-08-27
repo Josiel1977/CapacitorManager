@@ -39,6 +39,7 @@ test('analisador PDF carrega o worker e mantém dependências externas no servid
   const route = source('app/api/capacitormanager/auditar-fatura/route.ts');
   const nextConfig = source('next.config.ts');
   const demo = source('app/demo/page.tsx');
+  const rateLimitMigration = source('supabase/migrations/202608270001_restore_api_rate_limit.sql');
 
   assert.match(route, /import\s+["']pdf-parse\/worker["'];/);
   assert.match(route, /process\.env\.VERCEL_ENV === ["']preview["']/);
@@ -47,4 +48,6 @@ test('analisador PDF carrega o worker e mantém dependências externas no servid
   assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*["']@napi-rs\/canvas["']/s);
   assert.match(demo, /allowLocalFallback = response\.status >= 500/);
   assert.match(demo, /if \(!allowLocalFallback && !isTransportFailure\) throw serverError/);
+  assert.match(rateLimitMigration, /create or replace function public\.consume_api_rate_limit/);
+  assert.match(rateLimitMigration, /notify pgrst, 'reload schema'/);
 });
