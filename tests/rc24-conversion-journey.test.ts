@@ -33,6 +33,7 @@ test('demonstração começa pela fatura e não oferece destravamento artificial
 test('páginas públicas não anunciam materiais inexistentes', () => {
   const guide = source('app/como-usar/page.tsx');
   const help = source('app/ajuda/page.tsx');
+  assert.match(guide, /mx-auto max-w-7xl space-y-8 px-4/);
   assert.doesNotMatch(guide, /Em breve: tutorial completo em vídeo/);
   assert.doesNotMatch(guide, /guia-capacitormanager\.pdf/);
   assert.doesNotMatch(help, /Em breve: mais vídeos/);
@@ -43,6 +44,8 @@ test('piloto assistido é a opção inicial e relatório é identificado como de
   const report = source('app/relatorio-exemplo/page.tsx');
   assert.match(contact, /plano_interesse: 'piloto'/);
   assert.match(contact, /Piloto Assistido/);
+  assert.match(contact, /diretamente ao responsável técnico/);
+  assert.doesNotMatch(contact, /Nossa equipe/);
   assert.match(report, /Cenário demonstrativo com dados fictícios/);
   assert.match(report, /Aplicar aos meus dados/);
 });

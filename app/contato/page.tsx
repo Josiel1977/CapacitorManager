@@ -54,7 +54,7 @@ export default function ContatoPage() {
           html: `
             <div class="text-left">
               <p>✅ Recebemos sua solicitação!</p>
-              <p class="text-sm text-slate-500 mt-2">Entraremos em contato em até 24h úteis.</p>
+              <p class="text-sm text-slate-500 mt-2">Você receberá retorno em até 1 dia útil.</p>
               <hr class="my-3">
               <p class="text-xs text-slate-400">Enquanto isso, explore a <a href="/demo" class="text-primary">Demonstração Gratuita</a></p>
             </div>
@@ -263,19 +263,19 @@ export default function ContatoPage() {
             <div className="space-y-3 text-sm">
               <div className="flex gap-2">
                 <ArrowRight size={14} className="text-secondary mt-0.5" />
-                <span>Nossa equipe analisa sua solicitação</span>
+                <span>A solicitação chega diretamente ao responsável técnico</span>
               </div>
               <div className="flex gap-2">
                 <ArrowRight size={14} className="text-secondary mt-0.5" />
-                <span>Agendamos uma demonstração personalizada</span>
+                <span>Alinhamos o problema e os dados disponíveis</span>
               </div>
               <div className="flex gap-2">
                 <ArrowRight size={14} className="text-secondary mt-0.5" />
-                <span>Você testa o sistema com seus dados</span>
+                <span>Executamos o primeiro diagnóstico com você</span>
               </div>
               <div className="flex gap-2">
                 <ArrowRight size={14} className="text-secondary mt-0.5" />
-                <span>Definimos o melhor plano para você</span>
+                <span>Só então avaliamos se algum plano faz sentido</span>
               </div>
             </div>
           </div>

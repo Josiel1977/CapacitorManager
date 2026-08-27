@@ -148,7 +148,7 @@ export default function ComoUsarPage() {
   ];
 
   return (
-    <div className="space-y-8 pb-12">
+    <div className="mx-auto max-w-7xl space-y-8 px-4 pb-12 sm:px-6 lg:px-8">
       {/* Header */}
       <header>
         <div className="flex items-center gap-3 mb-4">
