@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { motion } from 'motion/react';
 import { 
-  BookOpen, ChevronRight, Play, FileText, Download,
-  Users, Database, Zap, ClipboardCheck, TrendingUp,
-  Settings, HelpCircle, CheckCircle2, AlertTriangle, XCircle,
-  Video, Star, ArrowRight
+  BookOpen, ChevronRight, FileSearch, FileText,
+  Users, ClipboardCheck, TrendingUp,
+  CheckCircle2, AlertTriangle, XCircle, ArrowRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -158,19 +158,22 @@ export default function ComoUsarPage() {
         <p className="text-slate-500">Guia completo do CapacitorManager</p>
       </header>
 
-      {/* Video Tutorial */}
-      <div className="bg-gradient-to-r from-primary/5 to-secondary/5 rounded-2xl p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <Video size={24} className="text-primary" />
-          <h2 className="text-xl font-bold text-primary">Vídeo Tutorial</h2>
-        </div>
-        <div className="aspect-video bg-slate-200 rounded-xl flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-16 h-16 bg-primary rounded-full flex items-center justify-center mx-auto mb-3 cursor-pointer hover:bg-primary/90 transition-colors">
-              <Play size={32} className="text-white ml-1" />
-            </div>
-            <p className="text-slate-500">Em breve: tutorial completo em vídeo</p>
+      {/* Entrada guiada */}
+      <div className="grid gap-4 rounded-2xl bg-gradient-to-r from-primary/5 to-secondary/5 p-6 sm:grid-cols-2">
+        <div>
+          <div className="flex items-center gap-3 mb-3">
+            <FileSearch size={24} className="text-primary" />
+            <h2 className="text-xl font-bold text-primary">Comece por um resultado</h2>
           </div>
+          <p className="text-sm leading-6 text-slate-600">Antes de cadastrar toda a estrutura, envie uma fatura ou simule uma medição. Você entenderá a saída da ferramenta sem criar conta.</p>
+        </div>
+        <div className="flex flex-col justify-center gap-2 sm:items-end">
+          <Link href="/demo" className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-3 font-bold text-white">
+            Fazer diagnóstico grátis <ArrowRight size={17} />
+          </Link>
+          <Link href="/relatorio-exemplo" className="inline-flex items-center justify-center gap-2 rounded-lg border border-primary/20 bg-white px-5 py-3 font-bold text-primary">
+            Ver relatório de exemplo
+          </Link>
         </div>
       </div>
 
@@ -209,20 +212,15 @@ export default function ComoUsarPage() {
         </div>
       </div>
 
-      {/* Download Guia PDF */}
+      {/* Orientação assistida */}
       <div className="bg-slate-50 rounded-2xl p-6 text-center border border-slate-200">
         <FileText size={32} className="mx-auto text-primary mb-3" />
-        <h3 className="font-bold text-primary mb-2">Guia em PDF</h3>
-        <p className="text-sm text-slate-500 mb-4">Baixe o guia completo para consultar offline</p>
-        <button 
-          onClick={() => window.open('/guia-capacitormanager.pdf', '_blank')}
-          className="inline-flex items-center gap-2 bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition-colors"
-        >
-          <Download size={18} />
-          Download PDF
-        </button>
+        <h3 className="font-bold text-primary mb-2">Prefere configurar acompanhado?</h3>
+        <p className="text-sm text-slate-500 mb-4">No piloto assistido, organizamos com você a primeira fatura, o primeiro cliente e o primeiro banco.</p>
+        <Link href="/contato" className="inline-flex items-center gap-2 bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition-colors">
+          Solicitar piloto assistido <ArrowRight size={18} />
+        </Link>
       </div>
     </div>
   );
 }
-

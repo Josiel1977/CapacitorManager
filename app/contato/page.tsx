@@ -18,13 +18,13 @@ export default function ContatoPage() {
     empresa: '',
     cargo: '',
     mensagem: '',
-    plano_interesse: 'essencial'
+    plano_interesse: 'piloto'
   });
   const [submitting, setSubmitting] = useState(false);
   const [aceitePrivacidade, setAceitePrivacidade] = useState(false);
 
   const planos = [
-    { id: 'demo', nome: 'Demo Gratuita', preco: 'Grátis', descricao: 'Acesso limitado para teste' },
+    { id: 'piloto', nome: 'Piloto Assistido', preco: 'Sem compromisso', descricao: 'Primeiro diagnóstico com seus dados' },
     { id: 'essencial', nome: 'Plano Essencial', preco: 'R$ 297/mês', descricao: '5 clientes, 10 bancos, 50 capacitores' },
     { id: 'pro', nome: 'Plano Pro', preco: 'R$ 597/mês', descricao: '20 clientes, 20 bancos, 200 capacitores' },
     { id: 'master', nome: 'Plano Master', preco: 'R$ 797/mês', descricao: '50 clientes, 100 bancos, 600 capacitores' }
@@ -64,7 +64,7 @@ export default function ContatoPage() {
         });
         
         setFormData({
-          nome: '', email: '', telefone: '', empresa: '', cargo: '', mensagem: '', plano_interesse: 'essencial'
+          nome: '', email: '', telefone: '', empresa: '', cargo: '', mensagem: '', plano_interesse: 'piloto'
         });
         setAceitePrivacidade(false);
       } else {
@@ -89,13 +89,13 @@ export default function ContatoPage() {
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-4">
             <Star size={28} className="text-secondary" />
-            <span className="text-sm font-medium text-white/80">Solicite sua Demonstração</span>
+            <span className="text-sm font-medium text-white/80">Piloto assistido com seus dados</span>
           </div>
           <h1 className="mb-4 text-4xl font-bold leading-tight md:text-5xl">
-            Comece sua <span className="text-secondary">jornada</span> com o CapacitorManager
+            Veja o CapacitorManager resolver um <span className="text-secondary">problema real</span>
           </h1>
           <p className="text-lg text-white/80 md:text-xl max-w-2xl">
-            Preencha o formulário e nossa equipe entrará em contato para agendar uma demonstração personalizada.
+            Comece com uma fatura, uma unidade ou um banco de capacitores. A primeira conversa é técnica e sem compromisso comercial.
           </p>
         </div>
       </motion.section>
@@ -104,7 +104,7 @@ export default function ContatoPage() {
         {/* Formulário */}
         <div className="lg:col-span-2">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-            <h2 className="text-xl font-bold text-primary mb-6">📋 Solicitar Acesso</h2>
+            <h2 className="text-xl font-bold text-primary mb-6">📋 Solicitar piloto assistido</h2>
             
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -212,7 +212,7 @@ export default function ContatoPage() {
                 ) : (
                   <>
                     <Send size={18} />
-                    Enviar Solicitação
+                    Quero analisar meu primeiro caso
                   </>
                 )}
               </button>

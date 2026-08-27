@@ -4,9 +4,9 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { 
   HelpCircle, Search, ChevronDown, ChevronUp, Mail, 
-  MessageCircle, FileText, Video, BookOpen, Star, 
-  CheckCircle, AlertCircle, Zap, Settings, Users, Database,
-  Play, ExternalLink, Shield, FileSignature
+  MessageCircle, FileText, BookOpen,
+  Zap, Settings, Users, Database,
+  ExternalLink, ClipboardCheck
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -22,7 +22,7 @@ const faqs = [
   },
   {
     question: "Como funciona o período de teste?",
-    answer: "A demonstração pública permite testar recursos limitados. A conta comercial é ativada após a confirmação do pagamento do plano escolhido."
+    answer: "A demonstração pública permite auditar uma fatura ou simular uma medição sem cadastro. Você também pode solicitar um piloto assistido com seus dados antes de escolher um plano."
   },
   {
     question: "Quais normas técnicas são utilizadas?",
@@ -53,11 +53,11 @@ const categorias = [
   { nome: "Configurações", icone: Settings, slug: "configuracoes", desc: "Ajustes, limites e personalização." },
 ];
 
-const tutoriais = [
-  { titulo: "Como cadastrar um cliente", duracao: "3min", icone: Users },
-  { titulo: "Realizando sua primeira medição", duracao: "5min", icone: Zap },
-  { titulo: "Exportando relatórios profissionais", duracao: "2min", icone: FileText },
-  { titulo: "Configurando limites de aprovação", duracao: "4min", icone: Settings },
+const atalhos = [
+  { titulo: "Auditar uma fatura sem cadastro", descricao: "Comece pelo seu próprio documento", icone: FileText, href: '/demo' },
+  { titulo: "Entender o fluxo completo", descricao: "Clientes, bancos e medições", icone: BookOpen, href: '/como-usar' },
+  { titulo: "Ver um relatório de exemplo", descricao: "Conheça a estrutura da entrega", icone: ClipboardCheck, href: '/relatorio-exemplo' },
+  { titulo: "Configurar o primeiro caso acompanhado", descricao: "Solicite o piloto assistido", icone: Settings, href: '/contato' },
 ];
 
 export default function AjudaPage() {
@@ -104,7 +104,7 @@ export default function AjudaPage() {
       {/* Categorias com links (simulando páginas internas) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {categorias.map((cat, idx) => (
-          <Link key={cat.nome} href="/documentacao" className="group">
+          <Link key={cat.nome} href="/como-usar" className="group">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -124,29 +124,26 @@ export default function AjudaPage() {
         ))}
       </div>
 
-      {/* Vídeos tutoriais */}
+      {/* Atalhos práticos */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
         <h2 className="text-xl font-bold text-primary mb-4 flex items-center gap-2">
-          <Video size={20} />
-          Vídeos Tutoriais
+          <BookOpen size={20} />
+          Atalhos práticos
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {tutoriais.map((video, idx) => (
-            <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
+          {atalhos.map((item) => (
+            <Link key={item.href} href={item.href} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                <video.icone size={20} />
+                <item.icone size={20} />
               </div>
               <div className="flex-1">
-                <p className="font-medium text-sm">{video.titulo}</p>
-                <p className="text-xs text-slate-400">{video.duracao}</p>
+                <p className="font-medium text-sm">{item.titulo}</p>
+                <p className="text-xs text-slate-400">{item.descricao}</p>
               </div>
-              <Play size={16} className="text-primary cursor-pointer" />
-            </div>
+              <ExternalLink size={16} className="text-primary" />
+            </Link>
           ))}
         </div>
-        <p className="text-xs text-slate-400 text-center mt-4">
-          Em breve: mais vídeos no nosso canal do YouTube.
-        </p>
       </div>
 
       {/* FAQ */}

@@ -1,10 +1,8 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
-import Sidebar from '@/components/Sidebar';
-import BackToTopButton from '@/components/BackToTopButton';
 import { AuthProvider } from '@/lib/AuthContext';
-import ChatAssistant from '@/components/ChatAssistant';
+import AppShell from '@/components/AppShell';
 
 const inter = Inter({ 
   subsets: ['latin'], 
@@ -24,7 +22,7 @@ export const metadata: Metadata = {
     template: '%s | CapacitorManager',
     default: 'CapacitorManager - Gestão Inteligente de Capacitores',
   },
-  description: 'Sistema profissional para gestão, monitoramento e manutenção preditiva de bancos de capacitores.',
+  description: 'Audite faturas, valide bancos de capacitores e transforme medições em decisões técnicas e relatórios profissionais.',
   keywords: 'capacitores, banco de capacitores, gestão de energia, manutenção preditiva, fator de potência',
   authors: [{ name: 'CapacitorManager' }],
   creator: 'CapacitorManager',
@@ -42,7 +40,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: 'CapacitorManager - Gestão Inteligente de Capacitores',
-    description: 'Monitore, valide e otimize seus bancos de capacitores.',
+    description: 'Descubra se seus bancos de capacitores estão economizando ou gerando multas. Teste com uma fatura, sem cadastro.',
     url: 'https://www.capacitormanager.com.br',
     siteName: 'CapacitorManager',
     locale: 'pt_BR',
@@ -51,7 +49,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'CapacitorManager - Gestão Inteligente de Capacitores',
-    description: 'Sistema profissional para gestão de bancos de capacitores.',
+    description: 'Auditoria de faturas, validação de capacitores e gestão técnica em uma única plataforma.',
   },
   alternates: {
     canonical: 'https://www.capacitormanager.com.br',
@@ -64,14 +62,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR" className={`${inter.variable}`} suppressHydrationWarning>
-      <body suppressHydrationWarning className="flex min-h-screen bg-slate-50 antialiased">
+      <body suppressHydrationWarning className="min-h-screen bg-slate-50 antialiased">
         <AuthProvider>
-          <Sidebar />
-          <main className="flex-1 overflow-y-auto p-4 md:p-8">
-            {children}
-          </main>
-          <BackToTopButton />
-          <ChatAssistant />
+          <AppShell>{children}</AppShell>
         </AuthProvider>
       </body>
     </html>
