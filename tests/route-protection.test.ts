@@ -6,6 +6,8 @@ test('login, cadastro e demonstração permanecem públicos', () => {
   assert.equal(isProtectedPath('/login'), false);
   assert.equal(isProtectedPath('/signup'), false);
   assert.equal(isProtectedPath('/demo'), false);
+  assert.equal(isProtectedPath('/contato'), false);
+  assert.equal(isProtectedPath('/relatorio-exemplo'), false);
   assert.equal(isProtectedPath('/'), false);
 });
 

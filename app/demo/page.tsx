@@ -48,7 +48,7 @@ async function analyzeInvoiceLocally(file: File): Promise<InvoiceAuditResult> {
 
 export default function DemoPage() {
   const router = useRouter();
-  const [modoDemo, setModoDemo] = useState<'capacitor' | 'fatura'>('capacitor');
+  const [modoDemo, setModoDemo] = useState<'capacitor' | 'fatura'>('fatura');
   const [tipoTeste, setTipoTeste] = useState<'corrente' | 'capacitancia'>('corrente');
   const [valorMedido, setValorMedido] = useState('');
   const [tensaoMedida, setTensaoMedida] = useState('480');
@@ -103,16 +103,6 @@ export default function DemoPage() {
     const count = stored ? parseInt(stored) : 0;
     setTestesRealizados(count);
     setBloqueado(count >= 2);
-  }
-
-  function resetarTestesGeral() {
-    sessionStorage.removeItem('demo_testes');
-    setTestesRealizados(0);
-    setBloqueado(false);
-    setResultado(null);
-    setResultadoFatura(null);
-    setArquivoFatura(null);
-    Swal.fire('Testes Liberados!', 'O contador de testes foi resetado com sucesso.', 'success');
   }
 
   function incrementarContador() {
@@ -396,9 +386,9 @@ export default function DemoPage() {
             Experimente o <span className="text-secondary">CapacitorManager</span>
           </h1>
           <p className="text-lg text-white/80 md:text-xl max-w-2xl">
-            Simule a validação de capacitores ou extraia os dados identificáveis de uma fatura para visualizar cobranças por reativo.
+            Envie uma fatura para identificar cobranças por reativo ou simule a validação de um capacitor. Nenhum cadastro é necessário.
             {!bloqueado ? (
-              <strong className="text-secondary"> {testesRestantes} teste(s) restante(s)</strong>
+              <strong className="text-secondary"> {testesRestantes} análise(s) gratuita(s) neste acesso.</strong>
             ) : (
               <strong className="text-secondary"> Testes concluídos! Assine o plano para continuar.</strong>
             )}
@@ -406,39 +396,32 @@ export default function DemoPage() {
         </div>
       </motion.section>
 
-      {/* Seletor de Modo e Botão de Destravamento de Teste */}
-      <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+      {/* Seletor de modo */}
+      <div className="flex justify-center">
         <div className="flex gap-4">
-          <button
-            onClick={() => { setModoDemo('capacitor'); setResultado(null); }}
-            className={cn(
-              "px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 shadow-sm",
-              modoDemo === 'capacitor' 
-                ? "bg-primary text-white shadow-md scale-105" 
-                : "bg-white text-slate-600 hover:bg-slate-50 border border-slate-200"
-            )}
-          >
-            <Zap size={18} /> Simulador de Capacitores
-          </button>
           <button
             onClick={() => { setModoDemo('fatura'); setResultadoFatura(null); }}
             className={cn(
               "px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 shadow-sm",
-              modoDemo === 'fatura' 
+              modoDemo === 'fatura'
                 ? "bg-primary text-white shadow-md scale-105" 
                 : "bg-white text-slate-600 hover:bg-slate-50 border border-slate-200"
             )}
           >
             <BarChart2 size={18} /> Auditoria de Fatura
           </button>
+          <button
+            onClick={() => { setModoDemo('capacitor'); setResultado(null); }}
+            className={cn(
+              "px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 shadow-sm",
+              modoDemo === 'capacitor'
+                ? "bg-primary text-white shadow-md scale-105" 
+                : "bg-white text-slate-600 hover:bg-slate-50 border border-slate-200"
+            )}
+          >
+            <Zap size={18} /> Simulador de Capacitores
+          </button>
         </div>
-        <button
-          onClick={resetarTestesGeral}
-          title="Clique para reiniciar os testes de demonstração"
-          className="px-4 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition-colors"
-        >
-          <RefreshCw size={14} /> Resetar Testes (Destravar)
-        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
