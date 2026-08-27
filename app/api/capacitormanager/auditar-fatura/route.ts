@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import 'pdf-parse/worker';
 import { PDFParse } from 'pdf-parse';
 import { parseEquatorialInvoiceText } from '@/lib/equatorial-invoice-parser';
 import { buildInvoiceAuditResult } from '@/lib/invoice-audit-result';
