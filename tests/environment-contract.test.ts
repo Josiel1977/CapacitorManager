@@ -41,6 +41,8 @@ test('analisador PDF carrega o worker e mantém dependências externas no servid
   const demo = source('app/demo/page.tsx');
 
   assert.match(route, /import\s+["']pdf-parse\/worker["'];/);
+  assert.match(route, /process\.env\.VERCEL_ENV === ["']preview["']/);
+  assert.match(route, /invoice-audit-preview/);
   assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*["']pdf-parse["']/s);
   assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*["']@napi-rs\/canvas["']/s);
   assert.match(demo, /allowLocalFallback = response\.status >= 500/);
