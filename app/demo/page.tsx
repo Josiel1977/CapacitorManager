@@ -195,20 +195,31 @@ export default function DemoPage() {
       const formData = new FormData();
       formData.append('fatura', arquivoFatura);
       let auditResult: InvoiceAuditResult;
+      let allowLocalFallback = false;
       try {
         const response = await fetch('/api/capacitormanager/auditar-fatura', {
           method: 'POST',
           body: formData,
           signal: AbortSignal.timeout(35_000),
         });
+        allowLocalFallback = response.status >= 500;
         const body = await readJsonResponse<{ data: InvoiceAuditResult }>(
           response,
           'Não foi possível analisar a fatura.',
         );
         auditResult = body.data;
       } catch (serverError) {
-        if (process.env.NODE_ENV === 'production') throw serverError;
-        auditResult = await analyzeInvoiceLocally(arquivoFatura);
+        const isTransportFailure = serverError instanceof TypeError
+          || (serverError instanceof DOMException && serverError.name === 'TimeoutError');
+        if (!allowLocalFallback && !isTransportFailure) throw serverError;
+
+        try {
+          // Contingência para indisponibilidade da função serverless: o PDF é
+          // interpretado no próprio navegador e não precisa ser reenviado.
+          auditResult = await analyzeInvoiceLocally(arquivoFatura);
+        } catch {
+          throw serverError;
+        }
       }
       setResultadoFatura(auditResult);
       incrementarContador();
