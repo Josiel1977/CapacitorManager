@@ -34,3 +34,15 @@ test('laudo protegido usa a sessão do servidor em vez de cliente anônimo', () 
   assert.match(laudo, /await createClient\(\)/);
   assert.doesNotMatch(laudo, /process\.env\.NEXT_PUBLIC_SUPABASE/);
 });
+
+test('analisador PDF carrega o worker e mantém dependências externas no servidor', () => {
+  const route = source('app/api/capacitormanager/auditar-fatura/route.ts');
+  const nextConfig = source('next.config.ts');
+  const demo = source('app/demo/page.tsx');
+
+  assert.match(route, /import\s+["']pdf-parse\/worker["'];/);
+  assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*["']pdf-parse["']/s);
+  assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*["']@napi-rs\/canvas["']/s);
+  assert.match(demo, /allowLocalFallback = response\.status >= 500/);
+  assert.match(demo, /if \(!allowLocalFallback && !isTransportFailure\) throw serverError/);
+});
