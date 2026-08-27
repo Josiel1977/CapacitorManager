@@ -21,8 +21,9 @@ export function useSubscriptionGuard(redirectTo: string = '/planos') {
         return;
       }
 
-      // ADMIN: acesso total, sem verificar assinatura
-      if (profile.role === 'admin') {
+      // Somente a administração da plataforma é isenta deste bloqueio.
+      // Administradores de tenant continuam sujeitos ao estado da assinatura.
+      if (profile.role === 'platform_admin') {
         return; // permite acesso
       }
 

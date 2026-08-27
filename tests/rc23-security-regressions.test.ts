@@ -27,6 +27,33 @@ test('tenant interno JM permanece isolado e dispensado da cobrança', () => {
   assert.match(migration, /11111111-1111-1111-1111-111111111111/);
   assert.match(migration, /billing_exempt = true/);
   assert.match(migration, /payment_status = 'internal'/);
+  assert.match(migration, /set id = '11111111-1111-1111-1111-111111111111'/);
+  assert.match(migration, /alter column tenant_id set not null/);
+});
+
+test('profiles e tabelas operacionais não mantêm políticas públicas legadas', () => {
+  const migration = source('supabase/migrations/202608230001_strict_tenant_access.sql');
+  assert.match(migration, /alter table public\.profiles enable row level security/);
+  assert.match(migration, /revoke all privileges on table public\.profiles from anon/);
+  assert.match(migration, /profiles_own_select[\s\S]*?to authenticated/);
+  assert.match(migration, /for select to authenticated using \(public\.can_read_tenant\(tenant_id\)\)/);
+  assert.doesNotMatch(migration, /using \(true\)|with check \(true\)/i);
+});
+
+test('medições carregam tolerâncias pela empresa autenticada', () => {
+  const measurements = source('app/medicoes/page.tsx');
+  assert.match(measurements, /\.eq\('tenant_id', userTenantId\)/);
+  assert.doesNotMatch(measurements, /\.eq\('id', 'global'\)/);
+});
+
+test('administrador de tenant não contorna cobrança ou recursos pagos', () => {
+  const subscription = source('app/api/subscription/status/route.ts');
+  const chat = source('app/api/chat/route.ts');
+  const guard = source('lib/useSubscriptionGuard.ts');
+  assert.doesNotMatch(subscription, /profile\.role === 'admin'/);
+  assert.match(subscription, /tenant\.billing_exempt/);
+  assert.match(chat, /profile\?\.role !== 'platform_admin'/);
+  assert.match(guard, /profile\.role === 'platform_admin'/);
 });
 
 test('webhook recupera processamento abandonado e sincroniza cancelamento', () => {

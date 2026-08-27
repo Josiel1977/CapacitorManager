@@ -20,7 +20,7 @@ export async function GET() {
 
   const { data: tenant, error: tenantError } = await getSupabaseAdmin()
     .from('tenants')
-    .select('payment_status, plano')
+    .select('payment_status, plano, billing_exempt')
     .eq('id', profile.tenant_id)
     .single();
   if (tenantError || !tenant) {
@@ -29,7 +29,8 @@ export async function GET() {
 
   return NextResponse.json(
     {
-      active: profile.role === 'admin' || tenant.payment_status === 'active',
+      active: tenant.billing_exempt
+        || ['trial', 'active', 'grace', 'internal'].includes(tenant.payment_status),
       status: tenant.payment_status || 'pending',
       plan: tenant.plano || null,
     },

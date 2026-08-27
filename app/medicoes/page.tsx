@@ -97,23 +97,24 @@ function ValidarCapacitoresContent() {
 
   const [resultado, setResultado] = useState<any>(null);
 
-  // Carrega configurações gerais
+  // Carrega as tolerâncias da empresa autenticada.
   useEffect(() => {
     async function fetchConfig() {
+      if (authLoading || !user || !userTenantId) return;
       try {
         const { data, error } = await supabase
           .from('configuracoes')
           .select('*')
-          .eq('id', 'global')
-          .single();
+          .eq('tenant_id', userTenantId)
+          .maybeSingle();
         if (error) throw error;
         if (data) setConfig(data);
       } catch (err) {
         console.error('Erro ao carregar config:', err);
       }
     }
-    fetchConfig();
-  }, []);
+    void fetchConfig();
+  }, [authLoading, user, userTenantId]);
 
   // Autenticação e tenant
   useEffect(() => {

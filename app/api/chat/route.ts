@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     if (!user) return Response.json({ error: 'Não autorizado' }, { status: 401 });
 
     const { data: profile } = await supabase.from('profiles').select('role, subscription_status').eq('id', user.id).maybeSingle();
-    if (profile?.role !== 'admin' && profile?.subscription_status !== 'active') {
+    if (profile?.role !== 'platform_admin' && profile?.subscription_status !== 'active') {
       return Response.json({ error: 'Recurso disponível para assinaturas ativas' }, { status: 403 });
     }
     const allowed = await enforceRateLimit({ endpoint: 'chat', request, userId: user.id, maxRequests: 30, windowSeconds: 3600 });

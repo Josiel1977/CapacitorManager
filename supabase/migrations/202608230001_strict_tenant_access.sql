@@ -107,9 +107,15 @@ as $$ select public.can_read_tenant(target_tenant_id); $$;
 revoke all on function public.has_active_support_grant(uuid) from public, anon;
 revoke all on function public.can_read_tenant(uuid) from public, anon;
 revoke all on function public.can_write_tenant(uuid) from public, anon;
+revoke all on function public.can_access_tenant(uuid) from public, anon;
+revoke all on function public.current_tenant_id() from public, anon;
+revoke all on function public.is_platform_admin() from public, anon;
 grant execute on function public.has_active_support_grant(uuid) to authenticated;
 grant execute on function public.can_read_tenant(uuid) to authenticated;
 grant execute on function public.can_write_tenant(uuid) to authenticated;
+grant execute on function public.can_access_tenant(uuid) to authenticated;
+grant execute on function public.current_tenant_id() to authenticated;
+grant execute on function public.is_platform_admin() to authenticated;
 
 -- A JM é operadora interna da plataforma e não depende de cobrança.
 update public.tenants
@@ -138,9 +144,24 @@ where tenant_id = '11111111-1111-1111-1111-111111111111'::uuid;
 -- O diagnóstico encontrou a configuração histórica "global" sem tenant.
 -- Ela pertence à operação interna já existente; nenhuma linha é apagada.
 update public.configuracoes
-set tenant_id = '11111111-1111-1111-1111-111111111111'::uuid,
+set id = '11111111-1111-1111-1111-111111111111',
+    tenant_id = '11111111-1111-1111-1111-111111111111'::uuid,
     updated_at = now()
-where tenant_id is null;
+where id = 'global' and tenant_id is null;
+
+update public.configuracoes
+set id = '11111111-1111-1111-1111-111111111111'
+where id = 'global'
+  and tenant_id = '11111111-1111-1111-1111-111111111111'::uuid;
+
+do $$
+begin
+  if exists (select 1 from public.configuracoes where tenant_id is null) then
+    raise exception 'Existem configurações sem tenant_id; atribua a empresa correta antes de continuar.';
+  end if;
+end $$;
+
+alter table public.configuracoes alter column tenant_id set not null;
 
 -- Acesso operacional: leitura isolada; escrita condicionada ao pagamento.
 do $$
@@ -160,25 +181,34 @@ begin
         execute format('drop policy if exists %I on public.%I', policy_row.policyname, table_name);
       end loop;
       execute format('alter table public.%I enable row level security', table_name);
-      execute format('create policy tenant_select on public.%I for select using (public.can_read_tenant(tenant_id))', table_name);
-      execute format('create policy tenant_insert on public.%I for insert with check (public.can_write_tenant(tenant_id))', table_name);
-      execute format('create policy tenant_update on public.%I for update using (public.can_write_tenant(tenant_id)) with check (public.can_write_tenant(tenant_id))', table_name);
-      execute format('create policy tenant_delete on public.%I for delete using (public.can_write_tenant(tenant_id))', table_name);
+      execute format('revoke all privileges on table public.%I from anon', table_name);
+      execute format('grant select, insert, update, delete on table public.%I to authenticated', table_name);
+      execute format('create policy tenant_select on public.%I for select to authenticated using (public.can_read_tenant(tenant_id))', table_name);
+      execute format('create policy tenant_insert on public.%I for insert to authenticated with check (public.can_write_tenant(tenant_id))', table_name);
+      execute format('create policy tenant_update on public.%I for update to authenticated using (public.can_write_tenant(tenant_id)) with check (public.can_write_tenant(tenant_id))', table_name);
+      execute format('create policy tenant_delete on public.%I for delete to authenticated using (public.can_write_tenant(tenant_id))', table_name);
     end if;
   end loop;
 end $$;
 
 do $$
+declare policy_row record;
 begin
   if to_regclass('public.dimensioning_runs') is not null then
-    drop policy if exists tenant_select on public.dimensioning_runs;
-    drop policy if exists tenant_insert on public.dimensioning_runs;
-    drop policy if exists tenant_update on public.dimensioning_runs;
-    drop policy if exists tenant_delete on public.dimensioning_runs;
+    for policy_row in
+      select policyname from pg_policies
+      where schemaname = 'public' and tablename = 'dimensioning_runs'
+    loop
+      execute format('drop policy if exists %I on public.dimensioning_runs', policy_row.policyname);
+    end loop;
+    alter table public.dimensioning_runs enable row level security;
+    revoke all privileges on table public.dimensioning_runs from anon;
+    revoke update, delete on table public.dimensioning_runs from authenticated;
+    grant select, insert on table public.dimensioning_runs to authenticated;
     create policy tenant_select on public.dimensioning_runs
-      for select using (public.can_read_tenant(tenant_id));
+      for select to authenticated using (public.can_read_tenant(tenant_id));
     create policy tenant_insert on public.dimensioning_runs
-      for insert with check (
+      for insert to authenticated with check (
         public.can_write_tenant(tenant_id)
         and created_by = auth.uid()
         and (
@@ -194,29 +224,65 @@ begin
 end $$;
 
 do $$
+declare policy_row record;
 begin
   if to_regclass('public.configuracoes') is not null then
-    drop policy if exists configuracoes_tenant_select on public.configuracoes;
-    drop policy if exists configuracoes_tenant_insert on public.configuracoes;
-    drop policy if exists configuracoes_tenant_update on public.configuracoes;
+    for policy_row in
+      select policyname from pg_policies
+      where schemaname = 'public' and tablename = 'configuracoes'
+    loop
+      execute format('drop policy if exists %I on public.configuracoes', policy_row.policyname);
+    end loop;
+    alter table public.configuracoes enable row level security;
+    revoke all privileges on table public.configuracoes from anon;
+    revoke delete on table public.configuracoes from authenticated;
+    grant select, insert, update on table public.configuracoes to authenticated;
     create policy configuracoes_tenant_select on public.configuracoes
-      for select using (public.can_read_tenant(tenant_id));
+      for select to authenticated using (public.can_read_tenant(tenant_id));
     create policy configuracoes_tenant_insert on public.configuracoes
-      for insert with check (public.can_write_tenant(tenant_id));
+      for insert to authenticated with check (public.can_write_tenant(tenant_id));
     create policy configuracoes_tenant_update on public.configuracoes
-      for update using (public.can_write_tenant(tenant_id))
+      for update to authenticated using (public.can_write_tenant(tenant_id))
       with check (public.can_write_tenant(tenant_id));
   end if;
 end $$;
 
 -- Administradores de tenant não recebem acesso à administração global.
-drop policy if exists profiles_own_or_admin_select on public.profiles;
+alter table public.profiles enable row level security;
+do $$
+declare policy_row record;
+begin
+  for policy_row in
+    select policyname from pg_policies
+    where schemaname = 'public' and tablename = 'profiles'
+  loop
+    execute format('drop policy if exists %I on public.profiles', policy_row.policyname);
+  end loop;
+end $$;
+revoke all privileges on table public.profiles from anon;
+revoke insert, update, delete, truncate, references, trigger
+  on table public.profiles from authenticated;
+grant select on table public.profiles to authenticated;
 create policy profiles_own_select on public.profiles
-  for select using (id = auth.uid());
+  for select to authenticated using (id = auth.uid());
 
-drop policy if exists tenants_member_select on public.tenants;
+alter table public.tenants enable row level security;
+do $$
+declare policy_row record;
+begin
+  for policy_row in
+    select policyname from pg_policies
+    where schemaname = 'public' and tablename = 'tenants'
+  loop
+    execute format('drop policy if exists %I on public.tenants', policy_row.policyname);
+  end loop;
+end $$;
+revoke all privileges on table public.tenants from anon;
+revoke insert, update, delete, truncate, references, trigger
+  on table public.tenants from authenticated;
+grant select on table public.tenants to authenticated;
 create policy tenants_member_select on public.tenants
-  for select using (public.can_read_tenant(id));
+  for select to authenticated using (public.can_read_tenant(id));
 
 -- Tenant interno não é submetido aos limites comerciais de planos pagos.
 create or replace function public.enforce_plan_record_limit()
