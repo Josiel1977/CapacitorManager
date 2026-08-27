@@ -1,14 +1,58 @@
 import type { NextConfig } from 'next';
 
+export function normalizeSupabaseOrigin(value: string | undefined): string {
+  try {
+    const url = new URL(value?.trim() ?? '');
+    return url.protocol === 'https:' ? url.origin : 'https://*.supabase.co';
+  } catch {
+    return 'https://*.supabase.co';
+  }
+}
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  eslint: { ignoreDuringBuilds: true },
+  poweredByHeader: false,
+  outputFileTracingRoot: process.cwd(),
   typescript: { ignoreBuildErrors: false },
   images: {
     remotePatterns: [{ protocol: 'https', hostname: 'picsum.photos', pathname: '/**' }],
   },
   output: 'standalone',
   transpilePackages: ['motion'],
+  async headers() {
+    const supabaseOrigin = normalizeSupabaseOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
+    // O Webpack usa eval no servidor de desenvolvimento. A exceção nunca é
+    // aplicada ao build de produção.
+    const scriptSrc = process.env.NODE_ENV === 'development'
+      ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+      : "script-src 'self' 'unsafe-inline'";
+    const csp = [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "frame-ancestors 'none'",
+      "form-action 'self' https://www.mercadopago.com https://www.mercadopago.com.br",
+      "object-src 'none'",
+      scriptSrc,
+      "style-src 'self' 'unsafe-inline'",
+      "font-src 'self' data:",
+      "img-src 'self' data: blob: https://picsum.photos",
+      `connect-src 'self' ${supabaseOrigin} wss://*.supabase.co`,
+      "upgrade-insecure-requests",
+    ].join('; ');
+    return [{
+      source: '/:path*',
+      headers: [
+        { key: 'Content-Security-Policy', value: csp },
+        { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        { key: 'X-Content-Type-Options', value: 'nosniff' },
+        { key: 'X-Frame-Options', value: 'DENY' },
+        { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+        { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
+        { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+        { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+      ],
+    }];
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {

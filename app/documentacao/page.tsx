@@ -21,7 +21,7 @@ const docs = {
           Evoluiu de um simples validador de capacitores para uma ferramenta completa que:
         </p>
         <ul className="list-disc pl-5 space-y-2 text-slate-600">
-          <li>✅ Dimensiona bancos de capacitores automaticamente a partir de faturas de energia (mínimo 2 faturas).</li>
+          <li>✅ Dimensiona bancos de capacitores a partir de pelo menos 3 faturas válidas; recomenda-se usar 6 a 12.</li>
           <li>✅ Realiza validação individual de capacitores (medições em campo/bancada).</li>
           <li>✅ Gerencia clientes, transformadores e histórico de medições.</li>
           <li>✅ Aplica manutenção preditiva com previsão de substituição.</li>
@@ -247,7 +247,7 @@ const docs = {
           {[
             { q: "O CapacitorManager é gratuito?", a: "Oferecemos uma versão de demonstração gratuita com testes limitados. Para acesso completo, consulte nossos planos." },
             { q: "Preciso instalar algum software?", a: "Não! O CapacitorManager é 100% web (SaaS). Basta acessar pelo navegador." },
-            { q: "Quais normas técnicas são utilizadas?", a: "O sistema segue a norma IEC 60831-1/2 para bancos de capacitores e os critérios da ANEEL (Resolução 414/2010) para fator de potência." },
+            { q: "Quais normas técnicas são utilizadas?", a: "A ferramenta registra a referência IEC 60831-1/2 e usa parâmetros configuráveis. A edição vigente, a regulação aplicável e as condições de ensaio devem ser confirmadas pelo responsável técnico." },
             { q: "Posso exportar relatórios?", a: "Sim! O memorial técnico pode ser exportado em PDF com um clique." },
             { q: "Como faço para adicionar uma nova concessionária?", a: "Entre em contato com o suporte – podemos incluir tarifas personalizadas." },
             { q: "O sistema armazena dados em nuvem?", a: "Todos os dados ficam armazenados localmente no seu navegador (localStorage). Você pode exportar/importar a qualquer momento." }

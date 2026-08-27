@@ -7,7 +7,6 @@ import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
-import { useSubscriptionGuard } from '@/lib/useSubscriptionGuard';
 
 interface Cliente {
   id: string;
@@ -20,17 +19,14 @@ interface Cliente {
 }
 
 export default function ClientesPage() {
-  useSubscriptionGuard(); // Proteção de assinatura ativa
-
   const router = useRouter();
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { profile, isAuthenticated, isLoading, isProfileLoading } = useAuth();
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCliente, setEditingCliente] = useState<Cliente | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [tenantId, setTenantId] = useState<string | null>(null);
+  const tenantId = profile?.tenant_id || null;
   const [formData, setFormData] = useState({
     nome: '',
     cnpj_cpf: '',
@@ -45,26 +41,6 @@ export default function ClientesPage() {
       router.push('/login');
     }
   }, [isAuthenticated, isLoading, router]);
-
-  // Busca role e tenant_id do perfil
-  useEffect(() => {
-    const fetchProfile = async () => {
-      if (!user) return;
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('role, tenant_id')
-        .eq('id', user.id)
-        .single();
-      if (error) {
-        console.error('Erro ao buscar perfil:', error);
-        Swal.fire('Erro', 'Perfil não encontrado. Contate o suporte.', 'error');
-        return;
-      }
-      setIsAdmin(profile?.role === 'admin');
-      setTenantId(profile?.tenant_id || null);
-    };
-    if (isAuthenticated) fetchProfile();
-  }, [user, isAuthenticated]);
 
   // Carrega clientes
   const fetchClientes = async () => {
@@ -84,10 +60,12 @@ export default function ClientesPage() {
   };
 
   useEffect(() => {
-    if (isAuthenticated && (isAdmin || tenantId)) {
+    if (isAuthenticated && tenantId) {
       fetchClientes();
+    } else if (!isLoading && !isProfileLoading) {
+      setLoading(false);
     }
-  }, [isAuthenticated, isAdmin, tenantId]);
+  }, [isAuthenticated, tenantId, isLoading, isProfileLoading]);
 
   const filteredClientes = clientes.filter(c =>
     c.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -174,7 +152,7 @@ export default function ClientesPage() {
     }
   }
 
-  if (isLoading || loading) {
+  if (isLoading || isProfileLoading || loading) {
     return (
       <div className="space-y-6">
         <div className="h-32 animate-pulse rounded-xl bg-slate-100" />

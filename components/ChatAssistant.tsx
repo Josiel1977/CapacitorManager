@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send } from 'lucide-react';
+import { useAuth } from '@/lib/AuthContext';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -9,6 +10,7 @@ interface Message {
 }
 
 export default function ChatAssistant() {
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: 'Olá! Sou o assistente do CapacitorManager. Como posso ajudar?' }
@@ -38,18 +40,14 @@ export default function ChatAssistant() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [
-            { 
-              role: 'system', 
-              content: 'Você é um assistente técnico de capacitores. REGRAS: Responda com NO MÁXIMO 3 frases curtas. Seja direto e objetivo. Não liste passos numerados com mais de 3 itens.' 
-            },
-            ...messages.slice(-5),
-            userMessage
-          ]
+          messages: [...messages.slice(-5), userMessage]
         }),
       });
 
-      if (!response.ok) throw new Error('Erro na requisição');
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        throw new Error(result?.error || 'Erro na requisição');
+      }
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -74,12 +72,14 @@ export default function ChatAssistant() {
       console.error('Error:', error);
       setMessages(prev => [...prev, { 
         role: 'assistant', 
-        content: 'Erro. Tente novamente.' 
+        content: error instanceof Error ? error.message : 'Erro. Tente novamente.'
       }]);
     } finally {
       setIsLoading(false);
     }
   };
+
+  if (authLoading || !isAuthenticated) return null;
 
   return (
     <>
@@ -135,7 +135,8 @@ export default function ChatAssistant() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+              onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+              maxLength={1000}
               placeholder="Digite sua pergunta..."
               className="flex-1 p-2 text-sm border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/20"
             />

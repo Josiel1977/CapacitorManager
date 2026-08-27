@@ -2,8 +2,6 @@
 
 import React, { useState, useMemo, useCallback, useRef } from "react";
 import Papa from "papaparse";
-import jsPDF from "jspdf";
-import { toPng } from "html-to-image";
 import {
   Upload,
   FileText,
@@ -40,6 +38,9 @@ import {
 } from "recharts";
 import { cn } from "@/lib/utils";
 import Swal from "sweetalert2";
+import { recommendCapacitorBank } from "@/lib/capacitor-recommendation";
+import { normalizeMassMemoryDateTime, parseSignedBrazilianNumber } from "@/lib/mass-memory-utils";
+import { estimateReactiveExposure, estimateReactiveIntervalExposure } from "@/lib/reactive-exposure";
 
 // ============================================================================
 // TIPOS E INTERFACES
@@ -55,6 +56,8 @@ interface MassMemoryData {
   tipoReativo: "indutivo" | "capacitivo" | "neutro";
   isHorarioCritico?: boolean;
   diaSemana?: string;
+  thdvPercent?: number | null;
+  thdiPercent?: number | null;
 }
 
 interface AnalysisStats {
@@ -98,6 +101,20 @@ interface DimensionamentoStats {
   potenciaInstalada: number;
   economiaMensalEstimada: number;
   paybackMeses: number;
+  specificationAllowed: boolean;
+  releaseLevel: "bloqueado" | "pre_dimensionamento" | "especificacao_condicionada";
+  confidence: "insuficiente" | "preliminar" | "representativa";
+  p50RequiredKvar: number | null;
+  p90RequiredKvar: number | null;
+  p95RequiredKvar: number | null;
+  suggestedStagesKvar: number[];
+  coverageHours: number | null;
+  distinctDays: number;
+  medianIntervalMinutes: number | null;
+  sampleDensityPercent: number | null;
+  harmonicCoveragePercent: number;
+  releaseReasons: string[];
+  warnings: string[];
 }
 
 interface PeriodoAnalise {
@@ -156,11 +173,12 @@ const PERIODOS_DIA = [
 const getDiaSemana = (dataStr: string): string => {
   if (!dataStr || dataStr === "") return "Desconhecido";
   try {
-    const matchData = dataStr.match(/(\d{1,2})\/(\d{1,2})/);
+    const matchData = dataStr.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
     if (matchData) {
       const dia = parseInt(matchData[1]);
       const mes = parseInt(matchData[2]) - 1;
-      const ano = new Date().getFullYear();
+      const rawYear = matchData[3];
+      const ano = rawYear ? (rawYear.length === 2 ? 2000 + parseInt(rawYear) : parseInt(rawYear)) : new Date().getFullYear();
       const data = new Date(ano, mes, dia);
       if (!isNaN(data.getTime())) {
         const diaNum = data.getDay();
@@ -191,6 +209,12 @@ const parseNumeroBrasileiro = (valor: any): number => {
   return isNaN(num) ? 0 : Math.abs(num);
 };
 
+const parseNumeroOpcional = (valor: unknown): number | null => {
+  if (valor === undefined || valor === null || String(valor).trim() === "") return null;
+  const parsed = parseNumeroBrasileiro(valor);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const calcularFP = (kw: number, kvar: number): number => {
   if (kw <= 0) return 1;
   const s = Math.sqrt(kw * kw + kvar * kvar);
@@ -212,28 +236,18 @@ const calcularCorrecaoNecessaria = (
   return Math.max(0, Math.round(kvarNecessario * 10) / 10);
 };
 
-const calcularMultaANEELDetalhada = (
+const calcularExposicaoReativaDetalhada = (
   registros: MassMemoryData[],
   tarifa: number,
   fpMinimo: number,
   samplesPerHour: number,
 ): { total: number; indutiva: number; capacitiva: number } => {
-  let totalIndutivo = 0;
-  let totalCapacitivo = 0;
-  for (const reg of registros) {
-    if (reg.fp >= fpMinimo || reg.kw <= 0.01) continue;
-    const fpCalculo = Math.max(0.01, Math.min(0.99, reg.fp));
-    const fatorAjuste = Math.max(0, fpMinimo / fpCalculo - 1);
-    const kvarhIntervalo = Math.abs(reg.kvar) / samplesPerHour;
-    const multaParcial = kvarhIntervalo * tarifa * fatorAjuste;
-    if (reg.tipoReativo === "indutivo") totalIndutivo += multaParcial;
-    else if (reg.tipoReativo === "capacitivo") totalCapacitivo += multaParcial;
-  }
-  return {
-    total: totalIndutivo + totalCapacitivo,
-    indutiva: totalIndutivo,
-    capacitiva: totalCapacitivo,
-  };
+  const estimate = estimateReactiveExposure(registros.map((reg) => ({
+    activePowerKw: reg.kw,
+    powerFactor: reg.fp,
+    direction: reg.tipoReativo,
+  })), tarifa, fpMinimo, 60 / samplesPerHour);
+  return { total: estimate.total, indutiva: estimate.inductive, capacitiva: estimate.capacitive };
 };
 
 const detectarIntervaloAmostragem = (data: MassMemoryData[]): number => {
@@ -445,32 +459,21 @@ const analisarDimensionamento = (
     potenciaInstalada,
     economiaMensalEstimada: multaMensal,
     paybackMeses,
+    specificationAllowed: false,
+    releaseLevel: "bloqueado",
+    confidence: "insuficiente",
+    p50RequiredKvar: null,
+    p90RequiredKvar: null,
+    p95RequiredKvar: null,
+    suggestedStagesKvar: [],
+    coverageHours: null,
+    distinctDays: 0,
+    medianIntervalMinutes: null,
+    sampleDensityPercent: null,
+    harmonicCoveragePercent: 0,
+    releaseReasons: [],
+    warnings: [],
   };
-};
-
-const gerarEstagiosCapacitores = (totalKvar: number): number[] => {
-  if (totalKvar <= 0) return [];
-  const estagios: number[] = [];
-  let restante = totalKvar;
-  let tamanhoEstagio: number;
-  if (totalKvar <= 30) tamanhoEstagio = 5;
-  else if (totalKvar <= 90) tamanhoEstagio = 10;
-  else if (totalKvar <= 200) tamanhoEstagio = 20;
-  else tamanhoEstagio = 30;
-  while (restante > 0) {
-    const estagio = Math.min(tamanhoEstagio, restante);
-    estagios.push(estagio);
-    restante -= estagio;
-  }
-  if (estagios.length > 1 && estagios[estagios.length - 1] < tamanhoEstagio / 2) {
-    const ultimo = estagios.pop() || 0;
-    if (estagios.length > 0) {
-      estagios[estagios.length - 1] += ultimo;
-    } else {
-      estagios.push(ultimo);
-    }
-  }
-  return estagios.sort((a, b) => a - b);
 };
 
 // ============================================================================
@@ -521,6 +524,8 @@ const processarArquivoLandis = (
   const idxKvarInd = colunas.findIndex(c => (c.includes("kvar") && c.includes("ind")) || c.includes("kvarind"));
   const idxKvarCap = colunas.findIndex(c => (c.includes("kvar") && c.includes("cap")) || c.includes("kvarcap"));
   const idxFP = colunas.findIndex(c => c.includes("fp") || c.includes("fator"));
+  const idxThdv = colunas.findIndex(c => c.includes("thdv") || c.includes("thd v"));
+  const idxThdi = colunas.findIndex(c => c.includes("thdi") || c.includes("thd i"));
   
   console.log("Landis - Colunas disponíveis:", colunas);
   console.log("Landis - Índices:", { idxData, idxHora, idxKW, idxKvarInd, idxKvarCap, idxFP });
@@ -549,7 +554,7 @@ const processarArquivoLandis = (
       let kvar = kvarInd - kvarCap;
       if (idxKvarInd === -1 && idxKvarCap === -1) {
         const idxKvar = colunas.findIndex(c => c === "kvar" || c.includes("reativa"));
-        if (idxKvar !== -1) kvar = parseNumeroBrasileiro(parts[idxKvar]);
+        if (idxKvar !== -1) kvar = parseSignedBrazilianNumber(parts[idxKvar]);
       }
       const tipoReativo: MassMemoryData["tipoReativo"] = kvar > 0.01 ? "indutivo" : kvar < -0.01 ? "capacitivo" : "neutro";
       const kvarAbs = Math.abs(kvar);
@@ -559,25 +564,11 @@ const processarArquivoLandis = (
         if (fpValor > 1 && fpValor <= 100) fpValor /= 100;
         if (fpValor > 0 && fpValor <= 1) fp = fpValor;
       }
-      let dataFormatada = dataRaw;
-      if (dataRaw && dataRaw.includes("/")) {
-        const partes = dataRaw.split("/");
-        if (partes.length >= 2) {
-          dataFormatada = `${partes[0].padStart(2, "0")}/${partes[1].padStart(2, "0")}`;
-        }
-      }
-      let horaFormatada = horaRaw;
-      if (horaRaw && !horaRaw.includes(":")) {
-        horaFormatada = `${horaRaw.padStart(2, "0")}:00`;
-      } else if (horaRaw && horaRaw.includes(":")) {
-        const [h, m] = horaRaw.split(":");
-        horaFormatada = `${h.padStart(2, "0")}:${m.padStart(2, "0")}`;
-      } else if (dataRaw.includes(" ")) {
-        const [d, h] = dataRaw.split(" ");
-        dataFormatada = d.split("/").slice(0,2).map(p=>p.padStart(2,"0")).join("/");
-        horaFormatada = h.substring(0,5);
-      }
-      const timestamp = `${dataFormatada}T${horaFormatada}`;
+      const dataParts = dataRaw.includes(" ") ? dataRaw.split(/\s+/, 2) : [dataRaw, horaRaw];
+      const normalizedDateTime = normalizeMassMemoryDateTime(dataParts[0], dataParts[1] || horaRaw);
+      const dataFormatada = normalizedDateTime.displayDate;
+      const horaFormatada = normalizedDateTime.displayTime;
+      const timestamp = normalizedDateTime.timestamp;
       const diaSemana = getDiaSemana(dataFormatada);
       const kvarNecessario = tipoReativo === "indutivo" && fp < targetFP
         ? calcularCorrecaoNecessaria(kw, fp, targetFP)
@@ -594,6 +585,8 @@ const processarArquivoLandis = (
         tipoReativo,
         isHorarioCritico,
         diaSemana,
+        thdvPercent: idxThdv !== -1 ? parseNumeroOpcional(parts[idxThdv]) : null,
+        thdiPercent: idxThdi !== -1 ? parseNumeroOpcional(parts[idxThdi]) : null,
       });
     } catch (error) {
       console.warn(`Erro na linha ${i}:`, error);
@@ -669,19 +662,10 @@ const processarArquivoEquatorial = (
       const tipoReativo: MassMemoryData["tipoReativo"] = kvar > 0.01 ? "indutivo" : kvar < -0.01 ? "capacitivo" : "neutro";
       const kvarAbs = Math.abs(kvar);
       const fp = calcularFP(kw, kvarAbs);
-      let dataFormatada = dataStr;
-      if (dataStr && dataStr.includes("/")) {
-        const partes = dataStr.split("/");
-        if (partes.length >= 2) {
-          dataFormatada = `${partes[0].padStart(2, "0")}/${partes[1].padStart(2, "0")}`;
-        }
-      }
-      let horaFormatada = horaStr;
-      if (horaStr && horaStr.includes(":")) {
-        const [h, m] = horaStr.split(":");
-        horaFormatada = `${h.padStart(2, "0")}:${m.padStart(2, "0")}`;
-      }
-      const timestamp = `${dataFormatada}T${horaFormatada}`;
+      const normalizedDateTime = normalizeMassMemoryDateTime(dataStr, horaStr);
+      const dataFormatada = normalizedDateTime.displayDate;
+      const horaFormatada = normalizedDateTime.displayTime;
+      const timestamp = normalizedDateTime.timestamp;
       const diaSemana = getDiaSemana(dataFormatada);
       const kvarNecessario = tipoReativo === "indutivo" && fp < targetFP
         ? calcularCorrecaoNecessaria(kw, fp, targetFP)
@@ -721,7 +705,7 @@ const processarArquivoPadrao = async (
     Papa.parse(content, {
       header: true,
       skipEmptyLines: true,
-      delimiter: ";",
+      delimiter: "",
       encoding: "ISO-8859-1",
       complete: (parseResult: Papa.ParseResult<any>) => {
         const rows = parseResult.data;
@@ -743,6 +727,8 @@ const processarArquivoPadrao = async (
           (normalizar(c).includes("kvar") || normalizar(c).includes("reativa")) &&
           !normalizar(c).includes("indutivo") && !normalizar(c).includes("capacitivo")
         );
+        const idxThdv = colunas.findIndex(c => normalizar(c).includes("thdv") || normalizar(c).includes("thd v"));
+        const idxThdi = colunas.findIndex(c => normalizar(c).includes("thdi") || normalizar(c).includes("thd i"));
         console.log("Padrão - Colunas:", colunas);
         console.log("Padrão - Índices:", { idxData, idxHora, idxKW, idxKvarInd, idxKvarCap, idxKvar });
         if (idxKW === -1) {
@@ -761,7 +747,7 @@ const processarArquivoPadrao = async (
               const kvarCap = parseNumeroBrasileiro(getVal(idxKvarCap));
               kvar = kvarInd - kvarCap;
             } else if (idxKvar !== -1) {
-              kvar = parseNumeroBrasileiro(getVal(idxKvar));
+              kvar = parseSignedBrazilianNumber(getVal(idxKvar));
             }
             if (kw === 0 && Math.abs(kvar) < 0.01) continue;
             let dataStr = idxData !== -1 ? String(getVal(idxData)) : "";
@@ -771,11 +757,10 @@ const processarArquivoPadrao = async (
               dataStr = parts[0];
               horaStr = parts[1] || "00:00";
             }
-            const dataFormatada = dataStr.split("/").slice(0,2).map(p => p.padStart(2,"0")).join("/");
-            const horaFormatada = horaStr.includes(":") 
-              ? horaStr.split(":").slice(0,2).map(p => p.padStart(2,"0")).join(":")
-              : "00:00";
-            const timestamp = `${dataFormatada}T${horaFormatada}`;
+            const normalizedDateTime = normalizeMassMemoryDateTime(dataStr, horaStr);
+            const dataFormatada = normalizedDateTime.displayDate;
+            const horaFormatada = normalizedDateTime.displayTime;
+            const timestamp = normalizedDateTime.timestamp;
             const tipoReativo: MassMemoryData["tipoReativo"] = kvar > 0.01 ? "indutivo" : kvar < -0.01 ? "capacitivo" : "neutro";
             const kvarAbs = Math.abs(kvar);
             const fp = calcularFP(kw, kvarAbs);
@@ -795,6 +780,8 @@ const processarArquivoPadrao = async (
               tipoReativo,
               isHorarioCritico,
               diaSemana,
+              thdvPercent: idxThdv !== -1 ? parseNumeroOpcional(getVal(idxThdv)) : null,
+              thdiPercent: idxThdi !== -1 ? parseNumeroOpcional(getVal(idxThdi)) : null,
             });
           } catch (error) {
             console.warn("Erro ao processar linha no padrão:", error);
@@ -846,10 +833,10 @@ const AlertaMultaCapacitiva = ({ multaCapacitiva }: { multaCapacitiva: number })
       <div className="flex items-start gap-3">
         <Battery size={20} className="text-blue-600 mt-0.5 flex-shrink-0" />
         <div>
-          <p className="text-sm font-bold text-blue-800">ATENCAO: Multa por Reativo Capacitivo Detectada!</p>
+          <p className="text-sm font-bold text-blue-800">ATENÇÃO: exposição a reativo capacitivo detectada</p>
           <p className="text-sm text-blue-700 mt-1">
-            Sua instalacao esta com <strong>SOBRECORRECAO</strong>. O reativo capacitivo esta gerando multa de{" "}
-            <strong>R$ {multaCapacitiva.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</strong> no periodo analisado.
+            A campanha indica possível <strong>sobrecompensação</strong>. A exposição econômica modelada no período é de{" "}
+            <strong>R$ {multaCapacitiva.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</strong>; confirme com a fatura e a regra tarifária aplicável.
           </p>
           <p className="text-xs text-blue-600 mt-2">
             Solucao: Desligue ou reduza o banco de capacitores existente. NAO adicione mais capacitores.
@@ -871,11 +858,11 @@ const AlertaMultaIndutiva = ({ multaIndutiva }: { multaIndutiva: number }) => {
       <div className="flex items-start gap-3">
         <Zap size={20} className="text-red-600 mt-0.5 flex-shrink-0" />
         <div>
-          <p className="text-sm font-bold text-red-800">ATENCAO: Multa por Reativo Indutivo Detectada!</p>
+          <p className="text-sm font-bold text-red-800">ATENÇÃO: exposição a reativo indutivo detectada</p>
           <p className="text-sm text-red-700 mt-1">
-            O reativo indutivo esta gerando multa de <strong>R$ {multaIndutiva.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</strong> no periodo analisado.
+            A exposição econômica modelada é de <strong>R$ {multaIndutiva.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</strong> no período. Confirme o valor faturado antes de apresentar economia ao cliente.
           </p>
-          <p className="text-xs text-red-600 mt-2">Solucao: Instale um banco de capacitores para corrigir o fator de potencia.</p>
+          <p className="text-xs text-red-600 mt-2">Próximo passo: validar a campanha e os estudos técnicos antes de definir ou instalar o banco.</p>
         </div>
       </div>
     </motion.div>
@@ -908,6 +895,9 @@ export default function AnaliseMassaPage() {
   const [samplingInterval, setSamplingInterval] = useState(15);
   const [fileName, setFileName] = useState<string>("");
   const [recalcKey, setRecalcKey] = useState(0);
+  const [representativeCampaignConfirmed, setRepresentativeCampaignConfirmed] = useState(false);
+  const [harmonicStudyValidated, setHarmonicStudyValidated] = useState(false);
+  const [protectionStudyValidated, setProtectionStudyValidated] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleRecalcular = useCallback(() => {
@@ -934,6 +924,9 @@ export default function AnaliseMassaPage() {
       if (result.isConfirmed) {
         setData([]);
         setFileName("");
+        setRepresentativeCampaignConfirmed(false);
+        setHarmonicStudyValidated(false);
+        setProtectionStudyValidated(false);
         if (fileInputRef.current) fileInputRef.current.value = "";
         Swal.fire("Dados limpos!", "Faça upload de um novo arquivo.", "success");
       }
@@ -986,6 +979,10 @@ export default function AnaliseMassaPage() {
     if (!element) return;
     setLoading(true);
     try {
+      const [{ default: jsPDF }, { toPng }] = await Promise.all([
+        import("jspdf"),
+        import("html-to-image"),
+      ]);
       const dataUrl = await toPng(element, {
         quality: 0.95,
         backgroundColor: "#ffffff",
@@ -997,16 +994,26 @@ export default function AnaliseMassaPage() {
         unit: "mm",
         format: "a4",
       });
-      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfWidth = pdf.internal.pageSize.getWidth() - 20;
+      const pdfHeight = pdf.internal.pageSize.getHeight() - 20;
       const img = new Image();
       img.src = dataUrl;
       await new Promise((resolve) => { img.onload = resolve; });
       const ratio = pdfWidth / img.width;
       const imgHeight = img.height * ratio;
-      pdf.addImage(dataUrl, "PNG", 0, 10, pdfWidth, imgHeight);
+      let renderedHeight = 0;
+      let pageCount = 1;
+      pdf.addImage(dataUrl, "PNG", 10, 10, pdfWidth, imgHeight);
+      renderedHeight += pdfHeight;
+      while (renderedHeight < imgHeight) {
+        pdf.addPage();
+        pdf.addImage(dataUrl, "PNG", 10, 10 - renderedHeight, pdfWidth, imgHeight);
+        renderedHeight += pdfHeight;
+        pageCount += 1;
+      }
       const dataAtual = new Date().toLocaleDateString("pt-BR").replace(/\//g, "-");
       pdf.save(`Relatorio_Capacitor_${dataAtual}.pdf`);
-      Swal.fire("Sucesso", "Relatorio PDF exportado com sucesso!", "success");
+      Swal.fire("Sucesso", `Relatório PDF exportado em ${pageCount} página(s).`, "success");
     } catch (error) {
       console.error(error);
       Swal.fire("Erro", "Falha ao gerar o PDF. Tente novamente.", "error");
@@ -1055,10 +1062,11 @@ export default function AnaliseMassaPage() {
         info.somaKvar += reg.kvar;
         info.count++;
         if (reg.fp < targetFP && reg.tipoReativo === "indutivo") {
-          const fpCalculo = Math.max(0.01, reg.fp);
-          const fatorAjuste = Math.max(0, targetFP / fpCalculo - 1);
-          const kvarh = reg.kvar / samplesPerHour;
-          info.multa += kvarh * tariff * fatorAjuste;
+          info.multa += estimateReactiveIntervalExposure({
+            activePowerKw: reg.kw,
+            powerFactor: reg.fp,
+            direction: reg.tipoReativo,
+          }, tariff, targetFP, 60 / samplesPerHour);
         }
       }
     }
@@ -1078,10 +1086,10 @@ export default function AnaliseMassaPage() {
   const stats = useMemo((): AnalysisStats | null => {
     if (data.length === 0) return null;
     const samplesPerHour = 60 / samplingInterval;
-    const multaDetalhada = calcularMultaANEELDetalhada(data, tariff, targetFP, samplesPerHour);
+    const multaDetalhada = calcularExposicaoReativaDetalhada(data, tariff, targetFP, samplesPerHour);
     const diasUnicos = new Set(data.map((d) => d.data));
     const diasNoArquivo = diasUnicos.size;
-    const fatorProjecao = diasNoArquivo > 0 ? Math.min(30 / diasNoArquivo, 1) : 1;
+    const fatorProjecao = diasNoArquivo > 0 ? 30 / diasNoArquivo : 1;
     const multaMensalProjetada = multaDetalhada.total * fatorProjecao;
     const picoDemanda = Math.max(...data.map((d) => d.kw), 0);
     const fpMedio = data.reduce((acc, curr) => acc + curr.fp, 0) / data.length;
@@ -1121,8 +1129,54 @@ export default function AnaliseMassaPage() {
 
   const dimensionamento = useMemo((): DimensionamentoStats | null => {
     if (data.length === 0) return null;
-    return analisarDimensionamento(data, targetFP, potenciaInstalada, stats?.multaMensalProjetada || 0);
-  }, [data, targetFP, potenciaInstalada, stats?.multaMensalProjetada, recalcKey]);
+    const analytics = analisarDimensionamento(data, targetFP, potenciaInstalada, stats?.multaMensalProjetada || 0);
+    const recommendation = recommendCapacitorBank({
+      mode: "novo_banco",
+      targetPowerFactor: targetFP,
+      transformerKva: potenciaInstalada,
+      samples: data.map((sample) => ({
+        timestamp: sample.timestamp || undefined,
+        intervalMinutes: samplingInterval,
+        activePowerKw: sample.kw,
+        reactivePowerKvar: sample.tipoReativo === "capacitivo" ? -Math.abs(sample.kvar) : Math.abs(sample.kvar),
+        powerFactor: sample.fp,
+        thdvPercent: sample.thdvPercent,
+        thdiPercent: sample.thdiPercent,
+      })),
+      engineeringApproval: {
+        representativeCampaignConfirmed,
+        harmonicStudyValidated,
+        protectionStudyValidated,
+      },
+    });
+    const referenceKvar = recommendation.recommendedKvar ?? 0;
+    const orcamentoEstimado = estimarOrcamento(referenceKvar, "automatico");
+    const exposure = stats?.multaMensalProjetada || 0;
+    return {
+      ...analytics,
+      bancoSugeridoFixo: 0,
+      bancoSugeridoAutomatico: referenceKvar,
+      tipoRecomendado: "automatico",
+      justificativa: recommendation.actions.join(" ") || "Campanha insuficiente para gerar referência de pré-dimensionamento.",
+      orcamentoEstimado,
+      economiaMensalEstimada: exposure,
+      paybackMeses: exposure > 0 && referenceKvar > 0 ? Math.ceil(orcamentoEstimado.max / exposure) : 0,
+      specificationAllowed: recommendation.specificationAllowed,
+      releaseLevel: recommendation.releaseLevel,
+      confidence: recommendation.confidence,
+      p50RequiredKvar: recommendation.p50RequiredKvar,
+      p90RequiredKvar: recommendation.p90RequiredKvar,
+      p95RequiredKvar: recommendation.p95RequiredKvar,
+      suggestedStagesKvar: recommendation.suggestedStagesKvar,
+      coverageHours: recommendation.coverageHours,
+      distinctDays: recommendation.distinctDays,
+      medianIntervalMinutes: recommendation.medianIntervalMinutes,
+      sampleDensityPercent: recommendation.sampleDensityPercent,
+      harmonicCoveragePercent: recommendation.harmonicCoveragePercent,
+      releaseReasons: recommendation.releaseReasons,
+      warnings: recommendation.warnings,
+    };
+  }, [data, targetFP, potenciaInstalada, stats?.multaMensalProjetada, samplingInterval, representativeCampaignConfirmed, harmonicStudyValidated, protectionStudyValidated, recalcKey]);
 
   const chartData = useMemo(() => {
     if (data.length === 0) return [];
@@ -1156,11 +1210,11 @@ export default function AnaliseMassaPage() {
         <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-secondary/10 rounded-full blur-3xl pointer-events-none" />
         <div className="relative z-10 max-w-2xl space-y-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-secondary text-xs font-bold tracking-wider uppercase">
-            <Cpu size={14} /> Analise Avancada • ANEEL 414/2010
+            <Cpu size={14} /> Diagnóstico temporal auditável • Motor RC23
           </div>
           <h1 className="text-4xl md:text-5xl font-black tracking-tight leading-tight">Capacitor Manager</h1>
           <p className="text-lg text-white/70 leading-relaxed">
-            Transforme dados brutos em economia real. Detectamos reativo excedente, calculamos multas conforme ANEEL e sugerimos a correcao exata para sua instalacao.
+            Analise o ciclo de carga, identifique sobrecompensação e obtenha uma faixa técnica com qualidade de dados e pendências explícitas.
           </p>
           <div className="flex flex-wrap gap-4 pt-4">
             <label className="flex items-center gap-2 bg-secondary text-primary px-6 py-3 rounded-xl font-bold shadow-lg shadow-secondary/20 cursor-pointer hover:scale-105 transition-transform">
@@ -1213,7 +1267,7 @@ export default function AnaliseMassaPage() {
 
             {horariosCriticos.length > 0 && (
               <div className="bg-gradient-to-br from-red-50 to-orange-50 p-8 rounded-3xl border border-red-200">
-                <div className="flex items-center justify-between mb-6"><h3 className="text-2xl font-bold text-red-800 flex items-center gap-2"><AlertCircle size={24} /> Horarios de Baixo Fator de Potencia</h3><span className="text-xs bg-red-200 text-red-700 px-3 py-1 rounded-full font-bold">Multa aplicavel pela ANEEL</span></div>
+                <div className="flex items-center justify-between mb-6"><h3 className="text-2xl font-bold text-red-800 flex items-center gap-2"><AlertCircle size={24} /> Horários de Baixo Fator de Potência</h3><span className="text-xs bg-red-200 text-red-700 px-3 py-1 rounded-full font-bold">Exposição reativa estimada</span></div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {horariosCriticos.map((horario, idx) => (
                     <div key={idx} className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-red-500">
@@ -1231,7 +1285,7 @@ export default function AnaliseMassaPage() {
                 <div className="space-y-3">
                   {analiseDiasSemana.map((dia, idx) => (
                     <div key={idx} className="bg-white p-4 rounded-xl shadow-sm">
-                      <div className="flex items-center justify-between flex-wrap gap-3 mb-2"><span className="font-bold text-slate-700 w-24">{dia.dia}</span><div className="flex-1"><div className="flex justify-between text-xs mb-1"><span className="text-slate-500">kVAr Medio</span><span className="text-red-600 font-bold">{dia.kvarMedio.toFixed(1)} kVAr</span></div><div className="w-full bg-slate-100 rounded-full h-2"><div className="bg-red-500 h-2 rounded-full" style={{ width: `${Math.min(100, (dia.kvarMedio / 50) * 100)}%` }} /></div></div><div className="text-right min-w-[100px]"><p className="text-xs text-slate-500">Multa Estimada</p><p className="text-sm font-bold text-red-600">R$ {dia.multa.toFixed(2)}</p></div></div>
+                      <div className="flex items-center justify-between flex-wrap gap-3 mb-2"><span className="font-bold text-slate-700 w-24">{dia.dia}</span><div className="flex-1"><div className="flex justify-between text-xs mb-1"><span className="text-slate-500">kVAr Médio</span><span className="text-red-600 font-bold">{dia.kvarMedio.toFixed(1)} kVAr</span></div><div className="w-full bg-slate-100 rounded-full h-2"><div className="bg-red-500 h-2 rounded-full" style={{ width: `${Math.min(100, (dia.kvarMedio / 50) * 100)}%` }} /></div></div><div className="text-right min-w-[100px]"><p className="text-xs text-slate-500">Exposição modelada</p><p className="text-sm font-bold text-red-600">R$ {dia.multa.toFixed(2)}</p></div></div>
                     </div>
                   ))}
                 </div>
@@ -1249,16 +1303,16 @@ export default function AnaliseMassaPage() {
                     </div>
                   ))}
                 </div>
-                {piorPeriodo && (<div className="mt-6 p-4 bg-white rounded-xl border border-blue-200"><h4 className="font-bold text-primary mb-2 flex items-center gap-2"><Zap size={18} className="text-secondary" /> Recomendacao</h4>{piorPeriodo.nivelCriticidade === "CRITICO" ? (<p className="text-sm text-slate-700">O periodo mais critico e <strong>{piorPeriodo.nome}</strong> com <strong className="text-red-600">{piorPeriodo.percentualCritico.toFixed(1)}%</strong> do tempo com FP abaixo de {targetFP * 100}%.<br />Recomenda-se instalar banco de capacitores <strong>automatico</strong>.</p>) : (<p className="text-sm text-slate-700">Todos os periodos estao dentro da conformidade.</p>)}</div>)}
+                {piorPeriodo && (<div className="mt-6 p-4 bg-white rounded-xl border border-blue-200"><h4 className="font-bold text-primary mb-2 flex items-center gap-2"><Zap size={18} className="text-secondary" /> Diagnóstico</h4>{piorPeriodo.nivelCriticidade === "CRITICO" ? (<p className="text-sm text-slate-700">O período mais crítico é <strong>{piorPeriodo.nome}</strong>, com <strong className="text-red-600">{piorPeriodo.percentualCritico.toFixed(1)}%</strong> do tempo com FP abaixo de {targetFP * 100}%. Use o motor abaixo para avaliar a faixa preliminar e as pendências antes de especificar o banco.</p>) : (<p className="text-sm text-slate-700">Os períodos avaliados estão dentro do critério configurado para esta campanha.</p>)}</div>)}
               </div>
             )}
 
             {/* DASHBOARD */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                <div className="flex items-center gap-3 mb-4"><div className="p-2 bg-red-50 rounded-lg text-red-600"><DollarSign size={20} /></div><span className="text-sm font-medium text-slate-500">Multa no periodo</span></div>
+                <div className="flex items-center gap-3 mb-4"><div className="p-2 bg-red-50 rounded-lg text-red-600"><DollarSign size={20} /></div><span className="text-sm font-medium text-slate-500">Exposição estimada no período</span></div>
                 <p className="text-3xl font-bold">R$ {stats?.multaPeriodo.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</p>
-                <p className="text-xs text-slate-400 mt-1">Projetado 30 dias: <strong>R$ {stats?.multaMensalProjetada.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</strong></p>
+                <p className="text-xs text-slate-400 mt-1">Cenário equivalente de 30 dias: <strong>R$ {stats?.multaMensalProjetada.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</strong></p>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                 <div className="flex items-center gap-3 mb-4"><div className="p-2 bg-blue-50 rounded-lg text-blue-600"><Zap size={20} /></div><span className="text-sm font-medium text-slate-500">Pico de Demanda</span></div>
@@ -1278,15 +1332,16 @@ export default function AnaliseMassaPage() {
             {/* DIMENSIONAMENTO */}
             {dimensionamento && (
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-3xl border border-blue-200">
-                <div className="flex items-center justify-between mb-6"><h3 className="text-2xl font-bold text-primary flex items-center gap-2"><Cpu size={24} /> Dimensionamento do Banco</h3><button onClick={handleRecalcular} className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90"><RefreshCw size={16} /> Recalcular</button></div>
+                <div className="flex items-center justify-between mb-6"><div><h3 className="text-2xl font-bold text-primary flex items-center gap-2"><Cpu size={24} /> Pré-dimensionamento por Série Temporal</h3><p className="text-xs text-slate-500 mt-1">A especificação só é liberada após campanha representativa e validações técnicas.</p></div><button onClick={handleRecalcular} className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90"><RefreshCw size={16} /> Recalcular</button></div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                   <div className="bg-white p-6 rounded-2xl"><h4 className="text-sm font-bold text-slate-400 uppercase mb-4">Medias Gerais</h4><div className="space-y-3"><div className="flex justify-between"><span className="text-slate-600">kW Medio:</span><span className="font-bold text-primary">{dimensionamento.mediaKW.toFixed(1)} kW</span></div><div className="flex justify-between"><span className="text-slate-600">kVAr Medio:</span><span className="font-bold text-primary">{dimensionamento.mediaKvar.toFixed(1)} kVAr</span></div><div className="flex justify-between"><span className="text-slate-600">FP Medio:</span><span className={cn("font-bold", dimensionamento.mediaFP >= targetFP ? "text-green-600" : "text-red-600")}>{dimensionamento.mediaFP.toFixed(3)}</span></div></div></div>
                   <div className="bg-white p-6 rounded-2xl"><h4 className="text-sm font-bold text-slate-400 uppercase mb-4">Periodos Criticos</h4><div className="space-y-3"><div className="flex justify-between"><span className="text-slate-600">Ocorrencias:</span><span className="font-bold text-red-600">{dimensionamento.periodosCriticos}</span></div><div className="flex justify-between"><span className="text-slate-600">% do Total:</span><span className="font-bold text-red-600">{dimensionamento.percentualCritico.toFixed(1)}%</span></div><div className="flex justify-between"><span className="text-slate-600">Variabilidade (CV):</span><span className="font-bold">{dimensionamento.coeficienteVariacao.toFixed(2)}</span></div></div></div>
-                  <div className="bg-white p-6 rounded-2xl border-2 border-secondary"><h4 className="text-sm font-bold text-secondary uppercase mb-4">Recomendacao</h4><div className="space-y-3"><div className="flex justify-between items-center"><span className="text-slate-600">Tipo:</span><span className="px-2 py-1 rounded text-xs font-bold uppercase bg-blue-100 text-blue-700">{dimensionamento.tipoRecomendado === "fixo" ? "Fixo" : dimensionamento.tipoRecomendado === "automatico" ? "Automatico" : "Hibrido"}</span></div><div className="flex justify-between"><span className="text-slate-600">Capacidade:</span><span className="font-bold text-2xl text-primary">{dimensionamento.bancoSugeridoAutomatico} kVAr</span></div>{dimensionamento.paybackMeses > 0 && (<div className="flex justify-between"><span className="text-slate-600">Payback:</span><span className="font-bold text-green-600">{dimensionamento.paybackMeses} meses</span></div>)}</div></div>
+                  <div className={cn("bg-white p-6 rounded-2xl border-2", dimensionamento.specificationAllowed ? "border-green-500" : dimensionamento.releaseLevel === "bloqueado" ? "border-red-400" : "border-amber-400")}><h4 className="text-sm font-bold uppercase mb-4">Nível de liberação</h4><div className="space-y-3"><div className="flex justify-between items-center"><span className="text-slate-600">Status:</span><span className={cn("px-2 py-1 rounded text-xs font-bold uppercase", dimensionamento.specificationAllowed ? "bg-green-100 text-green-700" : dimensionamento.releaseLevel === "bloqueado" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800")}>{dimensionamento.specificationAllowed ? "Especificação condicionada" : dimensionamento.releaseLevel === "bloqueado" ? "Bloqueado" : "Pré-dimensionamento"}</span></div><div className="flex justify-between"><span className="text-slate-600">Referência preliminar:</span><span className="font-bold text-2xl text-primary">{dimensionamento.bancoSugeridoAutomatico || 0} kVAr</span></div><div className="text-xs text-slate-500">Faixa P50/P90/P95: {dimensionamento.p50RequiredKvar?.toFixed(1) ?? "—"} / {dimensionamento.p90RequiredKvar?.toFixed(1) ?? "—"} / {dimensionamento.p95RequiredKvar?.toFixed(1) ?? "—"} kVAr</div></div></div>
                 </div>
-                <div className="bg-white p-6 rounded-2xl"><p className="text-slate-700 leading-relaxed">{dimensionamento.justificativa}</p></div>
-                {dimensionamento.tipoRecomendado !== "fixo" && dimensionamento.bancoSugeridoAutomatico > 0 && (<div className="mt-6 bg-white p-6 rounded-2xl"><h4 className="text-sm font-bold text-slate-400 uppercase mb-4">Estagios Recomendados</h4><div className="flex flex-wrap gap-3">{gerarEstagiosCapacitores(dimensionamento.bancoSugeridoAutomatico).map((estagio, idx) => (<div key={idx} className="bg-blue-50 px-4 py-2 rounded-lg"><span className="text-xs">Estagio {idx + 1}:</span><span className="font-bold text-blue-700 ml-2">{estagio} kVAr</span></div>))}</div></div>)}
-                <div className="mt-6 bg-white p-6 rounded-2xl border-2 border-green-500"><h4 className="text-sm font-bold text-green-600 uppercase mb-4">Orcamento Estimado</h4><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div><div className="flex justify-between items-center"><span className="text-slate-600">Investimento:</span><span className="font-bold text-lg">R$ {dimensionamento.orcamentoEstimado.min.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} - R$ {dimensionamento.orcamentoEstimado.max.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span></div></div><div><div className="flex justify-between items-center"><span className="text-slate-600">Economia Mensal:</span><span className="font-bold text-green-600 text-lg">R$ {dimensionamento.economiaMensalEstimada.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span></div></div></div></div>
+                <div className="bg-white p-6 rounded-2xl"><p className="text-slate-700 leading-relaxed">{dimensionamento.justificativa}</p><div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-4 text-xs"><div><strong>{dimensionamento.coverageHours?.toFixed(1) ?? "—"} h</strong><br />cobertura</div><div><strong>{dimensionamento.distinctDays}</strong><br />dias distintos</div><div><strong>{dimensionamento.medianIntervalMinutes?.toFixed(1) ?? "—"} min</strong><br />intervalo mediano</div><div><strong>{dimensionamento.sampleDensityPercent?.toFixed(1) ?? "—"}%</strong><br />densidade</div><div><strong>{dimensionamento.harmonicCoveragePercent.toFixed(1)}%</strong><br />THDv + THDi</div></div></div>
+                {dimensionamento.suggestedStagesKvar.length > 0 && (<div className="mt-6 bg-white p-6 rounded-2xl"><h4 className="text-sm font-bold text-slate-400 uppercase mb-4">Estágios ilustrativos — validar com o controlador e a carga mínima</h4><div className="flex flex-wrap gap-3">{dimensionamento.suggestedStagesKvar.map((estagio, idx) => (<div key={idx} className="bg-blue-50 px-4 py-2 rounded-lg"><span className="text-xs">Estágio {idx + 1}:</span><span className="font-bold text-blue-700 ml-2">{estagio} kVAr</span></div>))}</div></div>)}
+                {(dimensionamento.releaseReasons.length > 0 || dimensionamento.warnings.length > 0) && (<div className="mt-6 bg-amber-50 border border-amber-200 p-5 rounded-2xl"><h4 className="font-bold text-amber-900 mb-2">Pendências para liberação</h4><ul className="list-disc pl-5 text-sm text-amber-900 space-y-1">{[...dimensionamento.releaseReasons, ...dimensionamento.warnings].map((item, index) => <li key={index}>{item}</li>)}</ul></div>)}
+                <div className="mt-6 bg-white p-6 rounded-2xl border-2 border-slate-200"><h4 className="text-sm font-bold text-slate-600 uppercase mb-4">Cenário econômico — não é cotação nem garantia</h4><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div><div className="flex justify-between items-center"><span className="text-slate-600">Faixa paramétrica:</span><span className="font-bold text-lg">R$ {dimensionamento.orcamentoEstimado.min.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} - R$ {dimensionamento.orcamentoEstimado.max.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span></div></div><div><div className="flex justify-between items-center"><span className="text-slate-600">Exposição mensal estimada:</span><span className="font-bold text-amber-700 text-lg">R$ {dimensionamento.economiaMensalEstimada.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span></div></div></div></div>
               </div>
             )}
 
@@ -1298,13 +1353,13 @@ export default function AnaliseMassaPage() {
 
             {/* OBSERVACAO */}
             {dimensionamento && (
-              <div className="bg-amber-50 border-2 border-amber-200 p-6 rounded-3xl mt-6 shadow-sm"><div className="flex items-start gap-4"><div className="bg-amber-100 p-3 rounded-full text-amber-600 flex-shrink-0"><AlertTriangle size={24} /></div><div><h4 className="text-amber-900 font-bold text-lg">Observacao Importante</h4><p className="text-amber-800 leading-relaxed">O sistema recomenda <strong>{dimensionamento.tipoRecomendado === "fixo" ? dimensionamento.bancoSugeridoFixo : dimensionamento.bancoSugeridoAutomatico} kVAr</strong> para corrigir o fator de potencia. Verifique a configuracao do banco existente antes de instalar novos capacitores.</p><div className="pt-2 flex items-center gap-2 text-xs text-amber-700 italic"><Info size={14} /> <span>Nota: Se houver capacitores fixos instalados apos o ponto de medicao, a necessidade real pode diferir do valor calculado.</span></div></div></div></div>
+              <div className="bg-amber-50 border-2 border-amber-200 p-6 rounded-3xl mt-6 shadow-sm"><div className="flex items-start gap-4"><div className="bg-amber-100 p-3 rounded-full text-amber-600 flex-shrink-0"><AlertTriangle size={24} /></div><div><h4 className="text-amber-900 font-bold text-lg">Responsabilidade técnica</h4><p className="text-amber-800 leading-relaxed">A referência de <strong>{dimensionamento.bancoSugeridoAutomatico || 0} kVAr</strong> é um pré-dimensionamento estatístico. Não compre nem instale equipamentos enquanto o status não indicar “especificação condicionada” e o projeto não for aprovado pelo responsável técnico.</p><div className="pt-2 flex items-center gap-2 text-xs text-amber-700 italic"><Info size={14} /> <span>Banco existente, carga mínima, ressonância, curto-circuito, proteção, manobra e ventilação podem alterar a solução.</span></div></div></div></div>
             )}
 
             {/* CONFIGURACAO E RESUMO */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-white p-6 rounded-3xl border border-slate-100"><h4 className="font-bold text-primary mb-4 flex items-center gap-2"><Settings size={16} /> Configuracao</h4><div className="space-y-4"><div><label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Potencia Instalada (kVA)</label><input type="number" step="10" value={potenciaInstalada} onChange={(e) => setPotenciaInstalada(parseFloat(e.target.value) || 0)} className="w-full bg-slate-50 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50" /></div><div><label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Meta Fator de Potencia</label><input type="number" step="0.01" min="0.7" max="0.99" value={targetFP} onChange={(e) => setTargetFP(parseFloat(e.target.value) || 0.92)} className="w-full bg-slate-50 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50" /></div><button onClick={handleRecalcular} className="w-full bg-primary text-white py-2 rounded-lg hover:bg-primary/90">Recalcular</button></div></div>
-              <div className="bg-primary p-6 rounded-3xl text-white shadow-xl col-span-2 relative overflow-hidden"><div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" /><h3 className="text-xl font-bold mb-4 flex items-center gap-2"><Zap className="text-secondary" /> Resumo Executivo</h3><div className="grid grid-cols-2 gap-4 mb-6"><div><p className="text-white/60 text-xs">Multa Mensal Estimada</p><p className="text-xl font-bold">R$ {stats?.multaMensalProjetada.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</p></div><div><p className="text-white/60 text-xs">Banco Recomendado</p><p className="text-xl font-bold">{dimensionamento?.bancoSugeridoAutomatico || 0} kVAr</p></div><div><p className="text-white/60 text-xs">Payback Estimado</p><p className="text-xl font-bold">{dimensionamento?.paybackMeses || 0} meses</p></div><div><p className="text-white/60 text-xs">Conformidade</p><p className="text-xl font-bold">{stats?.percentualConformidade.toFixed(0)}%</p></div></div><button onClick={exportToPDF} className="w-full bg-secondary text-primary font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-secondary/90"><Download size={18} /> Exportar Relatorio PDF</button></div>
+              <div className="bg-white p-6 rounded-3xl border border-slate-100"><h4 className="font-bold text-primary mb-4 flex items-center gap-2"><Settings size={16} /> Configuração e liberações</h4><div className="space-y-4"><div><label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Potência instalada (kVA)</label><input type="number" step="10" value={potenciaInstalada} onChange={(e) => setPotenciaInstalada(parseFloat(e.target.value) || 0)} className="w-full bg-slate-50 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50" /></div><div><label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Meta de fator de potência</label><input type="number" step="0.01" min="0.92" max="0.99" value={targetFP} onChange={(e) => setTargetFP(Math.min(0.99, Math.max(0.92, parseFloat(e.target.value) || 0.92)))} className="w-full bg-slate-50 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50" /></div><label className="flex gap-2 text-xs"><input type="checkbox" checked={representativeCampaignConfirmed} onChange={(e) => setRepresentativeCampaignConfirmed(e.target.checked)} /><span>Ciclo de operação representativo confirmado</span></label><label className="flex gap-2 text-xs"><input type="checkbox" checked={harmonicStudyValidated} onChange={(e) => setHarmonicStudyValidated(e.target.checked)} /><span>Harmônicos, ressonância e dessintonia validados</span></label><label className="flex gap-2 text-xs"><input type="checkbox" checked={protectionStudyValidated} onChange={(e) => setProtectionStudyValidated(e.target.checked)} /><span>Proteção, cabos, manobra e ventilação validados</span></label><p className="text-[10px] text-amber-700">Marque somente com evidência registrada e aprovação do responsável técnico.</p><button onClick={handleRecalcular} className="w-full bg-primary text-white py-2 rounded-lg hover:bg-primary/90">Recalcular</button></div></div>
+              <div className="bg-primary p-6 rounded-3xl text-white shadow-xl col-span-2 relative overflow-hidden"><div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" /><h3 className="text-xl font-bold mb-4 flex items-center gap-2"><Zap className="text-secondary" /> Resumo Executivo</h3><div className="grid grid-cols-2 gap-4 mb-6"><div><p className="text-white/60 text-xs">Exposição mensal modelada</p><p className="text-xl font-bold">R$ {stats?.multaMensalProjetada.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</p></div><div><p className="text-white/60 text-xs">Referência preliminar</p><p className="text-xl font-bold">{dimensionamento?.bancoSugeridoAutomatico || 0} kVAr</p></div><div><p className="text-white/60 text-xs">Liberação</p><p className="text-xl font-bold">{dimensionamento?.specificationAllowed ? "Condicionada" : dimensionamento?.releaseLevel === "bloqueado" ? "Bloqueada" : "Pré-dimensionamento"}</p></div><div><p className="text-white/60 text-xs">Conformidade amostral</p><p className="text-xl font-bold">{stats?.percentualConformidade.toFixed(0)}%</p></div></div><button onClick={exportToPDF} className="w-full bg-secondary text-primary font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-secondary/90"><Download size={18} /> Exportar relatório PDF</button></div>
             </div>
 
             {/* TABELA */}

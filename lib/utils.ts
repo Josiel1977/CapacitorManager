@@ -289,7 +289,7 @@ export function getPlanFeatures(plan: string): string[] {
   const features = {
     demo: ['Acesso limitado', 'Apenas demonstração', 'Sem suporte'],
     essencial: ['Até 10 clientes', 'Até 50 capacitores', 'Suporte por email', 'Relatórios básicos'],
-    pro: ['Clientes ilimitados', 'Capacitores ilimitados', 'Suporte prioritário', 'Relatórios avançados', 'API acesso'],
+    pro: ['Até 20 clientes', 'Até 20 bancos', 'Até 200 capacitores', 'Suporte prioritário', 'Relatórios avançados'],
     enterprise: ['Tudo do Pro', 'Suporte dedicado', 'Customizações', 'SLA garantido', 'On-premise opcional'],
   };
   return features[plan as keyof typeof features] || features.demo;

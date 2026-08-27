@@ -1,247 +1,65 @@
 'use client';
 
-import { useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient';
+import Link from 'next/link';
 import Swal from 'sweetalert2';
-import { motion } from 'motion/react';
-import { Zap, Mail, Lock, Building } from 'lucide-react';
-
-const PLANOS = [
-  { id: 'basico', nome: 'Básico', preco: 'R$ 149/mês', descricao: '1 cliente, 1 banco, 6 capacitores' },
-  { id: 'essencial', nome: 'Essencial', preco: 'R$ 297/mês', descricao: '5 clientes, 10 bancos, 50 capacitores' },
-  { id: 'pro', nome: 'Pro', preco: 'R$ 597/mês', descricao: '20 clientes, 50 bancos, 200 capacitores' },
-  { id: 'master', nome: 'Master', preco: 'R$ 797/mês', descricao: '50+ clientes, bancos ilimitados' },
-];
-
-const gerarSubdomain = (nome: string): string => {
-  const baseSubdomain = nome
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return `${baseSubdomain}-${Date.now()}`;
-};
+import { supabase } from '@/lib/supabaseClient';
+import { PLAN_LIST, formatPlanLimits, type PlanId } from '@/lib/plans';
 
 export default function SignupPage() {
   const router = useRouter();
   const [empresa, setEmpresa] = useState('');
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
-  const [plano, setPlano] = useState('basico');
+  const [plano, setPlano] = useState<PlanId>('basico');
   const [aceiteTermos, setAceiteTermos] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!aceiteTermos) {
-      Swal.fire('Aceite necessário', 'Você precisa aceitar os Termos de Uso e a Política de Privacidade.', 'warning');
-      return;
-    }
+  async function submit(event: FormEvent) {
+    event.preventDefault();
     setLoading(true);
-
     try {
-      let userId: string | undefined;
-      let isExistingUser = false;
-
-      // 1. Tentar criar usuário no Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email,
-        password: senha,
-        options: { data: { nome: empresa, plano_interesse: plano } },
+      const response = await fetch('/api/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empresa, email, senha, plano, aceiteTermos }),
       });
-
-      if (authError) {
-        if (authError.message.includes('already registered') || authError.message.includes('already exists')) {
-          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-            email,
-            password: senha,
-          });
-          
-          if (signInError) {
-            throw new Error('Usuário já cadastrado. Tente fazer login ou use outra senha.');
-          }
-          
-          userId = signInData.user?.id;
-          isExistingUser = true;
-        } else {
-          throw new Error(authError.message);
-        }
-      } else {
-        userId = authData.user?.id;
-      }
-
-      if (!userId) throw new Error('Erro ao criar/buscar usuário');
-
-      // 2. Verificar se já existe profile para este usuário
-      const { data: existingProfile } = await supabase
-        .from('profiles')
-        .select('tenant_id')
-        .eq('id', userId)
-        .single();
-
-      if (existingProfile?.tenant_id) {
-        Swal.fire({
-          title: 'Bem-vindo de volta!',
-          text: 'Você já possui uma conta. Redirecionando...',
-          icon: 'info',
-          confirmButtonColor: '#0a2b3c',
-        });
-        router.push(`/planos?tenant_id=${existingProfile.tenant_id}`);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Não foi possível criar a conta.');
+      if (result.requiresEmailConfirmation) {
+        await Swal.fire('Confirme seu e-mail', 'Enviamos um link de confirmação. Depois, faça login para escolher o plano.', 'success');
+        router.replace('/login');
         return;
       }
-
-      // 3. Criar tenant (empresa)
-      const tenantId = crypto.randomUUID();
-      const subdomain = gerarSubdomain(empresa);
-      const planoNome = PLANOS.find(p => p.id === plano)?.nome || 'Básico';
-
-      const { error: tenantError } = await supabase
-        .from('tenants')
-        .insert({
-          id: tenantId,
-          name: empresa,
-          subdomain: subdomain,
-          email: email,
-          plan: 'trial',
-          status: 'active',
-          plano: plano,
-          payment_status: 'pending',
-          termos_aceito: true,
-          data_aceite_termos: new Date().toISOString(),
-          limite_clientes: 5,
-          limite_bancos: 10,
-          limite_capacitores: 50,
-        });
-      
-      if (tenantError) throw new Error(tenantError.message);
-
-      // 4. Criar perfil do usuário (com campos corretos da tabela)
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({
-          id: userId,
-          tenant_id: tenantId,
-          email: email,
-          role: 'cliente',
-          status: 'pendente',
-          plano: planoNome,
-          plan: 'free',
-          subscription_status: 'inactive',
-        });
-      
-      if (profileError) throw new Error(profileError.message);
-
-      // 5. Fazer login automático
-      if (!isExistingUser) {
-        await supabase.auth.signInWithPassword({ email, password: senha });
-      }
-
-      Swal.fire({
-        title: 'Conta criada!',
-        text: 'Agora escolha o plano para ativar seu acesso.',
-        icon: 'success',
-        confirmButtonColor: '#0a2b3c',
-      });
-      router.push(`/planos?tenant_id=${tenantId}`);
-    } catch (error: any) {
-      Swal.fire('Erro', error.message, 'error');
+      const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password: senha });
+      if (error) throw new Error('Conta criada. Faça login para continuar.');
+      router.replace('/planos');
+    } catch (error) {
+      Swal.fire('Cadastro não concluído', error instanceof Error ? error.message : 'Tente novamente.', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 to-secondary/10 p-4">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
-        <div className="bg-primary p-6 text-center">
-          <div className="inline-flex p-3 bg-white/10 rounded-xl mb-4"><Zap size={32} className="text-secondary" /></div>
-          <h1 className="text-2xl font-bold text-white">CapacitorManager</h1>
-          <p className="text-white/70 text-sm">Comece sua jornada</p>
-        </div>
-        <form onSubmit={handleSignup} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Empresa *</label>
-            <div className="relative">
-              <Building className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input
-                type="text"
-                required
-                placeholder="Minha Empresa Ltda"
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:border-primary focus:outline-none"
-                value={empresa}
-                onChange={e => setEmpresa(e.target.value)}
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">E-mail *</label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input
-                type="email"
-                required
-                placeholder="contato@empresa.com"
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:border-primary focus:outline-none"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Senha *</label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input
-                type="password"
-                required
-                placeholder="Mínimo 6 caracteres"
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:border-primary focus:outline-none"
-                value={senha}
-                onChange={e => setSenha(e.target.value)}
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Escolha seu plano *</label>
-            <div className="space-y-2">
-              {PLANOS.map(p => (
-                <label
-                  key={p.id}
-                  className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition ${plano === p.id ? 'border-primary bg-primary/5' : 'border-slate-200 hover:bg-slate-50'}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <input type="radio" name="plano" value={p.id} checked={plano === p.id} onChange={() => setPlano(p.id)} className="text-primary" />
-                    <div>
-                      <p className="font-medium">{p.nome}</p>
-                      <p className="text-xs text-slate-500">{p.descricao}</p>
-                    </div>
-                  </div>
-                  <p className="font-bold text-primary">{p.preco}</p>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <input type="checkbox" id="termos" checked={aceiteTermos} onChange={e => setAceiteTermos(e.target.checked)} className="mt-1 text-primary focus:ring-primary" />
-            <label htmlFor="termos" className="text-xs text-slate-600">
-              Li e aceito os <a href="/termos" target="_blank" className="text-primary hover:underline">Termos de Uso</a> e a{' '}
-              <a href="/privacidade" target="_blank" className="text-primary hover:underline">Política de Privacidade</a>.
-            </label>
-          </div>
-          <button
-            type="submit"
-            disabled={loading || !aceiteTermos}
-            className="w-full bg-primary text-white py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {loading ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Criar conta'}
-          </button>
-          <p className="text-center text-xs text-slate-400">
-            Já tem conta? <a href="/login" className="text-primary hover:underline">Faça login</a>
-          </p>
-        </form>
-      </motion.div>
-    </div>
+    <main className="min-h-screen grid place-items-center bg-slate-50 p-4">
+      <form onSubmit={submit} className="w-full max-w-lg space-y-4 rounded-2xl bg-white p-7 shadow-lg">
+        <div><h1 className="text-2xl font-bold text-primary">Criar conta</h1><p className="text-sm text-slate-600">Cadastre sua empresa para contratar o CapacitorManager.</p></div>
+        <input required minLength={2} maxLength={160} value={empresa} onChange={(e) => setEmpresa(e.target.value)} className="w-full rounded-lg border p-3" placeholder="Nome da empresa" />
+        <input required type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-lg border p-3" placeholder="voce@empresa.com" />
+        <input required type="password" minLength={12} autoComplete="new-password" value={senha} onChange={(e) => setSenha(e.target.value)} className="w-full rounded-lg border p-3" placeholder="Senha com 12 ou mais caracteres" />
+        <fieldset className="space-y-2"><legend className="mb-2 font-medium">Plano desejado</legend>{PLAN_LIST.map((plan) => (
+          <label key={plan.id} className={`block cursor-pointer rounded-lg border p-3 ${plano === plan.id ? 'border-primary bg-primary/5' : ''}`}>
+            <input type="radio" name="plano" className="mr-2" checked={plano === plan.id} onChange={() => setPlano(plan.id)} />
+            <strong>{plan.name}</strong> — R$ {plan.priceMonthly}/mês
+            <span className="block pl-6 text-xs text-slate-500">{formatPlanLimits(plan)}</span>
+          </label>
+        ))}</fieldset>
+        <label className="flex items-start gap-2 text-xs text-slate-600"><input required type="checkbox" className="mt-1" checked={aceiteTermos} onChange={(e) => setAceiteTermos(e.target.checked)} /><span>Li e aceito os <Link className="text-primary underline" href="/termos" target="_blank">Termos de Uso</Link> e a <Link className="text-primary underline" href="/privacidade" target="_blank">Política de Privacidade</Link>.</span></label>
+        <button disabled={loading || !aceiteTermos} className="w-full rounded-lg bg-primary p-3 font-semibold text-white disabled:opacity-50">{loading ? 'Criando conta…' : 'Criar conta'}</button>
+        <p className="text-center text-sm">Já tem uma conta? <Link className="text-primary underline" href="/login">Entrar</Link></p>
+      </form>
+    </main>
   );
 }

@@ -25,6 +25,7 @@ export default function LeadCapture({
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
+  const [consent, setConsent] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,13 +37,14 @@ export default function LeadCapture({
       const response = await fetch('/api/lead', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, nome, origem: window.location.pathname })
+        body: JSON.stringify({ email, nome, origem: window.location.pathname, aceite_privacidade: consent })
       });
 
       if (response.ok) {
         setSuccess(true);
         setEmail('');
         setNome('');
+        setConsent(false);
         setTimeout(() => setSuccess(false), 3000);
       }
     } catch (error) {
@@ -91,6 +93,7 @@ export default function LeadCapture({
             className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             value={nome}
             onChange={(e) => setNome(e.target.value)}
+            required
           />
           <input
             type="email"
@@ -100,9 +103,10 @@ export default function LeadCapture({
             onChange={(e) => setEmail(e.target.value)}
             required
           />
+          <label className="flex items-start gap-2 text-[11px] text-slate-500"><input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" /><span>Concordo com a <a href="/privacidade" target="_blank" className="underline">Política de Privacidade</a>.</span></label>
           <button 
             type="submit"
-            disabled={submitting}
+            disabled={submitting || !consent}
             className="w-full bg-primary text-white py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
           >
             {submitting ? 'Enviando...' : buttonText}
@@ -150,6 +154,7 @@ export default function LeadCapture({
                   className="w-full rounded-lg border border-slate-200 px-4 py-2"
                   value={nome}
                   onChange={(e) => setNome(e.target.value)}
+                  required
                 />
                 <input
                   type="email"
@@ -159,9 +164,10 @@ export default function LeadCapture({
                   onChange={(e) => setEmail(e.target.value)}
                   required
                 />
+                <label className="flex items-start gap-2 text-xs text-slate-500"><input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" /><span>Concordo com a <a href="/privacidade" target="_blank" className="underline">Política de Privacidade</a>.</span></label>
                 <button 
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || !consent}
                   className="w-full bg-primary text-white py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {submitting ? 'Enviando...' : <><Send size={16} /> {buttonText}</>}
@@ -189,6 +195,7 @@ export default function LeadCapture({
             className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
             value={nome}
             onChange={(e) => setNome(e.target.value)}
+            required
           />
           <input
             type="email"
@@ -198,9 +205,10 @@ export default function LeadCapture({
             onChange={(e) => setEmail(e.target.value)}
             required
           />
+          <label className="flex items-start gap-1 text-[11px] text-slate-500"><input type="checkbox" required checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" /><span>Aceito a <a href="/privacidade" target="_blank" className="underline">Política de Privacidade</a>.</span></label>
           <button 
             type="submit"
-            disabled={submitting}
+            disabled={submitting || !consent}
             className="bg-primary text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
           >
             {success ? <CheckCircle size={16} /> : submitting ? '...' : buttonText}

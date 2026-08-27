@@ -1,11 +1,8 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/server';
 
 export default async function VisualizarLaudo({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params;
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = await createClient();
 
   const { data: auditoria } = await supabase
     .from('auditorias')

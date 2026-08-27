@@ -1,9 +1,11 @@
-export const SIZING_ENGINE_VERSION = "2.0.0-audit";
+export const SIZING_ENGINE_VERSION = "3.0.0-rc23";
 export const REGULATORY_MINIMUM_FP = 0.92;
 export const MINIMUM_INVOICES = 3;
 export const RECOMMENDED_INVOICES = 6;
 
 export type ConfidenceLevel = "validated" | "preliminary" | "insufficient";
+export type InvoiceDemandSource = "invoice" | "manual_measurement" | "transformer_estimate";
+export type InvoicePowerFactorSource = "invoice" | "manual_measurement" | "derived_energy" | "unknown";
 
 export interface SizingInvoiceInput {
   id: string;
@@ -22,6 +24,12 @@ export interface SizingOptions {
   controllerStages?: number;
   installedTransformerKva?: number;
   transformerSafetyLimit?: number;
+  /** Percentual prudente da penalidade que se espera eliminar (0–100). */
+  savingsRealizationPercent?: number;
+  demandSource?: InvoiceDemandSource;
+  powerFactorSource?: InvoicePowerFactorSource;
+  /** Demanda ativa e FP obtidos no mesmo intervalo de integração. */
+  coincidentDemandAndPowerFactor?: boolean;
 }
 
 export interface MonthlySizingResult {
@@ -37,9 +45,15 @@ export interface SizingAuditResult {
   engineVersion: string;
   calculatedAt: string;
   confidence: ConfidenceLevel;
+  method: "invoice_pre_sizing";
+  releaseLevel: "blocked" | "pre_sizing";
+  specificationAllowed: false;
   targetPowerFactor: number;
   percentile: number;
   theoreticalKvar: number;
+  p50Kvar: number;
+  p90Kvar: number;
+  p95Kvar: number;
   commercialKvar: number;
   projectedPowerFactor: number;
   stages: number[];
@@ -50,6 +64,7 @@ export interface SizingAuditResult {
   transformerLimitKvar: number | null;
   limitApplied: boolean;
   warnings: string[];
+  assumptions: string[];
   formula: string;
 }
 
@@ -97,6 +112,7 @@ export function calculateAuditableSizing(
   const targetFp = options.targetPowerFactor;
   const marginMultiplier = 1 + Math.max(0, options.futureLoadMarginPercent ?? 0) / 100;
   const warnings: string[] = [];
+  const assumptions: string[] = [];
   const excludedInvoices: SizingAuditResult["excludedInvoices"] = [];
 
   if (!(targetFp >= REGULATORY_MINIMUM_FP && targetFp < 1)) {
@@ -128,23 +144,44 @@ export function calculateAuditableSizing(
     }];
   });
 
-  let confidence: ConfidenceLevel = "validated";
-  if (monthly.length < MINIMUM_INVOICES) confidence = "insufficient";
-  else if (monthly.length < RECOMMENDED_INVOICES || excludedInvoices.length > 0) confidence = "preliminary";
+  let confidence: ConfidenceLevel = monthly.length < MINIMUM_INVOICES ? "insufficient" : "preliminary";
 
   if (confidence === "insufficient") {
     warnings.push(`São necessárias pelo menos ${MINIMUM_INVOICES} faturas válidas com demanda e FP confiável.`);
-  } else if (confidence === "preliminary") {
-    warnings.push(`Resultado preliminar: recomenda-se analisar entre ${RECOMMENDED_INVOICES} e 12 faturas válidas.`);
+  } else if (monthly.length < RECOMMENDED_INVOICES || excludedInvoices.length > 0) {
+    warnings.push(`Pré-dimensionamento com histórico limitado: recomenda-se analisar entre ${RECOMMENDED_INVOICES} e 12 faturas válidas.`);
+  } else {
+    warnings.push("Mesmo com histórico completo, faturas permitem apenas pré-dimensionamento. A especificação exige campanha temporal e validações de engenharia.");
   }
   if (excludedInvoices.length) warnings.push(`${excludedInvoices.length} fatura(s) foram excluídas da memória de cálculo.`);
   if ((options.futureLoadMarginPercent ?? 0) > 0) {
     warnings.push("A margem de crescimento aumenta o banco e deve ser justificada por expansão documentada da carga.");
   }
+  if (options.demandSource === "transformer_estimate") {
+    warnings.push("A potência ativa foi estimada pela carga do transformador; substitua-a por demanda medida para reduzir a incerteza.");
+    assumptions.push("Demanda ativa estimada a partir da potência do transformador e do fator de carga informado.");
+  } else if (options.demandSource === "manual_measurement") {
+    assumptions.push("Demanda ativa informada manualmente pelo usuário.");
+  } else {
+    assumptions.push("Demanda ativa extraída do histórico de faturas.");
+  }
+  if (options.powerFactorSource === "derived_energy") {
+    warnings.push("O FP foi derivado de energias agregadas e pode não coincidir com a demanda máxima do mês.");
+    assumptions.push("Fator de potência derivado de energia ativa e reativa agregadas.");
+  } else if (options.powerFactorSource === "manual_measurement") {
+    assumptions.push("Fator de potência informado manualmente pelo usuário.");
+  } else {
+    assumptions.push("Fator de potência extraído/informado nas faturas válidas.");
+  }
+  if (!options.coincidentDemandAndPowerFactor) {
+    warnings.push("Demanda e fator de potência não foram confirmados como coincidentes no mesmo intervalo; o resultado não libera compra ou instalação.");
+  }
 
-  const theoreticalKvar = confidence === "insufficient"
-    ? 0
-    : percentileValue(monthly.map((item) => item.theoreticalKvar), percentile);
+  const distribution = monthly.map((item) => item.theoreticalKvar);
+  const p50Kvar = confidence === "insufficient" ? 0 : percentileValue(distribution, 0.5);
+  const p90Kvar = confidence === "insufficient" ? 0 : percentileValue(distribution, 0.9);
+  const p95Kvar = confidence === "insufficient" ? 0 : percentileValue(distribution, 0.95);
+  const theoreticalKvar = confidence === "insufficient" ? 0 : percentileValue(distribution, percentile);
   let commercialKvar = Math.ceil(theoreticalKvar / 2.5) * 2.5;
 
   const installedKva = options.installedTransformerKva ?? 0;
@@ -166,25 +203,51 @@ export function calculateAuditableSizing(
     warnings.push("Economia não calculada: informe o reativo excedente e a tarifa aplicável, ou o valor faturado da penalidade.");
   }
 
+  const realization = Math.min(100, Math.max(0, options.savingsRealizationPercent ?? 90));
+  if (estimatedMonthlyReactiveCharge > 0 && realization < 100) {
+    warnings.push(`A economia usa realização prudente de ${realization}% da cobrança reativa média; não é garantia de resultado.`);
+  }
+
+  let projectedPowerFactor = monthly.length
+    ? Math.min(...monthly.map((item) => item.powerFactor), targetFp)
+    : targetFp;
+  if (commercialKvar > 0 && !limitApplied) {
+    projectedPowerFactor = targetFp;
+  } else if (commercialKvar > 0 && monthly.length) {
+    const representative = monthly.reduce((best, item) =>
+      Math.abs(item.theoreticalKvar - theoreticalKvar) < Math.abs(best.theoreticalKvar - theoreticalKvar) ? item : best
+    );
+    const activePower = representative.demandKw * marginMultiplier;
+    const originalReactive = activePower * Math.tan(Math.acos(representative.powerFactor));
+    const remainingReactive = Math.max(0, originalReactive - commercialKvar);
+    projectedPowerFactor = activePower / Math.sqrt(activePower ** 2 + remainingReactive ** 2);
+    warnings.push('O fator de potência projetado ficou abaixo do alvo porque o limite preventivo do transformador restringiu o banco.');
+  }
+
   return {
     engineVersion: SIZING_ENGINE_VERSION,
     calculatedAt: new Date().toISOString(),
     confidence,
+    method: "invoice_pre_sizing",
+    releaseLevel: confidence === "insufficient" ? "blocked" : "pre_sizing",
+    specificationAllowed: false,
     targetPowerFactor: targetFp,
     percentile,
     theoreticalKvar: round(theoreticalKvar),
+    p50Kvar: round(p50Kvar),
+    p90Kvar: round(p90Kvar),
+    p95Kvar: round(p95Kvar),
     commercialKvar: round(commercialKvar),
-    projectedPowerFactor: commercialKvar > 0
-      ? targetFp
-      : monthly.length ? Math.min(...monthly.map((item) => item.powerFactor), targetFp) : targetFp,
+    projectedPowerFactor: round(projectedPowerFactor, 4),
     stages: buildCommercialStages(commercialKvar, options.controllerStages ?? 6),
     monthly,
     excludedInvoices,
     estimatedMonthlyReactiveCharge: round(estimatedMonthlyReactiveCharge, 2),
-    estimatedMonthlySaving: round(estimatedMonthlyReactiveCharge, 2),
+    estimatedMonthlySaving: round(estimatedMonthlyReactiveCharge * realization / 100, 2),
     transformerLimitKvar: transformerLimitKvar === null ? null : round(transformerLimitKvar),
     limitApplied,
     warnings,
-    formula: "Qc = P × [tan(arccos(FP atual)) − tan(arccos(FP alvo))]; referência = percentil das faturas válidas",
+    assumptions,
+    formula: "Qc = P × [tan(arccos(FP atual)) − tan(arccos(FP alvo))]; faixa = P50/P90/P95 das faturas válidas",
   };
 }

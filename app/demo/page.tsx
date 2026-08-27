@@ -11,6 +11,10 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { cn } from '@/lib/utils';
+import { calculateExpectedCapacitorCurrent } from '@/lib/domain/capacitorAnalysis';
+import { readJsonResponse } from '@/lib/http-json-response';
+import { parseEquatorialInvoiceText, reconstructPdfText } from '@/lib/equatorial-invoice-parser';
+import { buildInvoiceAuditResult, type InvoiceAuditResult } from '@/lib/invoice-audit-result';
 
 // Dados padrão para demonstração
 const DEFAULT_CAPACITOR = {
@@ -19,6 +23,28 @@ const DEFAULT_CAPACITOR = {
   tensao_nominal_v: 480,
   capacitancia_nominal_uf: 138,
 };
+
+async function analyzeInvoiceLocally(file: File): Promise<InvoiceAuditResult> {
+  const pdfjs = await import('pdfjs-dist');
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.min.mjs',
+    import.meta.url,
+  ).toString();
+  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  let text = '';
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    text += `${reconstructPdfText(content.items as any[])}\n`;
+  }
+  const parsed = parseEquatorialInvoiceText(text, file.name);
+  const hasUsefulData = parsed.total_pagar > 0
+    || parsed.consumo_ponta_kwh > 0
+    || parsed.consumo_fora_ponta_kwh > 0
+    || (parsed.penalidade_reativa_informada ?? 0) > 0;
+  if (!hasUsefulData) throw new Error('Não foi possível identificar os campos da fatura Equatorial.');
+  return buildInvoiceAuditResult(parsed);
+}
 
 export default function DemoPage() {
   const router = useRouter();
@@ -123,7 +149,11 @@ export default function DemoPage() {
           setLoading(false);
           return;
         }
-        valorTeorico = (capacitorParams.potencia_kvar * 1000) / (Math.sqrt(3) * tensao);
+        valorTeorico = calculateExpectedCapacitorCurrent(
+          capacitorParams.potencia_kvar,
+          capacitorParams.tensao_nominal_v,
+          tensao,
+        );
         desvio = ((valorNumerico - valorTeorico) / valorTeorico) * 100;
       } else {
         valorTeorico = capacitorParams.capacitancia_nominal_uf * 1.5;
@@ -135,13 +165,13 @@ export default function DemoPage() {
       
       if (desvio >= -5 && desvio <= 10) {
         status = 'aprovado';
-        mensagem = '✅ Capacitor dentro das especificações da norma IEC 60831-1/2. Nenhuma ação necessária.';
+        mensagem = '✅ Resultado dentro da faixa de aceitação configurada. Registre as condições do ensaio e mantenha o acompanhamento periódico.';
       } else if ((desvio >= -10 && desvio < -5) || (desvio > 10 && desvio <= 15)) {
         status = 'atencao';
-        mensagem = '⚠️ Capacitor em nível de atenção. Recomenda-se monitoramento mensal e planejamento de substituição em até 6 meses.';
+        mensagem = '⚠️ Desvio na faixa de atenção. Confirme as condições do ensaio e programe nova medição ou inspeção técnica.';
       } else {
         status = 'reprovado';
-        mensagem = '❌ Capacitor reprovado! Substituição imediata recomendada para evitar multas por baixo fator de potência.';
+        mensagem = '❌ Desvio fora da faixa configurada. Um profissional habilitado deve avaliar o componente e definir a ação segura.';
       }
       
       setResultado({ 
@@ -158,9 +188,9 @@ export default function DemoPage() {
     }, 500);
   }
 
-  function simularAnaliseFatura() {
+  async function simularAnaliseFatura() {
     if (!arquivoFatura) {
-      Swal.fire('Atenção', 'Faça o upload da fatura de energia em PDF ou imagem.', 'warning');
+      Swal.fire('Atenção', 'Faça o upload da fatura de energia em PDF.', 'warning');
       return;
     }
 
@@ -171,47 +201,35 @@ export default function DemoPage() {
     }
 
     setAnalisandoFatura(true);
-    setTimeout(() => {
-      // Valores exatos extraídos da fatura real (Equatorial PA / Premazon - 07/2026)
-      const valorTotalFatura = 6984.32;
-      const multaFp = 1886.73;
-      const multaPta = 139.85;
-      const totalMultas = multaFp + multaPta; // R$ 2.026,58
-      const percentualMulta = (totalMultas / valorTotalFatura) * 100; // ~29%
-
-      const historico12Meses = [
-        { mes: 'NOV', consumoFp: 22063, reativoFp: 4291, multaEstimada: 1650.00 },
-        { mes: 'DEZ', consumoFp: 21272, reativoFp: 3615, multaEstimada: 1420.00 },
-        { mes: 'JAN', consumoFp: 22922, reativoFp: 2347, multaEstimada: 980.00 },
-        { mes: 'FEV', consumoFp: 23862, reativoFp: 5995, multaEstimada: 2290.00 },
-        { mes: 'MAR', consumoFp: 24942, reativoFp: 4073, multaEstimada: 1560.00 },
-        { mes: 'ABR', consumoFp: 18341, reativoFp: 5728, multaEstimada: 2190.00 },
-        { mes: 'MAI', consumoFp: 24572, reativoFp: 5623, multaEstimada: 2150.00 },
-        { mes: 'JUN', consumoFp: 21207, reativoFp: 4361, multaEstimada: 1680.00 },
-        { mes: 'JUL', consumoFp: 24608, reativoFp: 4925, multaEstimada: 2026.58 },
-        { mes: 'AGO (Proj)', consumoFp: 23500, reativoFp: 4800, multaEstimada: 1950.00 },
-        { mes: 'SET (Proj)', consumoFp: 24000, reativoFp: 4900, multaEstimada: 1980.00 },
-        { mes: 'OUT (Proj)', consumoFp: 23800, reativoFp: 4750, multaEstimada: 1900.00 },
-      ];
-
-      const economiaAnualProjetada = historico12Meses.reduce((acc, curr) => acc + curr.multaEstimada, 0);
-
-      setResultadoFatura({
-        valorTotalFatura,
-        multaReativoFp: multaFp,
-        multaReativoPta: multaPta,
-        totalMultas,
-        percentualMulta,
-        economiaAnualProjetada,
-        consumoKwh: 24608.05,
-        empresa: "PREMAZON PREMOLDADOS DE CONCRETO LTDA",
-        mesReferencia: "07/2026",
-        historico12Meses
-      });
-
-      setAnalisandoFatura(false);
+    try {
+      const formData = new FormData();
+      formData.append('fatura', arquivoFatura);
+      let auditResult: InvoiceAuditResult;
+      try {
+        const response = await fetch('/api/capacitormanager/auditar-fatura', {
+          method: 'POST',
+          body: formData,
+          signal: AbortSignal.timeout(35_000),
+        });
+        const body = await readJsonResponse<{ data: InvoiceAuditResult }>(
+          response,
+          'Não foi possível analisar a fatura.',
+        );
+        auditResult = body.data;
+      } catch (serverError) {
+        if (process.env.NODE_ENV === 'production') throw serverError;
+        auditResult = await analyzeInvoiceLocally(arquivoFatura);
+      }
+      setResultadoFatura(auditResult);
       incrementarContador();
-    }, 1200);
+    } catch (error) {
+      const message = error instanceof DOMException && error.name === 'TimeoutError'
+        ? 'O processamento ultrapassou 35 segundos. Tente novamente.'
+        : error instanceof Error ? error.message : 'Tente novamente.';
+      Swal.fire('Análise não concluída', message, 'error');
+    } finally {
+      setAnalisandoFatura(false);
+    }
   }
 
   function exibirModalLimite() {
@@ -287,13 +305,17 @@ export default function DemoPage() {
             <select id="plano" class="w-full border rounded-lg p-2">
               <option value="essencial">Plano Essencial - R$ 297/mês</option>
               <option value="pro">Plano Pro - R$ 597/mês</option>
-              <option value="enterprise">Enterprise - Sob Consulta</option>
+              <option value="master">Plano Master - R$ 797/mês</option>
             </select>
           </div>
           <div class="mb-3">
             <label class="block text-sm font-medium mb-1">Mensagem (opcional)</label>
             <textarea id="mensagem" rows="2" class="w-full border rounded-lg p-2" placeholder="Quero eliminar minhas multas de reativos..."></textarea>
           </div>
+          <label class="flex items-start gap-2 text-xs">
+            <input type="checkbox" id="privacidade" class="mt-0.5">
+            <span>Concordo com a Política de Privacidade para que a equipe responda a esta solicitação.</span>
+          </label>
         </form>
       `,
       showCancelButton: true,
@@ -308,9 +330,10 @@ export default function DemoPage() {
         const telefone = (document.getElementById('telefone') as HTMLInputElement).value;
         const plano_interesse = (document.getElementById('plano') as HTMLSelectElement).value;
         const mensagem = (document.getElementById('mensagem') as HTMLTextAreaElement).value;
+        const aceite_privacidade = (document.getElementById('privacidade') as HTMLInputElement).checked;
         
-        if (!nome || !email || !telefone) {
-          Swal.showValidationMessage('Preencha nome, e-mail e telefone');
+        if (!nome || !email || !telefone || !aceite_privacidade) {
+          Swal.showValidationMessage('Preencha nome, e-mail e telefone e aceite a Política de Privacidade');
           return false;
         }
 
@@ -326,7 +349,8 @@ export default function DemoPage() {
               empresa, 
               plano_interesse,
               mensagem,
-              origem: 'Demo Page - Historico 12 Meses'
+              origem: 'Demo Page - Auditoria de Fatura',
+              aceite_privacidade
             })
           });
           if (!response.ok) throw new Error('Erro ao enviar');
@@ -372,7 +396,7 @@ export default function DemoPage() {
             Experimente o <span className="text-secondary">CapacitorManager</span>
           </h1>
           <p className="text-lg text-white/80 md:text-xl max-w-2xl">
-            Valide capacitores em campo ou audite o histórico de 12 meses da sua fatura para visualizar o impacto real das multas por reativo.
+            Simule a validação de capacitores ou extraia os dados identificáveis de uma fatura para visualizar cobranças por reativo.
             {!bloqueado ? (
               <strong className="text-secondary"> {testesRestantes} teste(s) restante(s)</strong>
             ) : (
@@ -405,7 +429,7 @@ export default function DemoPage() {
                 : "bg-white text-slate-600 hover:bg-slate-50 border border-slate-200"
             )}
           >
-            <BarChart2 size={18} /> Auditoria & Histórico de 12 Meses
+            <BarChart2 size={18} /> Auditoria de Fatura
           </button>
         </div>
         <button
@@ -422,7 +446,7 @@ export default function DemoPage() {
           <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-primary">
-                {modoDemo === 'capacitor' ? '🎮 Simulador de Validação de Capacitores' : '📊 Auditoria Completa e Histórico de 12 Meses'}
+                {modoDemo === 'capacitor' ? '🎮 Simulador de Validação de Capacitores' : '📊 Auditoria da Fatura Enviada'}
               </h2>
               <div className="text-right">
                 <span className={cn(
@@ -549,7 +573,7 @@ export default function DemoPage() {
                     <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer relative">
                       <input 
                         type="file" 
-                        accept=".pdf,image/*" 
+                        accept="application/pdf,.pdf" 
                         className="absolute inset-0 opacity-0 cursor-pointer"
                         onChange={(e) => {
                           if (e.target.files && e.target.files[0]) {
@@ -559,9 +583,9 @@ export default function DemoPage() {
                       />
                       <Upload size={36} className="mx-auto text-primary mb-2" />
                       <p className="font-medium text-slate-700">
-                        {arquivoFatura ? arquivoFatura.name : "Faça upload da fatura de energia para extrair o histórico (PDF ou Imagem)"}
+                        {arquivoFatura ? arquivoFatura.name : "Faça upload da fatura de energia em PDF"}
                       </p>
-                      <p className="text-xs text-slate-400 mt-1">O sistema mapeará automaticamente os dados de consumo e multas dos últimos 12 meses presentes na fatura.</p>
+                      <p className="text-xs text-slate-400 mt-1">Compatível nesta versão com o modelo Equatorial Pará; confira os valores extraídos com o documento original.</p>
                     </div>
 
                     <button 
@@ -570,7 +594,7 @@ export default function DemoPage() {
                       className="w-full bg-primary text-white py-3 rounded-lg font-medium hover:bg-primary/95 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                       {analisandoFatura ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <BarChart2 size={18} />}
-                      Extrair e Analisar Histórico de 12 Meses
+                      Extrair e Analisar Fatura
                     </button>
                   </div>
                 ) : null}
@@ -595,7 +619,7 @@ export default function DemoPage() {
                       <div>
                         <span className="text-xs bg-red-100 text-red-700 font-bold px-2.5 py-1 rounded-full">Relatório de Auditoria Energética</span>
                         <h3 className="font-bold text-xl text-primary mt-2">{resultadoFatura.empresa}</h3>
-                        <p className="text-xs text-slate-500">Mês de Referência Analisado: {resultadoFatura.mesReferencia} | Leitura oficial dos últimos 12 meses</p>
+                        <p className="text-xs text-slate-500">Mês de referência identificado: {resultadoFatura.mesReferencia} | Resultado da fatura enviada</p>
                       </div>
                       <button onClick={handleNovoTeste} className="text-xs text-primary hover:underline flex items-center gap-1 font-medium">
                         <RefreshCw size={12} /> Nova Análise
@@ -623,23 +647,23 @@ export default function DemoPage() {
                       </div>
 
                       <div className="bg-amber-50 p-4 rounded-xl border border-amber-200">
-                        <span className="text-xs text-amber-800 font-medium block">Desperdício em 12 Meses</span>
+                        <span className="text-xs text-amber-800 font-medium block">Projeção anual prudente</span>
                         <strong className="text-xl text-amber-700 block mt-1">
                           R$ {resultadoFatura.economiaAnualProjetada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </strong>
                         <span className="text-[11px] text-amber-800 font-medium mt-1 block">
-                          Total jogado fora no ano
+                          12 meses × valor atual × 90%; não é histórico nem garantia
                         </span>
                       </div>
                     </div>
 
-                    {/* TABELA DE HISTÓRICO DOS ÚLTIMOS 12 MESES */}
+                    {/* DADOS DA FATURA ENVIADA */}
                     <div className="border rounded-2xl overflow-hidden bg-white shadow-sm">
                       <div className="bg-primary/5 px-4 py-3 border-b border-slate-100 flex justify-between items-center">
                         <h4 className="font-bold text-primary text-sm flex items-center gap-2">
-                          <Calendar size={16} /> Histórico de Consumo e Multas (Últimos 12 Meses na Fatura)
+                          <Calendar size={16} /> Dados identificados na fatura enviada
                         </h4>
-                        <span className="text-xs text-slate-500">Fonte: Tabela oficial da concessionária</span>
+                        <span className="text-xs text-slate-500">Fonte: PDF enviado; sujeito a conferência</span>
                       </div>
                       <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse text-xs">
@@ -671,7 +695,7 @@ export default function DemoPage() {
                     <div className="bg-gradient-to-r from-primary/10 to-secondary/10 p-5 rounded-2xl border border-primary/20 flex flex-col sm:flex-row items-center justify-between gap-4">
                       <div>
                         <h4 className="font-bold text-primary text-base">Chega de jogar dinheiro fora com multas!</h4>
-                        <p className="text-xs text-slate-600 mt-0.5">Com o CapacitorManager, você dimensiona e mantém seus bancos de capacitores zerando 100% dessas cobranças.</p>
+                        <p className="text-xs text-slate-600 mt-0.5">Use as medições e a memória de cálculo para buscar a redução das cobranças, com validação de profissional habilitado.</p>
                       </div>
                       <button 
                         onClick={handleSolicitarDemo}
@@ -707,15 +731,15 @@ export default function DemoPage() {
         <div className="space-y-6">
           <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
             <h3 className="font-bold text-primary mb-4 flex items-center gap-2">
-              <Info size={18} /> O Poder do Histórico de 12 Meses
+              <Info size={18} /> Como interpretar a auditoria
             </h3>
             <p className="text-sm text-slate-600 mb-3">
-              Ao expor o histórico completo impresso na fatura da concessionária, o cliente percebe que o problema do fator de potência é crônico e drena o caixa da empresa mês após mês.
+              A extração automatiza a leitura da fatura enviada. Ela não substitui conferência documental, histórico de várias competências nem medição em campo.
             </p>
             <ul className="text-sm space-y-2 text-slate-600">
-              <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Visão de longo prazo (12 meses)</li>
-              <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Conscientização imediata de prejuízo</li>
-              <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Fechamento de contratos facilitado</li>
+              <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Valores extraídos da competência enviada</li>
+              <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Projeção anual claramente identificada</li>
+              <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Conferência técnica antes da proposta</li>
             </ul>
           </div>
 
@@ -723,7 +747,7 @@ export default function DemoPage() {
             <h3 className="font-bold text-primary mb-2">🚀 Vantagens do CapacitorManager</h3>
             <ul className="text-sm space-y-2 text-slate-600">
               <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Gestão completa de clientes</li>
-              <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Bancos de capacitores ilimitados</li>
+              <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Limites transparentes conforme o plano</li>
               <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Auditoria de faturas de energia</li>
               <li className="flex items-center gap-2"><CheckCircle2 size={14} className="text-green-600" /> Relatórios comerciais de impacto</li>
             </ul>

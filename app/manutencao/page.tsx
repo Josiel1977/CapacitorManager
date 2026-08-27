@@ -35,69 +35,8 @@ import Swal from "sweetalert2";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
-import DemoBanner from "@/components/DemoBanner";
-
-// ============================================
-// FUNÇÕES DE CÁLCULO
-// ============================================
-
-function calcularCorrenteTeorica(
-  potenciaKvar: number,
-  tensaoNominal: number,
-): number {
-  if (!tensaoNominal || tensaoNominal === 0) return 0;
-  return (potenciaKvar * 1000) / (Math.sqrt(3) * tensaoNominal);
-}
-
-function calcularCapacitanciaTeoricaDelta(
-  capacitanciaNominalFase: number,
-): number {
-  return capacitanciaNominalFase * 1.5;
-}
-
-function getStatusValidacao(desvio: number): string {
-  if (desvio >= -5 && desvio <= 10) return "aprovado";
-  if (desvio >= -10 && desvio < -5) return "atencao";
-  if (desvio > 10 && desvio <= 15) return "atencao";
-  return "reprovado";
-}
-
-function calcularTendenciaCapacitor(medicoes: any[]) {
-  if (medicoes.length < 2) return null;
-
-  const primeira = medicoes[medicoes.length - 1];
-  const ultima = medicoes[0];
-
-  const variacao = ultima.desvio_percentual - primeira.desvio_percentual;
-  const dias =
-    (new Date(ultima.created_at).getTime() -
-      new Date(primeira.created_at).getTime()) /
-    (1000 * 3600 * 24);
-  const degradacaoPorMes = dias > 0 ? (variacao / dias) * 30 : 0;
-
-  let previsao = null;
-  if (degradacaoPorMes > 0 && ultima.desvio_percentual < 15) {
-    const mesesRestantes = (15 - ultima.desvio_percentual) / degradacaoPorMes;
-    previsao = {
-      meses: mesesRestantes.toFixed(1),
-      data: new Date(
-        Date.now() + mesesRestantes * 30 * 24 * 60 * 60 * 1000,
-      ).toLocaleDateString("pt-BR"),
-    };
-  }
-
-  return {
-    variacao: variacao.toFixed(2),
-    degradacaoPorMes: degradacaoPorMes.toFixed(2),
-    tendencia:
-      variacao > 0 ? "piorando" : variacao < 0 ? "melhorando" : "estavel",
-    primeiraData: new Date(primeira.created_at).toLocaleDateString("pt-BR"),
-    ultimaData: new Date(ultima.created_at).toLocaleDateString("pt-BR"),
-    primeiraDesvio: primeira.desvio_percentual?.toFixed(2) || "0",
-    ultimaDesvio: ultima.desvio_percentual?.toFixed(2) || "0",
-    previsao,
-  };
-}
+import { calculateDeltaCapacitance, calculateExpectedCapacitorCurrent, classifyDeviation } from "@/lib/domain/capacitorAnalysis";
+import { withTimeout } from "@/lib/with-timeout";
 
 interface CapacitorInfo {
   id: string;
@@ -125,7 +64,7 @@ interface ClienteResumo {
   atencao: number;
   reprovados: number;
   sem_medicao: number;
-  bancos: {
+  bancos: Array<{
     id: string;
     nome: string;
     kvar_instalado: number;
@@ -133,141 +72,9 @@ interface ClienteResumo {
     atencao: number;
     reprovados: number;
     sem_medicao: number;
-  }[];
+  }>;
   capacitores_sem_medicao: CapacitorInfo[];
 }
-
-// ============================================
-// DADOS MOCK PARA MODO DEMONSTRAÇÃO
-// ============================================
-const MOCK_CLIENTES = [
-  { id: "1", nome: "Indústria ABC Ltda" },
-  { id: "2", nome: "Shopping Center Norte" },
-  { id: "3", nome: "Hospital Regional" },
-];
-
-const MOCK_CAPACITORES: CapacitorInfo[] = [
-  {
-    id: "1",
-    codigo: "CAP-001",
-    banco: "Banco Principal",
-    banco_id: "b1",
-    cliente: "Indústria ABC Ltda",
-    cliente_id: "1",
-    potencia_kvar: 30,
-    tensao_nominal_v: 480,
-    capacitancia_nominal_uf: 138,
-    status_validacao: "aprovado",
-    ultimo_desvio: 3.2,
-    ultima_data: new Date().toISOString(),
-    tem_medicao: true,
-  },
-  {
-    id: "2",
-    codigo: "CAP-002",
-    banco: "Banco Principal",
-    banco_id: "b1",
-    cliente: "Indústria ABC Ltda",
-    cliente_id: "1",
-    potencia_kvar: 30,
-    tensao_nominal_v: 480,
-    capacitancia_nominal_uf: 138,
-    status_validacao: "atencao",
-    ultimo_desvio: 12.5,
-    ultima_data: new Date().toISOString(),
-    tem_medicao: true,
-  },
-  {
-    id: "3",
-    codigo: "CAP-003",
-    banco: "Banco Secundário",
-    banco_id: "b2",
-    cliente: "Indústria ABC Ltda",
-    cliente_id: "1",
-    potencia_kvar: 20,
-    tensao_nominal_v: 380,
-    capacitancia_nominal_uf: 92,
-    status_validacao: "reprovado",
-    ultimo_desvio: -18.2,
-    ultima_data: new Date().toISOString(),
-    tem_medicao: true,
-  },
-  {
-    id: "4",
-    codigo: "CAP-004",
-    banco: "Banco Shopping",
-    banco_id: "b3",
-    cliente: "Shopping Center Norte",
-    cliente_id: "2",
-    potencia_kvar: 50,
-    tensao_nominal_v: 480,
-    capacitancia_nominal_uf: 230,
-    status_validacao: "aprovado",
-    ultimo_desvio: 2.1,
-    ultima_data: new Date().toISOString(),
-    tem_medicao: true,
-  },
-  {
-    id: "5",
-    codigo: "CAP-005",
-    banco: "Banco Shopping",
-    banco_id: "b3",
-    cliente: "Shopping Center Norte",
-    cliente_id: "2",
-    potencia_kvar: 50,
-    tensao_nominal_v: 480,
-    capacitancia_nominal_uf: 230,
-    status_validacao: "atencao",
-    ultimo_desvio: 11.8,
-    ultima_data: new Date().toISOString(),
-    tem_medicao: true,
-  },
-  {
-    id: "6",
-    codigo: "CAP-006",
-    banco: "Banco Emergência",
-    banco_id: "b4",
-    cliente: "Hospital Regional",
-    cliente_id: "3",
-    potencia_kvar: 25,
-    tensao_nominal_v: 220,
-    capacitancia_nominal_uf: 115,
-    status_validacao: "aprovado",
-    ultimo_desvio: -1.5,
-    ultima_data: new Date().toISOString(),
-    tem_medicao: true,
-  },
-  {
-    id: "7",
-    codigo: "CAP-007",
-    banco: "Banco Principal",
-    banco_id: "b1",
-    cliente: "Indústria ABC Ltda",
-    cliente_id: "1",
-    potencia_kvar: 30,
-    tensao_nominal_v: 480,
-    capacitancia_nominal_uf: 138,
-    status_validacao: "sem_medicao",
-    ultimo_desvio: 0,
-    ultima_data: "",
-    tem_medicao: false,
-  },
-  {
-    id: "8",
-    codigo: "CAP-008",
-    banco: "Banco Shopping",
-    banco_id: "b3",
-    cliente: "Shopping Center Norte",
-    cliente_id: "2",
-    potencia_kvar: 50,
-    tensao_nominal_v: 480,
-    capacitancia_nominal_uf: 230,
-    status_validacao: "sem_medicao",
-    ultimo_desvio: 0,
-    ultima_data: "",
-    tem_medicao: false,
-  },
-];
 
 export default function ManutencaoPage() {
   const router = useRouter();
@@ -291,96 +98,90 @@ export default function ManutencaoPage() {
 
   // ... resto do código (agora sem `mode`)
 
-  async function fetchClientes() {
-    try {
-      const { data } = await supabase
-        .from("clientes")
-        .select("id, nome")
-        .eq("ativo", true)
-        .order("nome");
-      setClientes(data || []);
-    } catch (error) {
-      console.error("Erro ao buscar clientes:", error);
-    }
-  }
-
   async function fetchDadosReais() {
     setLoading(true);
     try {
-      const { data: bancosData } = await supabase
-        .from("bancos_capacitores")
-        .select("id, nome_banco, cliente_id")
-        .eq("ativo", true);
+      const [bancosResult, capacitoresResult, medicoesResult, clientesResult] = await withTimeout(
+        Promise.all([
+          supabase.from("bancos_capacitores").select("id, nome_banco, cliente_id").eq("ativo", true),
+          supabase.from("capacitores").select("id, codigo_identificacao, potencia_kvar, tensao_nominal_v, capacitancia_nominal_uf, banco_id").eq("ativo", true),
+          // Usa * para manter compatibilidade com bases anteriores à inclusão
+          // de frequencia_medida_hz. A data oficial da medição é created_at.
+          supabase.from("medicoes").select("*").order("created_at", { ascending: false }),
+          supabase.from("clientes").select("id, nome").eq("ativo", true).order("nome"),
+        ]),
+        15_000,
+        "Tempo limite ao carregar a manutenção preditiva.",
+      );
+      const firstError = bancosResult.error || capacitoresResult.error || medicoesResult.error || clientesResult.error;
+      if (firstError) throw firstError;
+
+      const bancosData = bancosResult.data || [];
+      const todosCapacitores = capacitoresResult.data || [];
+      const medicoesData = medicoesResult.data || [];
+      const clientesData = clientesResult.data || [];
+      setClientes(clientesData);
+
       const bancosMap = new Map();
-      bancosData?.forEach((banco) =>
+      bancosData.forEach((banco) =>
         bancosMap.set(banco.id, {
           nome: banco.nome_banco,
           cliente_id: banco.cliente_id,
         }),
       );
 
-      const { data: todosCapacitores } = await supabase
-        .from("capacitores")
-        .select(
-          "id, codigo_identificacao, potencia_kvar, tensao_nominal_v, capacitancia_nominal_uf, banco_id",
-        )
-        .eq("ativo", true);
-      const { data: medicoesData } = await supabase
-        .from("medicoes")
-        .select(
-          "id, capacitor_id, desvio_percentual, status_validacao, data_medicao, created_at, tipo_teste, corrente_medida_a, capacitancia_medida_uf",
-        )
-        .order("created_at", { ascending: false });
-
       // Mantém a medição mais recente de cada tipo para cada capacitor.
       const ultimasPorTipo = new Map<string, any>();
-      medicoesData?.forEach((med) => {
+      const ultimasPorCapacitor = new Map<string, any[]>();
+      medicoesData.forEach((med) => {
         if (!med.capacitor_id || !med.tipo_teste) return;
         const key = `${med.capacitor_id}:${med.tipo_teste}`;
-        if (!ultimasPorTipo.has(key)) ultimasPorTipo.set(key, med);
+        if (!ultimasPorTipo.has(key)) {
+          ultimasPorTipo.set(key, med);
+          const atuais = ultimasPorCapacitor.get(med.capacitor_id) || [];
+          atuais.push(med);
+          ultimasPorCapacitor.set(med.capacitor_id, atuais);
+        }
       });
 
-      const { data: clientesData } = await supabase
-        .from("clientes")
-        .select("id, nome")
-        .eq("ativo", true);
       const clientesMap = new Map();
-      clientesData?.forEach((c) => clientesMap.set(c.id, c.nome));
+      clientesData.forEach((c) => clientesMap.set(c.id, c.nome));
 
       const processedData: CapacitorInfo[] = [];
-      for (const cap of todosCapacitores || []) {
-        const medicoesAtuais = [...ultimasPorTipo.values()].filter(
-          (med) => med.capacitor_id === cap.id,
-        );
+      for (const cap of todosCapacitores) {
+        const medicoesAtuais = ultimasPorCapacitor.get(cap.id) || [];
         const temMedicao = medicoesAtuais.length > 0;
         const avaliadas = medicoesAtuais.map((med) => {
           let desvio = med.desvio_percentual || 0;
           let status = med.status_validacao || "atencao";
           if (
             med.tipo_teste === "corrente" &&
-            med.corrente_medida_a &&
+            med.corrente_medida_a !== null && med.corrente_medida_a !== undefined &&
             cap.tensao_nominal_v &&
             cap.potencia_kvar
           ) {
-            const teorico = calcularCorrenteTeorica(
+            const teorico = calculateExpectedCapacitorCurrent(
               cap.potencia_kvar,
               cap.tensao_nominal_v,
+              med.tensao_medida_v || cap.tensao_nominal_v,
+              60,
+              med.frequencia_medida_hz || 60,
             );
             if (teorico > 0) {
               desvio = ((med.corrente_medida_a - teorico) / teorico) * 100;
-              status = getStatusValidacao(desvio);
+              status = classifyDeviation(desvio);
             }
           } else if (
             med.tipo_teste === "capacitancia" &&
-            med.capacitancia_medida_uf &&
+            med.capacitancia_medida_uf !== null && med.capacitancia_medida_uf !== undefined &&
             cap.capacitancia_nominal_uf
           ) {
-            const teorico = calcularCapacitanciaTeoricaDelta(
+            const teorico = calculateDeltaCapacitance(
               cap.capacitancia_nominal_uf,
             );
             if (teorico > 0) {
               desvio = ((med.capacitancia_medida_uf - teorico) / teorico) * 100;
-              status = getStatusValidacao(desvio);
+              status = classifyDeviation(desvio);
             }
           }
           return { ...med, desvio_calculado: desvio, status_calculado: status };
@@ -424,26 +225,19 @@ export default function ManutencaoPage() {
       setCapacitores(processedData);
       processarResumo(processedData);
     } catch (error) {
-      console.error("Erro ao buscar dados:", error);
+      const message = error && typeof error === "object" && "message" in error
+        ? String(error.message)
+        : "Não foi possível carregar os dados.";
+      console.warn("[Manutenção] Não foi possível carregar os dados.", error);
       Swal.fire({
         title: "Erro",
-        text: "Não foi possível carregar os dados.",
+        text: message,
         icon: "error",
         confirmButtonColor: "#0a2b3c",
       });
     } finally {
       setLoading(false);
     }
-  }
-
-  function carregarDadosMock() {
-    setLoading(true);
-    setTimeout(() => {
-      setClientes(MOCK_CLIENTES);
-      setCapacitores(MOCK_CAPACITORES);
-      processarResumo(MOCK_CAPACITORES);
-      setLoading(false);
-    }, 500);
   }
 
   function processarResumo(data: CapacitorInfo[]) {
@@ -500,29 +294,24 @@ export default function ManutencaoPage() {
       (r) => r.total_kvar_instalado > 0,
     );
     setResumoClientes(resumoArray);
-    if (clienteFiltro !== "todos")
-      setClienteSelecionadoResumo(
-        resumoArray.find((r) => r.id === clienteFiltro) || null,
-      );
-    else setClienteSelecionadoResumo(null);
   }
 
   useEffect(() => {
+    if (authLoading) return;
     if (isAuthenticated) {
-      fetchClientes();
       fetchDadosReais();
     } else {
-      carregarDadosMock();
+      setLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, authLoading]);
 
   useEffect(() => {
-    if (isAuthenticated && clienteFiltro !== "todos") {
-      fetchDadosReais();
-    } else if (!isAuthenticated) {
-      processarResumo(MOCK_CAPACITORES);
-    }
-  }, [clienteFiltro, isAuthenticated]);
+    setClienteSelecionadoResumo(
+      clienteFiltro === "todos"
+        ? null
+        : resumoClientes.find((resumo) => resumo.id === clienteFiltro) || null,
+    );
+  }, [clienteFiltro, resumoClientes]);
 
   const filteredCapacitores = capacitores.filter((cap) => {
     if (clienteFiltro !== "todos" && cap.cliente_id !== clienteFiltro)
@@ -563,7 +352,6 @@ export default function ManutencaoPage() {
 
   return (
     <div className="space-y-8 pb-12">
-      <DemoBanner />
       <motion.section
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -799,7 +587,7 @@ export default function ManutencaoPage() {
                           <td className="px-4 py-2">
                             <button
                               onClick={() =>
-                                router.push(`/testes?capacitor_id=${cap.id}`)
+                                router.push(`/medicoes?capacitor_id=${cap.id}`)
                               }
                               className="px-3 py-1 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 transition-colors"
                             >
@@ -1069,7 +857,7 @@ export default function ManutencaoPage() {
                       {!cap.tem_medicao ? (
                         <button
                           onClick={() =>
-                            router.push(`/testes?capacitor_id=${cap.id}`)
+                            router.push(`/medicoes?capacitor_id=${cap.id}`)
                           }
                           className="px-3 py-1 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 transition-colors"
                         >
@@ -1100,7 +888,7 @@ export default function ManutencaoPage() {
       )}
 
       <div className="flex justify-end gap-2">
-  <button onClick={isAuthenticated ? fetchDadosReais : carregarDadosMock} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+  <button onClick={fetchDadosReais} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
     <RefreshCw size={16} /> Atualizar
   </button>
 </div>

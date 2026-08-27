@@ -43,9 +43,8 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'CapacitorManager - Gestão Inteligente de Capacitores',
     description: 'Monitore, valide e otimize seus bancos de capacitores.',
-    url: 'https://capacitor-manage.vercel.app',
+    url: 'https://www.capacitormanager.com.br',
     siteName: 'CapacitorManager',
-    images: [{ url: '/og-image.png', width: 1200, height: 630, alt: 'CapacitorManager Dashboard' }],
     locale: 'pt_BR',
     type: 'website',
   },
@@ -53,15 +52,12 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'CapacitorManager - Gestão Inteligente de Capacitores',
     description: 'Sistema profissional para gestão de bancos de capacitores.',
-    images: ['/og-image.png'],
   },
   alternates: {
-    canonical: 'https://capacitor-manage.vercel.app',
+    canonical: 'https://www.capacitormanager.com.br',
   },
   icons: {
     icon: '/favicon.ico',
-    shortcut: '/favicon-16x16.png',
-    apple: '/apple-touch-icon.png',
   },
 };
 

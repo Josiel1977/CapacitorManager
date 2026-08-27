@@ -1,6 +1,9 @@
-export const planosLimites = {
-  basico: { cliente: 1, banco: 1, capacitor: 6 },
-  essencial: { cliente: 5, banco: 10, capacitor: 50 },
-  pro: { cliente: 20, banco: 50, capacitor: 300 },
-  master: { cliente: 50, banco: 100, capacitor: 600 },
-  };
+import { PLANS } from "./plans";
+
+export const planosLimites = Object.fromEntries(
+  Object.values(PLANS).map((plan) => [plan.id, {
+    cliente: plan.limits.clients,
+    banco: plan.limits.banks,
+    capacitor: plan.limits.capacitors,
+  }]),
+);

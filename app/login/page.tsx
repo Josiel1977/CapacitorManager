@@ -1,132 +1,184 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { ArrowRight, Eye, EyeOff, Lock, Mail, Zap } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
+import { withTimeout } from '@/lib/with-timeout';
 
-import { useState, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { motion } from 'motion/react';
-import { Zap, Lock, Mail, ArrowRight, Eye, EyeOff, Sparkles } from 'lucide-react';
-import Swal from 'sweetalert2';
-import { useAuth } from '@/lib/AuthContext';
+type LoginErrorCode = 'invalid' | 'unavailable' | 'configuration';
 
-function LoginForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const redirectTo = searchParams.get('redirectTo') || '/dimensionar';
-  const { login } = useAuth();
+function loginErrorMessage(code: LoginErrorCode | string | undefined): string {
+  if (code === 'unavailable') return 'O serviço de autenticação não respondeu. Tente novamente.';
+  if (code === 'configuration') return 'A autenticação deste ambiente não está configurada corretamente.';
+  return 'E-mail ou senha inválidos.';
+}
+
+function getSafeRedirect(): string {
+  if (typeof window === 'undefined') return '/dashboard-real';
+  const requestedRedirect = new URLSearchParams(window.location.search).get('redirectTo');
+  return requestedRedirect?.startsWith('/') && !requestedRedirect.startsWith('//')
+    ? requestedRedirect
+    : '/dashboard-real';
+}
+
+export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [redirectTo, setRedirectTo] = useState('/dashboard-real');
+  const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await login(email, senha);
-      Swal.fire({
-        title: 'Bem-vindo!',
-        text: 'Login realizado com sucesso.',
-        icon: 'success',
-        timer: 1500,
-        showConfirmButton: false,
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errorCode = params.get('error');
+    setRedirectTo(getSafeRedirect());
+
+    if (errorCode) {
+      setMessage({
+        type: 'error',
+        text: loginErrorMessage(errorCode),
       });
-      router.push(redirectTo);
-    } catch (error) {
-      Swal.fire({
-        title: 'Erro!',
-        text: 'E-mail ou senha inválidos.',
-        icon: 'error',
-        confirmButtonColor: '#0a2b3c',
-      });
-    } finally {
-      setLoading(false);
     }
-  };
 
-  const preencherCredenciais = () => {
-    setEmail('suporte@jmeletroservice.com.br');
-    setSenha('Suporte@1677#');
-  };
+    // Remove parâmetros sensíveis de URLs antigas geradas antes da RC6.
+    if (params.has('email') || params.has('password') || errorCode) {
+      params.delete('email');
+      params.delete('password');
+      params.delete('error');
+      const query = params.toString();
+      window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+    }
+  }, []);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 to-secondary/10 p-4">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
-        <div className="bg-primary p-6 text-center">
-          <div className="inline-flex p-3 bg-white/10 rounded-xl mb-4"><Zap size={32} className="text-secondary" /></div>
-          <h1 className="text-2xl font-bold text-white">CapacitorManager</h1>
-          <p className="text-white/70 text-sm">Acesso ao Sistema</p>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input
-                type="email"
-                required
-                placeholder="seu@email.com"
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:border-primary outline-none"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
+    <div className="fixed inset-0 z-[100] overflow-y-auto bg-gradient-to-br from-primary/10 to-secondary/10">
+      <div className="flex min-h-dvh items-center justify-center p-4">
+        <section className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl" aria-labelledby="login-title">
+          <header className="bg-primary p-6 text-center">
+            <div className="mb-4 inline-flex rounded-xl bg-white/10 p-3">
+              <Zap size={32} className="text-secondary" aria-hidden="true" />
             </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Senha</label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input
-                type={showPassword ? 'text' : 'password'}
-                required
-                placeholder="••••••"
-                className="w-full pl-10 pr-10 py-2 border border-slate-200 rounded-lg focus:border-primary outline-none"
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            <h1 id="login-title" className="text-2xl font-bold text-white">CapacitorManager</h1>
+            <p className="text-sm text-white/70">Acesso ao Sistema</p>
+          </header>
+
+          <form
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setLoading(true);
+              setMessage(null);
+
+              try {
+                const supabase = createClient();
+                const { data, error } = await withTimeout(
+                  supabase.auth.signInWithPassword({
+                    email: email.trim().toLowerCase(),
+                    password: senha,
+                  }),
+                  12_000,
+                  'Tempo limite ao fazer login.',
+                );
+
+                if (error || !data.session) {
+                  const code = error?.code === 'invalid_credentials' || error?.status === 400
+                    ? 'invalid'
+                    : 'unavailable';
+                  setMessage({ type: 'error', text: loginErrorMessage(code) });
+                  return;
+                }
+
+                window.location.replace(redirectTo);
+              } catch (error) {
+                const code = error instanceof Error && error.message === 'supabase_public_configuration_missing'
+                  ? 'configuration'
+                  : 'unavailable';
+                setMessage({ type: 'error', text: loginErrorMessage(code) });
+              } finally {
+                setLoading(false);
+              }
+            }}
+            className="space-y-5 p-6"
+          >
+            <div>
+              <label htmlFor="login-email" className="mb-1 block text-sm font-medium text-slate-700">E-mail</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} aria-hidden="true" />
+                <input
+                  id="login-email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  autoFocus
+                  placeholder="seu@email.com"
+                  className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-4 text-slate-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="login-password" className="mb-1 block text-sm font-medium text-slate-700">Senha</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} aria-hidden="true" />
+                <input
+                  id="login-password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  required
+                  placeholder="Digite sua senha"
+                  className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-11 text-slate-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  value={senha}
+                  onChange={(event) => setSenha(event.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded text-slate-500 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            {message && (
+              <p
+                role="status"
+                aria-live="polite"
+                className={`rounded-lg border px-3 py-2 text-sm ${
+                  message.type === 'success'
+                    ? 'border-green-200 bg-green-50 text-green-700'
+                    : 'border-red-200 bg-red-50 text-red-700'
+                }`}
               >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-primary text-white py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {loading ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <>Entrar <ArrowRight size={18} /></>}
-          </button>
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-200"></div>
-            </div>
-            <div className="relative flex justify-center text-xs">
-              <span className="px-2 bg-white text-slate-400">ou</span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={preencherCredenciais}
-            className="w-full border border-slate-200 text-slate-600 py-2 rounded-lg font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
-          >
-            <Sparkles size={18} /> Preencher credenciais de teste
-          </button>
-          <p className="text-center text-xs text-slate-400 mt-4">
-            Não tem acesso? <a href="/signup" className="text-primary hover:underline">Cadastre-se agora</a>
-          </p>
-        </form>
-      </motion.div>
-    </div>
-  );
-}
+                {message.text}
+              </p>
+            )}
 
-export default function LoginPage() {
-  return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Carregando...</div>}>
-      <LoginForm />
-    </Suspense>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 font-medium text-white transition-colors hover:bg-primary/90 disabled:cursor-wait disabled:opacity-60"
+            >
+              {loading ? 'Entrando…' : <><span>Entrar</span><ArrowRight size={18} aria-hidden="true" /></>}
+            </button>
+
+            <div className="space-y-3 text-center text-sm">
+              <Link href="/recuperar-senha" className="block text-primary hover:underline">Esqueci minha senha</Link>
+              <p className="text-slate-500">
+                Não tem acesso?{' '}
+                <Link href="/signup" className="font-medium text-primary hover:underline">Cadastre-se agora</Link>
+              </p>
+              <Link href="/demo" className="block text-xs text-slate-400 hover:text-primary">Voltar à demonstração</Link>
+            </div>
+          </form>
+        </section>
+      </div>
+    </div>
   );
 }

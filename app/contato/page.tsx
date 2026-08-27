@@ -21,12 +21,13 @@ export default function ContatoPage() {
     plano_interesse: 'essencial'
   });
   const [submitting, setSubmitting] = useState(false);
+  const [aceitePrivacidade, setAceitePrivacidade] = useState(false);
 
   const planos = [
     { id: 'demo', nome: 'Demo Gratuita', preco: 'Grátis', descricao: 'Acesso limitado para teste' },
-    { id: 'essencial', nome: 'Plano Essencial', preco: 'R$ 297/mês', descricao: 'Até 10 clientes' },
-    { id: 'pro', nome: 'Plano Pro', preco: 'R$ 597/mês', descricao: 'Clientes ilimitados' },
-    { id: 'enterprise', nome: 'Enterprise', preco: 'Sob consulta', descricao: 'Solução customizada' }
+    { id: 'essencial', nome: 'Plano Essencial', preco: 'R$ 297/mês', descricao: '5 clientes, 10 bancos, 50 capacitores' },
+    { id: 'pro', nome: 'Plano Pro', preco: 'R$ 597/mês', descricao: '20 clientes, 20 bancos, 200 capacitores' },
+    { id: 'master', nome: 'Plano Master', preco: 'R$ 797/mês', descricao: '50 clientes, 100 bancos, 600 capacitores' }
   ];
 
   async function handleSubmit(e: React.FormEvent) {
@@ -44,7 +45,7 @@ export default function ContatoPage() {
       const response = await fetch('/api/contato', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify({ ...formData, aceite_privacidade: aceitePrivacidade, origem: 'Contato' })
       });
 
       if (response.ok) {
@@ -65,6 +66,7 @@ export default function ContatoPage() {
         setFormData({
           nome: '', email: '', telefone: '', empresa: '', cargo: '', mensagem: '', plano_interesse: 'essencial'
         });
+        setAceitePrivacidade(false);
       } else {
         throw new Error('Erro ao enviar');
       }
@@ -192,9 +194,14 @@ export default function ContatoPage() {
                 </div>
               </div>
 
+              <label className="flex items-start gap-2 text-xs text-slate-600">
+                <input type="checkbox" required checked={aceitePrivacidade} onChange={(e) => setAceitePrivacidade(e.target.checked)} className="mt-0.5" />
+                <span>Concordo com o tratamento dos dados para responder a esta solicitação, conforme a <a href="/privacidade" target="_blank" className="text-primary underline">Política de Privacidade</a>.</span>
+              </label>
+
               <button 
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || !aceitePrivacidade}
                 className="w-full flex items-center justify-center gap-2 bg-primary text-white py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 {submitting ? (
@@ -277,4 +284,3 @@ export default function ContatoPage() {
     </div>
   );
 }
-

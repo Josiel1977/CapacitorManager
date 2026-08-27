@@ -1,12 +1,11 @@
 import OpenAI from "openai";
 
-if (!process.env.DEEPSEEK_API_KEY) {
-  throw new Error("Missing DEEPSEEK_API_KEY environment variable");
+let client: OpenAI | undefined;
+
+export function getDeepSeekClient(): OpenAI {
+  if (client) return client;
+  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+  if (!apiKey) throw new Error("Assistente não configurado no servidor.");
+  client = new OpenAI({ apiKey, baseURL: "https://api.deepseek.com" });
+  return client;
 }
-
-const deepseek = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY,
-  baseURL: "https://api.deepseek.com",
-});
-
-export default deepseek;

@@ -1,23 +1,38 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# CapacitorManager
 
-# Run and deploy your AI Studio app
+Aplicação SaaS multiempresa para cadastro de clientes e bancos de capacitores, registro de medições, auditoria assistida de faturas e dimensionamento com memória de cálculo.
 
-This contains everything you need to run your app locally.
+## Requisitos
 
-View your app in AI Studio: https://ai.studio/apps/8d0daa4d-7294-4c9f-af94-526ac9a20076
+- Node.js 20 LTS
+- Projeto Supabase separado para homologação e produção
+- Conta Mercado Pago com planos recorrentes e assinatura de webhook
+- Resend e DeepSeek são opcionais
 
-## Run Locally
+## Execução local
 
-**Prerequisites:**  Node.js
+1. Copie `.env.example` para `.env.local` e preencha os valores.
+2. Instale de forma reproduzível: `npm ci`.
+3. Rode `npm test`, `npm run lint` e `npm run build`.
+4. Inicie com `npm run dev`.
 
+Nunca envie `.env.local`, chaves Supabase administrativas, tokens Mercado Pago ou chaves de IA ao navegador ou ao repositório.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Banco de dados
 
-## Deploy
-Site hospedado na Vercel
+As migrações ficam em `supabase/migrations`. Antes de aplicá-las, execute os diagnósticos em `supabase/diagnostics` e faça um backup restaurável. A migração `202608200001_production_hardening.sql` encerra permissões legadas, aplica RLS multiempresa, limites de plano, vínculo entre registros, rate limit e ciclo idempotente de webhooks.
+
+## Limites comerciais vigentes
+
+| Plano | Mensalidade | Clientes | Bancos | Capacitores |
+|---|---:|---:|---:|---:|
+| Básico | R$ 149 | 1 | 1 | 6 |
+| Essencial | R$ 297 | 5 | 10 | 50 |
+| Pro | R$ 597 | 20 | 20 | 200 |
+| Master | R$ 797 | 50 | 100 | 600 |
+
+A fonte única desses dados é `lib/plans.ts`; não duplique valores em novas telas.
+
+## Observação técnica
+
+Faturas geram somente pré-dimensionamento. Campanhas temporais podem liberar uma especificação condicionada apenas quando os critérios de qualidade e as validações de engenharia forem atendidos. Nenhum resultado substitui medição em campo, projeto, laudo, ART/TRT ou decisão de profissional habilitado. Consulte `docs/RC23.md`, `docs/DEPLOYMENT_CHECKLIST.md` e `docs/PRODUCTION_READINESS.md` antes de liberar vendas.
