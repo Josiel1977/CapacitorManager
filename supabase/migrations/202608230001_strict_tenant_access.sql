@@ -195,6 +195,38 @@ do $$
 declare policy_row record;
 begin
   if to_regclass('public.dimensioning_runs') is not null then
+    -- Alguns bancos RC22 já possuem a tabela auditável, mas ainda não
+    -- receberam a extensão temporal 202608210002. Completa o esquema de
+    -- forma aditiva para que a política abaixo nunca dependa de uma coluna
+    -- ausente e para que as telas RC23 consigam registrar suas memórias.
+    alter table public.dimensioning_runs
+      add column if not exists transformer_id uuid references public.transformadores(id) on delete restrict,
+      add column if not exists source_method text not null default 'legacy',
+      add column if not exists release_level text not null default 'legacy',
+      add column if not exists engineering_confirmations jsonb not null default '{}'::jsonb;
+
+    alter table public.dimensioning_runs
+      drop constraint if exists dimensioning_runs_confidence_check;
+    alter table public.dimensioning_runs
+      add constraint dimensioning_runs_confidence_check
+      check (confidence_level in ('validated', 'representative', 'preliminary', 'insufficient'));
+
+    alter table public.dimensioning_runs
+      drop constraint if exists dimensioning_runs_source_method_check;
+    alter table public.dimensioning_runs
+      add constraint dimensioning_runs_source_method_check
+      check (source_method in ('legacy', 'invoice_history', 'temporal_measurements', 'mass_memory'));
+
+    alter table public.dimensioning_runs
+      drop constraint if exists dimensioning_runs_release_level_check;
+    alter table public.dimensioning_runs
+      add constraint dimensioning_runs_release_level_check
+      check (release_level in ('legacy', 'blocked', 'pre_sizing', 'conditional_specification'));
+
+    create index if not exists idx_dimensioning_runs_transformer_created
+      on public.dimensioning_runs (tenant_id, transformer_id, created_at desc)
+      where transformer_id is not null;
+
     for policy_row in
       select policyname from pg_policies
       where schemaname = 'public' and tablename = 'dimensioning_runs'

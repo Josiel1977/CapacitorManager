@@ -40,6 +40,17 @@ test('profiles e tabelas operacionais não mantêm políticas públicas legadas'
   assert.doesNotMatch(migration, /using \(true\)|with check \(true\)/i);
 });
 
+test('migração estrita completa o esquema temporal antes da política auditável', () => {
+  const migration = source('supabase/migrations/202608230001_strict_tenant_access.sql');
+  const addTransformer = migration.indexOf('add column if not exists transformer_id');
+  const insertPolicy = migration.indexOf('create policy tenant_insert on public.dimensioning_runs');
+  assert.ok(addTransformer >= 0);
+  assert.ok(insertPolicy > addTransformer);
+  assert.match(migration, /add column if not exists source_method/);
+  assert.match(migration, /add column if not exists release_level/);
+  assert.match(migration, /add column if not exists engineering_confirmations/);
+});
+
 test('medições carregam tolerâncias pela empresa autenticada', () => {
   const measurements = source('app/medicoes/page.tsx');
   assert.match(measurements, /\.eq\('tenant_id', userTenantId\)/);
