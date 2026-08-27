@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
     remotePatterns: [{ protocol: 'https', hostname: 'picsum.photos', pathname: '/**' }],
   },
   output: 'standalone',
+  serverExternalPackages: ['pdf-parse', '@napi-rs/canvas'],
   transpilePackages: ['motion'],
   async headers() {
     const supabaseOrigin = normalizeSupabaseOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
