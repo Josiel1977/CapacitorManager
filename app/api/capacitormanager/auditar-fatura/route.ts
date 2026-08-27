@@ -11,7 +11,12 @@ export const maxDuration = 30;
 export async function POST(request: Request) {
   let parser: PDFParse | undefined;
   try {
-    const allowed = await enforceRateLimit({ endpoint: 'invoice-audit', request, maxRequests: 5, windowSeconds: 3600 });
+    // Pré-visualizações não devem consumir a cota pública de Produção. O
+    // limite continua idêntico e persistente em cada ambiente.
+    const rateLimitEndpoint = process.env.VERCEL_ENV === 'preview'
+      ? 'invoice-audit-preview'
+      : 'invoice-audit';
+    const allowed = await enforceRateLimit({ endpoint: rateLimitEndpoint, request, maxRequests: 5, windowSeconds: 3600 });
     if (!allowed) return NextResponse.json({ error: 'Limite temporário atingido. Aguarde antes de enviar outra fatura.' }, { status: 429 });
 
     const formData = await request.formData();
