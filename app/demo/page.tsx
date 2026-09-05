@@ -630,7 +630,9 @@ export default function DemoPage() {
                           R$ {resultadoFatura.economiaAnualProjetada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </strong>
                         <span className="text-[11px] text-amber-800 font-medium mt-1 block">
-                          {resultadoFatura.projecaoBase === 'historico_fatura'\n                            ? `${resultadoFatura.mesesHistorico} meses identificados × média × 12 × 90%; tarifa atual`\n                            : '12 meses × valor atual × 90%; histórico insuficiente'}
+                          {resultadoFatura.projecaoBase === 'historico_fatura'
+                            ? `${resultadoFatura.mesesHistorico} meses identificados × média × 12 × 90%; tarifa atual`
+                            : '12 meses × valor atual × 90%; histórico insuficiente'}
                         </span>
                       </div>
                     </div>
