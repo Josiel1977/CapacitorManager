@@ -11,6 +11,12 @@ TUSD Energia Ponta (kWh) 1.688,90 0,203239 0,151860 21,56 65,22 343,25
 Consumo Reativo Excedente NP (kVAr) 365,08 0,383067 0,286220 8,79 26,57 139,85
 Consumo Reativo Excedente FP (kVAr) 4.925,27 0,383071 0,286220 118,54 358,48 1.886,73
 Dem. Máx. F. Ponta (kW): 194,80 Dem. Máx. Ponta (kW): 36,79
+MÊS PONTA FORA PONTA REATIVO EXCEDENTE PONTA/TOT FORA PONTA REATIVO EXCEDENTE CONSUMO REATIVO EXCEDENTE PONTA FORA PONTA
+JUL 36,79 194,80 0,00 1.688,90 24.608,05 5.290,35 0,00 0,00 0,00 0,00
+JUN 33,01 228,82 0,00 1.573,99 21.207,19 4.361,23 0,00 0,00 0,00 0,00
+MAI 29,48 201,35 0,00 1.534,24 24.572,46 5.623,68 0,00 0,00 0,00 0,00
+DEZ 70,31 183,20 0,00 1.655,77 21.272,14 3.615,58 0,00 0,00 0,00 0,00
+NOV 43,09 202,36 0,00 1.541,86 22.063,23 4.291,82 0,00 0,00 0,00 0,00
 `;
 
 test("extrai o novo layout Equatorial de julho de 2026", () => {
@@ -25,6 +31,14 @@ test("extrai o novo layout Equatorial de julho de 2026", () => {
   assert.equal(result.reativo_fora_ponta_kvarh, 4925.27);
   assert.equal(result.total_pagar, 6984.32);
   assert.equal(result.dias_ciclo, 31);
+  assert.equal(result.historico_mensal.length, 5);
+  assert.deepEqual(result.historico_mensal[0], {
+    mes_referencia: "07/2026",
+    consumo_ponta_kwh: 1688.9,
+    consumo_fora_ponta_kwh: 24608.05,
+    reativo_excedente_kvarh: 5290.35,
+  });
+  assert.equal(result.historico_mensal[3].mes_referencia, "12/2025");
 });
 
 test("classifica reativo excedente sem inventar fator de potência", () => {
