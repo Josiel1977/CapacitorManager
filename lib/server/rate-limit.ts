@@ -20,6 +20,14 @@ interface RateLimitOptions {
   userId?: string | null;
   maxRequests: number;
   windowSeconds: number;
+  allowOnServiceFailure?: boolean;
+}
+
+export class RateLimitServiceError extends Error {
+  constructor() {
+    super("O serviço de controle de uso está temporariamente indisponível.");
+    this.name = "RateLimitServiceError";
+  }
 }
 
 const requestAddress = (request: Request) =>
@@ -67,7 +75,10 @@ export async function enforceRateLimit(options: RateLimitOptions): Promise<boole
   if (error) {
     if (process.env.NODE_ENV !== "production") return consumeLocalRateLimit(options);
     console.warn("Falha ao verificar limite de uso:", error);
-    return false;
+    // A Pré-visualização pode continuar para não bloquear a homologação por
+    // uma falha transitória de rede. Produção permanece em modo fail-closed.
+    if (options.allowOnServiceFailure) return true;
+    throw new RateLimitServiceError();
   }
   return data === true;
 }
