@@ -39,12 +39,18 @@ test('analisador PDF carrega o worker e mantém dependências externas no servid
   const route = source('app/api/capacitormanager/auditar-fatura/route.ts');
   const nextConfig = source('next.config.ts');
   const demo = source('app/demo/page.tsx');
+  const rateLimit = source('lib/server/rate-limit.ts');
   const rateLimitMigration = source('supabase/migrations/202608270001_restore_api_rate_limit.sql');
 
   assert.match(route, /import\s+["']pdf-parse\/worker["'];/);
   assert.match(route, /process\.env\.VERCEL_ENV === ["']preview["']/);
   assert.match(route, /process\.env\.VERCEL_GIT_COMMIT_SHA/);
   assert.match(route, /invoice-audit-preview:\$\{previewDeployment\}/);
+  assert.match(route, /maxRequests:\s*isPreview\s*\?\s*50\s*:\s*5/);
+  assert.match(route, /allowOnServiceFailure:\s*isPreview/);
+  assert.match(route, /error instanceof RateLimitServiceError/);
+  assert.match(rateLimit, /if \(options\.allowOnServiceFailure\) return true/);
+  assert.match(rateLimit, /throw new RateLimitServiceError\(\)/);
   assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*["']pdf-parse["']/s);
   assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*["']@napi-rs\/canvas["']/s);
   assert.match(demo, /allowLocalFallback = response\.status >= 500/);
