@@ -13,8 +13,9 @@ export async function POST(request: Request) {
   try {
     // Pré-visualizações não devem consumir a cota pública de Produção. O
     // limite continua idêntico e persistente em cada ambiente.
+    const previewDeployment = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) || 'shared';
     const rateLimitEndpoint = process.env.VERCEL_ENV === 'preview'
-      ? 'invoice-audit-preview'
+      ? `invoice-audit-preview:${previewDeployment}`
       : 'invoice-audit';
     const allowed = await enforceRateLimit({ endpoint: rateLimitEndpoint, request, maxRequests: 5, windowSeconds: 3600 });
     if (!allowed) return NextResponse.json({ error: 'Limite temporário atingido. Aguarde antes de enviar outra fatura.' }, { status: 429 });
