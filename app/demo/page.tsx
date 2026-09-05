@@ -56,23 +56,7 @@ export default function DemoPage() {
   // Estados para análise de fatura e histórico de 12 meses
   const [arquivoFatura, setArquivoFatura] = useState<File | null>(null);
   const [analisandoFatura, setAnalisandoFatura] = useState(false);
-  const [resultadoFatura, setResultadoFatura] = useState<null | {
-    valorTotalFatura: number;
-    multaReativoFp: number;
-    multaReativoPta: number;
-    totalMultas: number;
-    percentualMulta: number;
-    economiaAnualProjetada: number;
-    consumoKwh: number;
-    empresa: string;
-    mesReferencia: string;
-    historico12Meses: Array<{
-      mes: string;
-      consumoFp: number;
-      reativoFp: number;
-      multaEstimada: number;
-    }>;
-  }>(null);
+  const [resultadoFatura, setResultadoFatura] = useState<InvoiceAuditResult | null>(null);
   
   const [capacitorParams, setCapacitorParams] = useState({
     potencia_kvar: DEFAULT_CAPACITOR.potencia_kvar,
@@ -631,22 +615,22 @@ export default function DemoPage() {
                       </div>
 
                       <div className="bg-red-50 p-4 rounded-xl border border-red-200">
-                        <span className="text-xs text-red-700 font-medium block">Multa Reativa do Mês</span>
+                        <span className="text-xs text-red-700 font-medium block">Cobrança reativa excedente</span>
                         <strong className="text-xl text-red-700 block mt-1">
                           R$ {resultadoFatura.totalMultas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </strong>
                         <span className="text-[11px] text-red-600 font-bold mt-1 block">
-                          Impacto de {resultadoFatura.percentualMulta.toFixed(1)}% na conta
+                          {resultadoFatura.percentualMulta.toFixed(1)}% do valor líquido desta fatura
                         </span>
                       </div>
 
                       <div className="bg-amber-50 p-4 rounded-xl border border-amber-200">
-                        <span className="text-xs text-amber-800 font-medium block">Projeção anual prudente</span>
+                        <span className="text-xs text-amber-800 font-medium block">Oportunidade anual estimada</span>
                         <strong className="text-xl text-amber-700 block mt-1">
                           R$ {resultadoFatura.economiaAnualProjetada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </strong>
                         <span className="text-[11px] text-amber-800 font-medium mt-1 block">
-                          12 meses × valor atual × 90%; não é histórico nem garantia
+                          {resultadoFatura.projecaoBase === 'historico_fatura'\n                            ? `${resultadoFatura.mesesHistorico} meses identificados × média × 12 × 90%; tarifa atual`\n                            : '12 meses × valor atual × 90%; histórico insuficiente'}
                         </span>
                       </div>
                     </div>
@@ -655,7 +639,7 @@ export default function DemoPage() {
                     <div className="border rounded-2xl overflow-hidden bg-white shadow-sm">
                       <div className="bg-primary/5 px-4 py-3 border-b border-slate-100 flex justify-between items-center">
                         <h4 className="font-bold text-primary text-sm flex items-center gap-2">
-                          <Calendar size={16} /> Dados identificados na fatura enviada
+                          <Calendar size={16} /> {resultadoFatura.mesesHistorico > 1 ? 'Histórico identificado na fatura' : 'Dados identificados na fatura enviada'}
                         </h4>
                         <span className="text-xs text-slate-500">Fonte: PDF enviado; sujeito a conferência</span>
                       </div>
@@ -666,7 +650,7 @@ export default function DemoPage() {
                               <th className="p-3">Mês</th>
                               <th className="p-3">Consumo Ativo (kWh)</th>
                               <th className="p-3">Excedente Reativo (kVArh)</th>
-                              <th className="p-3 text-right">Multa Estimada (R$)</th>
+                              <th className="p-3 text-right">Cobrança estimada na tarifa atual (R$)</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -688,14 +672,14 @@ export default function DemoPage() {
                     {/* CTA Comercial Imediato */}
                     <div className="bg-gradient-to-r from-primary/10 to-secondary/10 p-5 rounded-2xl border border-primary/20 flex flex-col sm:flex-row items-center justify-between gap-4">
                       <div>
-                        <h4 className="font-bold text-primary text-base">Chega de jogar dinheiro fora com multas!</h4>
+                        <h4 className="font-bold text-primary text-base">Reduza a cobrança por energia reativa excedente</h4>
                         <p className="text-xs text-slate-600 mt-0.5">Use as medições e a memória de cálculo para buscar a redução das cobranças, com validação de profissional habilitado.</p>
                       </div>
                       <button 
                         onClick={handleSolicitarDemo}
                         className="bg-primary text-white text-xs px-5 py-3 rounded-xl font-bold hover:bg-primary/90 transition-colors whitespace-nowrap inline-flex items-center gap-2 shadow-md"
                       >
-                        <ArrowRight size={16} /> Quero Eliminar Essas Multas Agora
+                        <ArrowRight size={16} /> Quero Reduzir Essa Cobrança
                       </button>
                     </div>
                   </motion.div>
