@@ -3,7 +3,7 @@ import 'pdf-parse/worker';
 import { PDFParse } from 'pdf-parse';
 import { parseEquatorialInvoiceText } from '@/lib/equatorial-invoice-parser';
 import { buildInvoiceAuditResult } from '@/lib/invoice-audit-result';
-import { enforceRateLimit } from '@/lib/server/rate-limit';
+import { enforceRateLimit, RateLimitServiceError } from '@/lib/server/rate-limit';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -13,10 +13,18 @@ export async function POST(request: Request) {
   try {
     // Pré-visualizações não devem consumir a cota pública de Produção. O
     // limite continua idêntico e persistente em cada ambiente.
-    const rateLimitEndpoint = process.env.VERCEL_ENV === 'preview'
-      ? 'invoice-audit-preview'
+    const isPreview = process.env.VERCEL_ENV === 'preview';
+    const previewDeployment = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) || 'shared';
+    const rateLimitEndpoint = isPreview
+      ? `invoice-audit-preview:${previewDeployment}`
       : 'invoice-audit';
-    const allowed = await enforceRateLimit({ endpoint: rateLimitEndpoint, request, maxRequests: 5, windowSeconds: 3600 });
+    const allowed = await enforceRateLimit({
+      endpoint: rateLimitEndpoint,
+      request,
+      maxRequests: isPreview ? 50 : 5,
+      windowSeconds: 3600,
+      allowOnServiceFailure: isPreview,
+    });
     if (!allowed) return NextResponse.json({ error: 'Limite temporário atingido. Aguarde antes de enviar outra fatura.' }, { status: 429 });
 
     const formData = await request.formData();
@@ -38,6 +46,12 @@ export async function POST(request: Request) {
     const result = buildInvoiceAuditResult(parsed);
     return NextResponse.json({ success: true, data: result, status: 'sucesso', dados: result });
   } catch (error) {
+    if (error instanceof RateLimitServiceError) {
+      return NextResponse.json(
+        { error: 'O controle de uso está temporariamente indisponível. Tente novamente em alguns instantes.' },
+        { status: 503 },
+      );
+    }
     console.warn('[Auditoria] Falha ao processar PDF:', error);
     const detail = process.env.NODE_ENV === 'development' && error instanceof Error ? ` ${error.message}` : '';
     return NextResponse.json({ error: `Não foi possível processar esta fatura.${detail}` }, { status: 500 });

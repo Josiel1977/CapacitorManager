@@ -15,6 +15,12 @@ export interface ParsedEquatorialInvoice {
   penalidade_reativa_ponta: number | null;
   penalidade_reativa_fora_ponta: number | null;
   tarifa_reativa_aplicada: number | null;
+  historico_mensal: Array<{
+    mes_referencia: string;
+    consumo_ponta_kwh: number;
+    consumo_fora_ponta_kwh: number;
+    reativo_excedente_kvarh: number;
+  }>;
   fonte_dados: "pdf";
 }
 
@@ -68,6 +74,56 @@ const billedItem = (text: string, label: RegExp) => {
   };
 };
 
+const MONTH_NUMBER: Record<string, number> = {
+  JAN: 1,
+  FEV: 2,
+  MAR: 3,
+  ABR: 4,
+  MAI: 5,
+  JUN: 6,
+  JUL: 7,
+  AGO: 8,
+  SET: 9,
+  OUT: 10,
+  NOV: 11,
+  DEZ: 12,
+};
+
+function parseMonthlyHistory(text: string, referenceMonth: string) {
+  const number = "([\\d.]+,\\d+)";
+  const pattern = new RegExp(
+    `\\b(${Object.keys(MONTH_NUMBER).join("|")})\\s+${Array.from({ length: 10 }, () => number).join("\\s+")}`,
+    "gi",
+  );
+  const reference = referenceMonth.match(/^(\d{2})\/(20\d{2})$/);
+  const referenceMonthNumber = Number(reference?.[1] ?? 0);
+  const referenceYear = Number(reference?.[2] ?? 0);
+  const seen = new Set<string>();
+  const history = [];
+
+  for (const match of text.matchAll(pattern)) {
+    const monthNumber = MONTH_NUMBER[match[1].toUpperCase()];
+    const year = referenceYear
+      ? referenceYear - (monthNumber > referenceMonthNumber ? 1 : 0)
+      : 0;
+    const monthLabel = year
+      ? `${String(monthNumber).padStart(2, "0")}/${year}`
+      : match[1].toUpperCase();
+    if (seen.has(monthLabel)) continue;
+    seen.add(monthLabel);
+
+    const values = match.slice(2, 12).map(parseBR);
+    history.push({
+      mes_referencia: monthLabel,
+      consumo_ponta_kwh: values[3],
+      consumo_fora_ponta_kwh: values[4],
+      reativo_excedente_kvarh: values[5],
+    });
+  }
+
+  return history.slice(0, 12);
+}
+
 export function parseEquatorialInvoiceText(text: string, fileName = ""): ParsedEquatorialInvoice {
   const normalized = text.replace(/\s+/g, " ").trim();
   const fileMonth = fileName.match(/(?:^|\D)(0[1-9]|1[0-2])[.\-_\/](20\d{2})(?:\D|$)/);
@@ -100,15 +156,16 @@ export function parseEquatorialInvoiceText(text: string, fileName = ""): ParsedE
     ? reactiveItems.reduce((sum, item) => sum + item.quantity * item.grossTariff, 0) /
       reactiveItems.reduce((sum, item) => sum + item.quantity, 0)
     : null;
+  const referenceMonth = fileMonth
+    ? `${fileMonth[1]}/${fileMonth[2]}`
+    : labelledMonth?.[1]
+      ?? (billingSummaryMonth ? `${billingSummaryMonth[1]}/${billingSummaryMonth[2]}` : undefined)
+      ?? predominantMonth
+      ?? "";
 
   return {
     concessionaria: isEquatorialPara ? "EQUATORIAL_PARA" : "DESCONHECIDA",
-    mes_referencia: fileMonth
-      ? `${fileMonth[1]}/${fileMonth[2]}`
-      : labelledMonth?.[1]
-        ?? (billingSummaryMonth ? `${billingSummaryMonth[1]}/${billingSummaryMonth[2]}` : undefined)
-        ?? predominantMonth
-        ?? "",
+    mes_referencia: referenceMonth,
     consumo_ponta_kwh: firstNumberAfter(normalized, /TUSD\s+Energia\s+Ponta\s*\(kWh\)/i),
     consumo_fora_ponta_kwh: firstNumberAfter(normalized, /TUSD\s+Energia\s+Fora\s+Ponta\s*\(kWh\)/i),
     demanda_ponta_kw: parseBR(demandPeak?.[1]),
@@ -123,6 +180,7 @@ export function parseEquatorialInvoiceText(text: string, fileName = ""): ParsedE
     penalidade_reativa_ponta: reactivePeak?.billedAmount ?? null,
     penalidade_reativa_fora_ponta: reactiveOffPeak?.billedAmount ?? null,
     tarifa_reativa_aplicada: weightedTariff,
+    historico_mensal: parseMonthlyHistory(normalized, referenceMonth),
     fonte_dados: "pdf",
   };
 }
