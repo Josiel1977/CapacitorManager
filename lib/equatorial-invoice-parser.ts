@@ -1,4 +1,11 @@
 export interface ParsedEquatorialInvoice {
+  contexto_energetico?: {
+    b_optante: boolean;
+    gd2: boolean;
+    energia_compensada_kwh: number;
+    consumo_rede_kwh: number;
+    divida_e_atrasos: number;
+  };
   concessionaria: "EQUATORIAL_PARA" | "DESCONHECIDA";
   mes_referencia: string;
   consumo_ponta_kwh: number;
@@ -24,7 +31,7 @@ export interface ParsedEquatorialInvoice {
   fonte_dados: "pdf";
 }
 
-const BR_NUMBER = "([\\d.]+,\\d+)";
+const BR_NUMBER = "([\\d.]+(?:,\\d+)?)";
 
 export interface PdfTextItemLike {
   str: string;
@@ -148,7 +155,14 @@ export function parseEquatorialInvoiceText(text: string, fileName = ""): ParsedE
   const demandPeak = normalized.match(/Dem\.\s*M[aá]x\.\s*Ponta\s*\(kW\)\s*:\s*([\d.,]+)/i);
   const reactivePeak = billedItem(normalized, /Consumo\s+Reativo\s+Excedente\s+NP\s*\(kVAr\)/i);
   const reactiveOffPeak = billedItem(normalized, /Consumo\s+Reativo\s+Excedente\s+FP\s*\(kVAr\)/i);
-  const reactiveItems = [reactivePeak, reactiveOffPeak].filter((item): item is NonNullable<typeof item> => item !== null);
+  const reactiveTotal = billedItem(normalized, /Consumo\s+Reativo\s+Excedente\s*\(kVArh?\)/i);
+  const activeTotal = billedItem(normalized, /(?:^|\s)Consumo\s*\(kWh\)/i);
+  const compensated = billedItem(normalized, /Consumo\s+Compensado\s*\(kWh\)/i);
+  const financialLabels = [/Parcela\s*\(\d+\/\d+\)/i, /(?:^|\s)Multa/i, /(?:^|\s)Juros/i,
+    /Corre[çc][ãa]o\s+Monet[áa]ria\s+Parcela\s*\(\d+\/\d+\)/i,
+    /Corre[çc][ãa]o\s+Monet[áa]ria(?!\s+Parcela)/i];
+  const debt = financialLabels.reduce((sum, label) => sum + firstNumberAfter(normalized, label), 0);
+  const reactiveItems = (reactivePeak || reactiveOffPeak ? [reactivePeak, reactiveOffPeak] : [reactiveTotal]).filter((item): item is NonNullable<typeof item> => item !== null);
   const penalty = reactiveItems.length
     ? reactiveItems.reduce((sum, item) => sum + item.billedAmount, 0)
     : null;
@@ -164,21 +178,31 @@ export function parseEquatorialInvoiceText(text: string, fileName = ""): ParsedE
       ?? "";
 
   return {
+    contexto_energetico: {
+      b_optante: /B[ -]OPTANTE/i.test(normalized),
+      gd2: /GD\s*2/i.test(normalized),
+      energia_compensada_kwh: compensated?.quantity ?? 0,
+      consumo_rede_kwh: (activeTotal?.quantity ?? 0) + (compensated?.quantity ?? 0),
+      divida_e_atrasos: Number(debt.toFixed(2)),
+    },
     concessionaria: isEquatorialPara ? "EQUATORIAL_PARA" : "DESCONHECIDA",
     mes_referencia: referenceMonth,
     consumo_ponta_kwh: firstNumberAfter(normalized, /TUSD\s+Energia\s+Ponta\s*\(kWh\)/i),
-    consumo_fora_ponta_kwh: firstNumberAfter(normalized, /TUSD\s+Energia\s+Fora\s+Ponta\s*\(kWh\)/i),
+    consumo_fora_ponta_kwh: firstNumberAfter(normalized, /TUSD\s+Energia\s+Fora\s+Ponta\s*\(kWh\)/i) || activeTotal?.quantity || 0,
     demanda_ponta_kw: parseBR(demandPeak?.[1]),
     demanda_fora_ponta_kw: parseBR(demandOffPeak?.[1]),
     reativo_ponta_kvarh: reactivePeak?.quantity ?? 0,
-    reativo_fora_ponta_kvarh: reactiveOffPeak?.quantity ?? 0,
-    total_pagar: parseBR(labelledTotal?.[1]) || Math.max(0, ...currencyValues),
+    reativo_fora_ponta_kvarh: reactiveOffPeak?.quantity ?? reactiveTotal?.quantity ?? 0,
+    total_pagar: parseBR(labelledTotal?.[1])
+      || parseBR(normalized.match(/\b(?:0[1-9]|1[0-2])\/20\d{2}\s+\d{2}\/\d{2}\/20\d{2}\s+R\$\s*([\d.]+,\d{2})/i)?.[1])
+      || parseBR(normalized.match(/VALOR\s+DOCUMENTO.{0,180}?R\$\s*([\d.]+,\d{2})/i)?.[1])
+      || Math.max(0, ...currencyValues),
     dias_ciclo: days ? Number(days[1]) : readingSequence ? Number(readingSequence[3]) : 30,
     fp_calculado: undefined,
     reativo_origem: "excedente_faturado",
     penalidade_reativa_informada: penalty,
     penalidade_reativa_ponta: reactivePeak?.billedAmount ?? null,
-    penalidade_reativa_fora_ponta: reactiveOffPeak?.billedAmount ?? null,
+    penalidade_reativa_fora_ponta: reactiveOffPeak?.billedAmount ?? reactiveTotal?.billedAmount ?? null,
     tarifa_reativa_aplicada: weightedTariff,
     historico_mensal: parseMonthlyHistory(normalized, referenceMonth),
     fonte_dados: "pdf",

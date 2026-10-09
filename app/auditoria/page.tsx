@@ -1,19 +1,11 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
+import EnergyTariffDiagnosis from '@/components/EnergyTariffDiagnosis';
+import type { InvoiceAuditResult } from '@/lib/invoice-audit-result';
 import { readJsonResponse } from '@/lib/http-json-response';
 
-interface AuditResult {
-  concessionaria: string;
-  mesReferencia: string;
-  valorTotalFatura: number;
-  consumoKwh: number;
-  reativo_ponta_kvarh: number;
-  reativo_fora_ponta_kvarh: number;
-  totalMultas: number;
-  percentualMulta: number;
-  economiaAnualProjetada: number;
-}
+type AuditResult = InvoiceAuditResult;
 
 const money = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const number = (value: number) => value.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
@@ -75,6 +67,7 @@ export default function AuditoriaPage() {
           <p className="text-xs text-slate-500">A extração automática deve ser conferida com a fatura original. Dimensionamento e intervenção elétrica exigem medição em campo e responsável técnico habilitado.</p>
         </section>
       )}
+      <EnergyTariffDiagnosis key={result?.mesReferencia ?? "manual"} invoice={result ?? undefined} />
     </main>
   );
 }

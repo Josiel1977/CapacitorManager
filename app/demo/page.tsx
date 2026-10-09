@@ -1,4 +1,5 @@
 'use client';
+import EnergyTariffDiagnosis from '@/components/EnergyTariffDiagnosis';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -671,6 +672,7 @@ export default function DemoPage() {
                       </div>
                     </div>
 
+                    <EnergyTariffDiagnosis key={resultadoFatura.mesReferencia} invoice={resultadoFatura} />
                     {/* CTA Comercial Imediato */}
                     <div className="bg-gradient-to-r from-primary/10 to-secondary/10 p-5 rounded-2xl border border-primary/20 flex flex-col sm:flex-row items-center justify-between gap-4">
                       <div>
