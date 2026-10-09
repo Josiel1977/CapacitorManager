@@ -41,3 +41,12 @@ test('total do boleto prevalece sobre débitos antigos quando resumo gráfico n�
  const p=parseEquatorialInvoiceText('Equatorial Pará Referência 08/2026 DEBITOS 07/2026 R$ 27.735,10 VALOR (=) VALOR DOCUMENTO 17 R$ 23.842,83');
  assert.equal(p.total_pagar,23842.83);
 });
+test('azul aceita 30 kW em apenas um posto, inclusive zero na ponta',()=>{
+ const s=study();s.scenarios[2].contractedPeak=0;s.scenarios[2].contractedOffPeak=30;
+ assert.notEqual(diagnoseEnergyTariffs(s).results[2].total,null);
+ s.scenarios[2].contractedOffPeak=29;assert.equal(diagnoseEnergyTariffs(s).results[2].total,null);
+});
+test('correção antes da parcela não duplica correção nem omite parcelamento',()=>{
+ const p=parseEquatorialInvoiceText('Equatorial Pará Correção Monetária Parcela (7/10) 183,06 Parcela (7/10) 5.757,03');
+ assert.equal(p.contexto_energetico?.divida_e_atrasos,5940.09);
+});

@@ -48,8 +48,9 @@ export function diagnoseEnergyTariffs(study: EnergyStudy) {
     if (s.mode !== 'B-optante') {
       if (!valid(s.energyPeak) || s.energyPeak <= 0) missing.push('tarifa de ponta');
       if (!valid(study.measuredPeakKw) || !valid(study.measuredOffPeakKw)) missing.push('demanda medida por posto');
-      if (!valid(s.demandOffPeak) || s.demandOffPeak <= 0 || !valid(s.contractedOffPeak) || s.contractedOffPeak < 30) missing.push('demanda contratada e tarifa (mínimo geral de 30 kW neste simulador)');
-      if (s.mode === 'A-azul' && (!valid(s.demandPeak) || s.demandPeak <= 0 || !valid(s.contractedPeak) || s.contractedPeak < 30)) missing.push('demanda contratada e tarifa de ponta');
+      if (!valid(s.demandOffPeak) || s.demandOffPeak <= 0 || !valid(s.contractedOffPeak) || (s.mode === 'A-verde' && s.contractedOffPeak < 30)) missing.push('demanda contratada e tarifa (mínimo geral de 30 kW neste simulador)');
+      if (s.mode === 'A-azul' && (!valid(s.demandPeak) || s.demandPeak <= 0 || !valid(s.contractedPeak))) missing.push('demanda contratada e tarifa de ponta');
+      if (s.mode === 'A-azul' && valid(s.contractedPeak) && valid(s.contractedOffPeak) && Math.max(s.contractedPeak,s.contractedOffPeak) < 30) missing.push('mínimo geral de 30 kW em pelo menos um posto');
     }
     const eligible = s.mode !== 'B-optante' || bEligibility === 'compativel';
     if (missing.length) return { mode: s.mode, eligible, missing, energy: null, demand: null, excess: null, total: null };

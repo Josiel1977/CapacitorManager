@@ -1,4 +1,6 @@
+import { extractInvoiceDetails, type InvoiceDetails } from './invoice-details.ts';
 export interface ParsedEquatorialInvoice {
+  detalhes_fatura?: InvoiceDetails;
   contexto_energetico?: {
     b_optante: boolean;
     gd2: boolean;
@@ -161,7 +163,8 @@ export function parseEquatorialInvoiceText(text: string, fileName = ""): ParsedE
   const financialLabels = [/Parcela\s*\(\d+\/\d+\)/i, /(?:^|\s)Multa/i, /(?:^|\s)Juros/i,
     /Corre[çc][ãa]o\s+Monet[áa]ria\s+Parcela\s*\(\d+\/\d+\)/i,
     /Corre[çc][ãa]o\s+Monet[áa]ria(?!\s+Parcela)/i];
-  const debt = financialLabels.reduce((sum, label) => sum + firstNumberAfter(normalized, label), 0);
+  const financialText = normalized.replace(/Corre[çc][ãa]o\s+Monet[áa]ria\s+Parcela\s*\(\d+\/\d+\)\s*[\d.]+(?:,\d+)?/gi, '');
+  const debt = financialLabels.reduce((sum, label, index) => sum + firstNumberAfter(index === 0 ? financialText : normalized, label), 0);
   const reactiveItems = (reactivePeak || reactiveOffPeak ? [reactivePeak, reactiveOffPeak] : [reactiveTotal]).filter((item): item is NonNullable<typeof item> => item !== null);
   const penalty = reactiveItems.length
     ? reactiveItems.reduce((sum, item) => sum + item.billedAmount, 0)
@@ -178,6 +181,7 @@ export function parseEquatorialInvoiceText(text: string, fileName = ""): ParsedE
       ?? "";
 
   return {
+    detalhes_fatura: extractInvoiceDetails(text),
     contexto_energetico: {
       b_optante: /B[ -]OPTANTE/i.test(normalized),
       gd2: /GD\s*2/i.test(normalized),
