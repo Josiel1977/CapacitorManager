@@ -15,6 +15,7 @@ import { useAuth } from '@/lib/AuthContext';
 
 // Itens públicos (sempre visíveis)
 const publicMenuItems = [
+  { name: 'Auditoria Energética', href: '/auditoria', icon: ClipboardCheck },
   { name: 'Demonstração', href: '/demo', icon: Play },
   { name: 'Como Usar', href: '/como-usar', icon: BookOpen },
   { name: 'Central de Ajuda', href: '/ajuda', icon: HelpCircle },
