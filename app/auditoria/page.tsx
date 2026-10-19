@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
+import DemandStudy from '@/components/DemandStudy';
 import InvoiceDetailsPanel from '@/components/InvoiceDetailsPanel';
 import EnergyTariffDiagnosis from '@/components/EnergyTariffDiagnosis';
 import type { InvoiceAuditResult } from '@/lib/invoice-audit-result';
@@ -12,6 +13,7 @@ const money = (value: number) => value.toLocaleString('pt-BR', { style: 'currenc
 const number = (value: number) => value.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
 
 export default function AuditoriaPage() {
+  const [tab, setTab] = useState<'invoice' | 'demand'>('invoice');
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<AuditResult | null>(null);
   const [error, setError] = useState('');
@@ -46,6 +48,12 @@ export default function AuditoriaPage() {
         <h1 className="text-3xl font-bold">Auditoria de fatura</h1>
         <p className="mt-2 text-white/80">Extração real de faturas em PDF da Equatorial Pará. O arquivo é processado em memória e não é armazenado por este recurso.</p>
       </section>
+      <nav aria-label="Áreas da auditoria" className="flex gap-3">
+        <button type="button" aria-pressed={tab==='invoice'} onClick={()=>setTab('invoice')} className={`rounded-lg border px-4 py-3 ${tab==='invoice'?'bg-primary text-white':''}`}>Auditoria da fatura</button>
+        <button type="button" aria-pressed={tab==='demand'} onClick={()=>setTab('demand')} className={`rounded-lg border px-4 py-3 ${tab==='demand'?'bg-primary text-white':''}`}>Estudo de demanda</button>
+      </nav>
+      <div hidden={tab!=='demand'}><DemandStudy /></div>
+      <div hidden={tab!=='invoice'} className="space-y-6">
       <form onSubmit={audit} className="space-y-4 rounded-2xl border bg-white p-6 shadow-sm">
         <label className="block font-medium">Fatura em PDF (até 8 MB)</label>
         <input type="file" required accept="application/pdf,.pdf" onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="block w-full rounded-lg border p-3" />
@@ -70,6 +78,7 @@ export default function AuditoriaPage() {
       )}
       {result?.detalhes_fatura && <InvoiceDetailsPanel details={result.detalhes_fatura} total={result.valorTotalFatura} onChange={details=>setResult(old=>old?({...old,detalhes_fatura:details}):null)} />}
       <EnergyTariffDiagnosis key={result?.mesReferencia ?? "manual"} invoice={result ?? undefined} />
+      </div>
     </main>
   );
 }
