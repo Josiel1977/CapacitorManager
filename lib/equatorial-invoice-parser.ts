@@ -1,6 +1,14 @@
 import { extractInvoiceDetails, type InvoiceDetails } from './invoice-details.ts';
 export interface ParsedEquatorialInvoice {
   detalhes_fatura?: InvoiceDetails;
+  consultoria?: {
+    contratada_unica_kw: number | null;
+    contratada_ponta_kw: number | null;
+    contratada_fora_kw: number | null;
+    demanda_ponta_identificada: boolean;
+    demanda_fora_identificada: boolean;
+    energia_injetada_kwh: number | null;
+  };
   contexto_energetico?: {
     b_optante: boolean;
     gd2: boolean;
@@ -29,6 +37,8 @@ export interface ParsedEquatorialInvoice {
     consumo_ponta_kwh: number;
     consumo_fora_ponta_kwh: number;
     reativo_excedente_kvarh: number;
+    demanda_ponta_kw?: number;
+    demanda_fora_ponta_kw?: number;
   }>;
   fonte_dados: "pdf";
 }
@@ -69,9 +79,11 @@ const firstNumberAfter = (text: string, label: RegExp) => {
   return parseBR(match?.[1]);
 };
 
+const SIGNED_BR_NUMBER = "(-?[\\d.]+(?:,\\d+)?)";
+
 const billedItem = (text: string, label: RegExp) => {
   const match = text.match(new RegExp(
-    `${label.source}\\s*${BR_NUMBER}\\s+${BR_NUMBER}\\s+${BR_NUMBER}\\s+${BR_NUMBER}\\s+${BR_NUMBER}\\s+${BR_NUMBER}`,
+    `${label.source}\\s*${SIGNED_BR_NUMBER}\\s+${SIGNED_BR_NUMBER}\\s+${SIGNED_BR_NUMBER}\\s+${SIGNED_BR_NUMBER}\\s+${SIGNED_BR_NUMBER}\\s+${SIGNED_BR_NUMBER}`,
     "i",
   ));
   if (!match) return null;
@@ -124,6 +136,8 @@ function parseMonthlyHistory(text: string, referenceMonth: string) {
     const values = match.slice(2, 12).map(parseBR);
     history.push({
       mes_referencia: monthLabel,
+      demanda_ponta_kw: values[0],
+      demanda_fora_ponta_kw: values[1],
       consumo_ponta_kwh: values[3],
       consumo_fora_ponta_kwh: values[4],
       reativo_excedente_kvarh: values[5],
@@ -182,6 +196,14 @@ export function parseEquatorialInvoiceText(text: string, fileName = ""): ParsedE
 
   return {
     detalhes_fatura: extractInvoiceDetails(text),
+    consultoria: {
+      contratada_unica_kw: (()=>{const m=normalized.match(/Demanda\s+Contratada\s+[ÚU]nica\s*\(kW\)\s*:\s*([\d.,]+)/i);return m?parseBR(m[1]):null;})(),
+      contratada_ponta_kw: (()=>{const m=normalized.match(/Demanda\s+Contratada\s+Ponta\s*\(kW\)\s*:\s*([\d.,]+)/i);return m?parseBR(m[1]):null;})(),
+      contratada_fora_kw: (()=>{const m=normalized.match(/Demanda\s+Contratada\s+Fora\s+Ponta\s*\(kW\)\s*:\s*([\d.,]+)/i);return m?parseBR(m[1]):null;})(),
+      demanda_ponta_identificada: Boolean(demandPeak),
+      demanda_fora_identificada: Boolean(demandOffPeak),
+      energia_injetada_kwh: billedItem(normalized, /Energia\s+Ativa\s+Injetada\s*\(kWh\)/i)?.quantity??null,
+    },
     contexto_energetico: {
       b_optante: /B[ -]OPTANTE/i.test(normalized),
       gd2: /GD\s*2/i.test(normalized),

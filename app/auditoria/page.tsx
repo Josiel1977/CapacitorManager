@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import DemandStudy from '@/components/DemandStudy';
+import TariffConsultancy from '@/components/TariffConsultancy';
 import InvoiceDetailsPanel from '@/components/InvoiceDetailsPanel';
 import EnergyTariffDiagnosis from '@/components/EnergyTariffDiagnosis';
 import type { InvoiceAuditResult } from '@/lib/invoice-audit-result';
@@ -43,16 +43,16 @@ export default function AuditoriaPage() {
   }
 
   return (
-    <main className="mx-auto max-w-4xl space-y-6 p-6">
+    <main className="mx-auto max-w-7xl space-y-6 p-6">
       <section className="rounded-2xl bg-primary p-7 text-white">
         <h1 className="text-3xl font-bold">Auditoria de fatura</h1>
         <p className="mt-2 text-white/80">Extração real de faturas em PDF da Equatorial Pará. O arquivo é processado em memória e não é armazenado por este recurso.</p>
       </section>
       <nav aria-label="Áreas da auditoria" className="flex gap-3">
         <button type="button" aria-pressed={tab==='invoice'} onClick={()=>setTab('invoice')} className={`rounded-lg border px-4 py-3 ${tab==='invoice'?'bg-primary text-white':''}`}>Auditoria da fatura</button>
-        <button type="button" aria-pressed={tab==='demand'} onClick={()=>setTab('demand')} className={`rounded-lg border px-4 py-3 ${tab==='demand'?'bg-primary text-white':''}`}>Estudo de demanda</button>
+        <button type="button" aria-pressed={tab==='demand'} onClick={()=>setTab('demand')} className={`rounded-lg border px-4 py-3 ${tab==='demand'?'bg-primary text-white':''}`}>Consultoria e Gestão Tarifária</button>
       </nav>
-      <div hidden={tab!=='demand'}><DemandStudy /></div>
+      <div hidden={tab!=='demand'}><TariffConsultancy invoice={result??undefined} /></div>
       <div hidden={tab!=='invoice'} className="space-y-6">
       <form onSubmit={audit} className="space-y-4 rounded-2xl border bg-white p-6 shadow-sm">
         <label className="block font-medium">Fatura em PDF (até 8 MB)</label>

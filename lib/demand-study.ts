@@ -41,5 +41,8 @@ export function studyDemand(input: DemandInput) {
   const peak = input.mode==='azul'?optimize(input.months.map(r=>r.peak!*factor),input.tariffPeak,input.minimumPeak,input.contractedPeak,input.marginPercent):null;
   const scenarios = (['current','economic','margin'] as const).map(key=>({key,offPeak:off[key].contract,peak:peak?.[key].contract??null,total:cents(off[key].total+(peak?.[key].total??0)),excess:cents(off[key].excess+(peak?.[key].excess??0)),breaches:off[key].breaches+(peak?.[key].breaches??0)}));
   if (scenarios.some(s=>!Number.isFinite(s.total))) throw new Error('Valores excedem o limite de cálculo.');
-  return { scenarios, months:input.months.length, saving:cents(scenarios[0].total-scenarios[1].total), completeYear:input.months.length===12 };
+  const dates=input.months.map(m=>m.month).sort();
+  const serial=(m:string)=>Number(m.slice(0,4))*12+Number(m.slice(5));
+  const completeYear=dates.length===12&&dates.every((m,i)=>i===0||serial(m)-serial(dates[i-1])===1);
+  return { scenarios, months:input.months.length, saving:cents(scenarios[0].total-scenarios[1].total), completeYear };
 }
