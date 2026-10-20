@@ -54,6 +54,13 @@ Multa 1,00`));
   await page.screenshot({path:'artifacts/report-print/'+file+'.png',fullPage:true});
  }
  await page.emulateMedia({media:'screen'});
+ await page.getByRole('button',{name:'Auditoria da fatura',exact:true}).click();
+ const auditDownloadPromise=page.waitForEvent('download');
+ await page.getByRole('button',{name:'Gerar e baixar relatório PDF',exact:true}).click();
+ const auditDownload=await auditDownloadPromise;
+ await auditDownload.saveAs('artifacts/report-print/auditoria-download.pdf');
+ await inspectPdf(await readFile('artifacts/report-print/auditoria-download.pdf'),'PDF direto da auditoria');
+ await page.getByRole('button',{name:'Expansão e transformadores',exact:true}).click();
  const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'Baixar estudo de expansão PDF',exact:true}).click();
  const download=await downloadPromise;await download.saveAs('artifacts/report-print/expansao-download.pdf');
  const direct=await readFile('artifacts/report-print/expansao-download.pdf');
