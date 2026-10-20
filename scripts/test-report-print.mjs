@@ -15,7 +15,7 @@ function png(){const head=Buffer.alloc(13);head.writeUInt32BE(1,0);head.writeUIn
 const server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','-p','3100'],{env:process.env,stdio:['ignore','pipe','pipe']});
 let output='';server.stdout.on('data',data=>output+=data);server.stderr.on('data',data=>output+=data);
 let browser;
-async function inspectPdf(buffer,label){const parser=new PDFParse({data:buffer});try{const result=await parser.getText();assert.match(result.text,/Profissional Teste/);assert.match(result.text,/CRT-TESTE-0000/);assert.match(result.text,/CLIENTE SINTETICO TESTE/);assert.ok(result.pages.every(page=>page.text.replace(/\s/g,'').length>30),label+': página em branco');assert.ok(!result.text.includes('Salvar dados e assinatura neste navegador'),label+': formulário impresso');console.log(label+': '+result.pages.length+' páginas com conteúdo e identificação.');}finally{await parser.destroy();}}
+async function inspectPdf(buffer,label){const parser=new PDFParse({data:buffer});try{const result=await parser.getText();assert.match(result.text,/Profissional Teste/);assert.match(result.text,/CRT-TESTE-0000/);assert.ok(!result.text.includes('Prévia — data definida'),label+': data de impressão não atualizada');assert.match(result.text,/CLIENTE SINTETICO TESTE/);assert.ok(result.pages.every(page=>page.text.replace(/\s/g,'').length>30),label+': página em branco');assert.ok(!result.text.includes('Salvar dados e assinatura neste navegador'),label+': formulário impresso');console.log(label+': '+result.pages.length+' páginas com conteúdo e identificação.');}finally{await parser.destroy();}}
 try{
  let ready=false;for(let n=0;n<60;n++){try{if((await fetch('http://localhost:3100/auditoria')).ok){ready=true;break;}}catch{}await setTimeout(1000);}assert.ok(ready,'Servidor não iniciou: '+output.slice(-2000));
  await mkdir('artifacts/report-print',{recursive:true});
@@ -41,7 +41,7 @@ Multa 1,00`));
  await page.locator('input[type="file"][accept="application/pdf,.pdf"]:visible').setInputFiles({name:'fatura-sintetica.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7 fixture')});
  await page.getByRole('button',{name:'Analisar fatura',exact:true}).click();
  await page.getByRole('heading',{name:'Resultado da fatura enviada',exact:true}).waitFor();
- await page.getByLabel('Geração dos inversores, cargas previstas, medições e recomendações',{exact:true}).fill('Observações técnicas sintéticas para testar paginação. '.repeat(160));
+ await page.getByLabel('Geração dos inversores, cargas previstas, medições e recomendações').fill('Observações técnicas sintéticas para testar paginação. '.repeat(160));
  await page.getByLabel('Nome do responsável',{exact:true}).fill('Profissional Teste');
  await page.getByLabel('Número do CRT/CFT e regional',{exact:true}).fill('CRT-TESTE-0000');
  await page.getByLabel('Imagem da assinatura',{exact:true}).setInputFiles({name:'assinatura-sintetica.png',mimeType:'image/png',buffer:png()});

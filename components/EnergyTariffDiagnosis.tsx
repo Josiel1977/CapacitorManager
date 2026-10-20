@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import {useReportPrintDate} from '@/hooks/use-report-print-date';
 import {ReportPrintView} from '@/components/ReportPrintView';
 import type {ReportProfessional} from '@/lib/report-professional';
 import {energyStudyFromInvoice,invoiceStudyFacts} from '@/lib/audit-study-import';
@@ -19,12 +20,13 @@ export default function EnergyTariffDiagnosis({ invoice,professional }: { invoic
   const [pdfError,setPdfError] = useState('');
   const result = diagnoseEnergyTariffs(study);
   const context = invoice?.contexto_energetico;
-  const reportLines = buildEnergyDiagnosisReport({client,notes,study,invoice,diagnosis:result,date:new Date().toLocaleDateString('pt-BR')});
+  const printDate=useReportPrintDate();
+  const reportLines = buildEnergyDiagnosisReport({client,notes,study,invoice,diagnosis:result,date:printDate||'Prévia — data definida ao imprimir'});
   async function downloadReport() {
     setGenerating(true); setPdfError('');
     try {
       const { createEnergyDiagnosisPdf } = await import('@/lib/energy-diagnosis-pdf');
-      const pdf = await createEnergyDiagnosisPdf(reportLines,professional);
+      const pdf = await createEnergyDiagnosisPdf(buildEnergyDiagnosisReport({client,notes,study,invoice,diagnosis:result,date:new Date().toLocaleString('pt-BR')}),professional);
       pdf.save('Diagnostico-Energetico.pdf');
       setSaved('PDF gerado. Verifique os downloads do navegador.');
     } catch {
