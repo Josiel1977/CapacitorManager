@@ -34,6 +34,8 @@ test("extrai o novo layout Equatorial de julho de 2026", () => {
   assert.equal(result.historico_mensal.length, 5);
   assert.deepEqual(result.historico_mensal[0], {
     mes_referencia: "07/2026",
+    demanda_ponta_kw: 36.79,
+    demanda_fora_ponta_kw: 194.8,
     consumo_ponta_kwh: 1688.9,
     consumo_fora_ponta_kwh: 24608.05,
     reativo_excedente_kvarh: 5290.35,
@@ -83,4 +85,11 @@ test("prioriza competência auditável presente no nome do PDF", () => {
   const ambiguous = `${invoiceText.replace(/Conta Mês 07\/2026/, "")}
     30/06/2026 31/07/2026 31/08/2026 07/08/2026 07/08/2026`;
   assert.equal(parseEquatorialInvoiceText(ambiguous, "EQTL - 07.2026.pdf").mes_referencia, "07/2026");
+});
+
+test('extrai energia injetada com valores de crédito negativos e contrato identificado',()=>{
+ const parsed=parseEquatorialInvoiceText('Equatorial Pará Conta Mês 08/2026 Demanda Contratada Única (kW): 250,00 Energia Ativa Injetada (kWh) 3.744 0,949997 0,728550 -153,32 -675,79 -3.556,79');
+ assert.equal(parsed.consultoria?.energia_injetada_kwh,3744);
+ assert.equal(parsed.consultoria?.contratada_unica_kw,250);
+ assert.equal(parsed.consultoria?.contratada_ponta_kw,null);
 });
