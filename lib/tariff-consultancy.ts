@@ -18,12 +18,20 @@ export interface ConsultingStudy {
  gd:boolean; gdVerified:boolean; alternativesApproved:boolean; reviewed:boolean; notes:string;
 }
 export const CONSULTING_SOURCES=[
+ {title:'Equatorial Pará - NT.00002, revisão 10: ampliação e medição (itens 6.8.1 e 6.8.8–6.8.10)',url:'https://pa.equatorialenergia.com.br/wp-content/uploads/2025/12/NT.00002.EQTL-10-Fornecimento-de-Energia-Eletrica-em-Media-Tensao-138kV-231kV-e-345kV.pdf'},
  {title:'ANEEL - modalidades tarifárias',url:'https://www.gov.br/aneel/pt-br/assuntos/tarifas/entenda-a-tarifa/modalidades-tarifarias'},
  {title:'REN ANEEL 1.000/2021 consolidada - contratação, faturamento e reativo',url:'https://www2.aneel.gov.br/cedoc/ren20211000.pdf'},
  {title:'ANEEL - tarifas de aplicação, TE e TUSD',url:'https://dadosabertos.aneel.gov.br/dataset/tarifas-distribuidoras-energia-eletrica'},
  {title:'Lei 14.300/2022 - geração distribuída e SCEE',url:'https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2022/lei/l14300.htm'},
  {title:'ANEEL - estudos de inversão de fluxo, Despacho 2.216/2024',url:'https://www2.aneel.gov.br/cedoc/adsp20242216_2.pdf'},
 ];
+export const EXPANSION_EXAMPLE = [
+ 'Exemplo orientativo — Equatorial Pará: um transformador atual de 112,5 kVA mais outro igual na mesma UC somam 225 kVA. É capacidade de transformação, não demanda contratada de 225 kW. Com SCEE, a soma ultrapassa o requisito de 112,5 kVA do B-optante (REN 1.000, art. 292, § 3º).',
+ 'Passar do faturamento B-optante ao Grupo A não exige, por si só, cabine de medição primária. Pela NT.00002.EQTL, revisão 10, item 6.8.1, um único transformador até 300 kVA em poste ou pedestal tem medição no secundário, respeitadas as condições de localização e os demais requisitos da norma.',
+ 'Se forem dois transformadores, cada um em seu poste na rede interna e distribuídos conforme o centro de carga, o item 6.8.8 prevê medição em média tensão em cabine de alvenaria ou cubículo blindado, mesmo com soma até 300 kVA. Subestação abrigada também exige medição em média tensão (item 6.8.9); a localização pode impor outras condições (item 6.8.10).',
+ 'Comparar duas alternativas de projeto: acrescentar outro transformador com a medição exigida versus substituir o atual por um único maior. A definição depende de medições, cargas futuras, quedas de tensão, proteção, custos, norma vigente e aprovação da distribuidora. Este exemplo não dimensiona a instalação nem recomenda obra automaticamente.',
+];
+export const EXPANSION_NOTES_TEMPLATE = 'AMPLIAÇÃO A AVALIAR (preencher e validar): transformador atual ___ kVA; nova carga ___ kW; alternativa A — acrescentar ___ kVA; alternativa B — substituir por um único de ___ kVA; localização dos transformadores ___; ponto/padrão de medição ___; demanda prevista ___ kW; custos das alternativas ___; enquadramento SCEE/B-optante ___; aprovação da distribuidora pendente.';
 export const CONSULTING_METHOD=[
  'Estudo prospectivo: reaplica as tarifas de referência ao perfil mensal informado. Não reconstitui faturas históricas e não comprova restituição de tributos. Tarifas de todas as alternativas na mesma base, sem tributos, bandeiras e CIP. Não se aplica cálculo genérico de ICMS por dentro.',
  'Demanda regular = max(medida prevista, contratada) × tarifa. Para consumo, se medida > 1,05 × contratada: adicional = 2 × tarifa × (medida - contratada). Verde usa o maior pico entre os postos; Azul calcula cada posto. A tolerância não disponibiliza capacidade adicional.',
@@ -152,6 +160,7 @@ export function consultancyReport(s:ConsultingStudy,date:string){
  'MEMÓRIA MENSAL DAS ALTERNATIVAS',...r.simulations.flatMap(v=>v.options.flatMap(o=>[`${v.mode} / ${o.kind}`,...o.monthly.map(m=>`${m.month}: energia R$ ${m.energy.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}, demanda R$ ${m.demand.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}, ultrapassagem R$ ${m.excess.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}, GD R$ ${m.gd.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}; total R$ ${m.total.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}.`)])),
  'REATIVO E ENERGIA INJETADA',`Reativo identificado: R$ ${r.reactive.total.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})} em ${r.reactive.months} meses informados; não equivale a economia garantida. Injeção informada: ${r.injection.kwh} kWh em ${r.injection.months} meses; não equivale à geração total.`,
  'PLANO DE AÇÃO','1. Conferir 12 faturas, CUSD, resolução tarifária e perfil por posto; obter curva de carga de 15 minutos quando necessária.','2. Validar cargas futuras, capacidade de conexão, opções disponíveis e custos de adequação com a distribuidora.','3. Para reativo: realizar campanha horária de P/Q/FP e harmônicas, revisar o banco existente e emitir especificação por responsável habilitado.','4. Para energia injetada: conferir projeto/aprovação, potência de inversores, medição bidirecional, créditos, regime GD e limites de exportação.','5. Solicitar formalmente a alteração após validação, registrar protocolo, vigência e monitorar as faturas seguintes.',
+ 'AMPLIAÇÃO E MEDIÇÃO — EXEMPLO ORIENTATIVO (EQUATORIAL PARÁ)',...EXPANSION_EXAMPLE,
  `Observações: ${s.notes}`,'PREMISSAS E LIMITES',...CONSULTING_METHOD,'REFERÊNCIAS',...CONSULTING_SOURCES.map(v=>`${v.title}: ${v.url}`)];
 }
 export function parseConsultingStudy(value:unknown):ConsultingStudy {

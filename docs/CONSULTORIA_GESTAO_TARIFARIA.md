@@ -98,3 +98,8 @@ Esses itens não são ocultados como resultado conclusivo. Tarifas manuais docum
 - PDFs reais enviados pelo usuário conferidos localmente: contrato de 250 kW e nove meses de histórico no caso industrial; 3.744 kWh de injeção identificados no caso B-optante. Nenhum dado identificador desses clientes foi incluído como fixture público no repositório.
 - PDF sintético renderizado para inspeção visual; fonte incorporada evita dependência das fontes instaladas no leitor.
 - Navegação visual completa em navegador não foi validada neste ambiente: Chromium não estava instalado e o download disponível não forneceu um arquivo válido. A interface compilou, mas o teste visual de desktop/celular permanece parte da homologação.
+
+
+## Observação orientativa de ampliação e medição
+
+A tela e o relatório incluem o exemplo Equatorial PA de 112,5 + 112,5 kVA, distinguindo B-optante/SCEE, demanda em kW e padrão físico de medição. A referência direta é a NT.00002.EQTL revisão 10, itens 6.8.1 e 6.8.8–6.8.10, consultada no PDF oficial publicado no portal Pará. A observação não é utilizada pelo motor como dimensionamento ou recomendação de obra. Há botão para inserir um roteiro editável no campo de diagnóstico, sem duplicar inserções e preservando o texto existente.
