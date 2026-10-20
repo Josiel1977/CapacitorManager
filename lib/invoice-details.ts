@@ -27,12 +27,12 @@ export function extractInvoiceDetails(text:string): InvoiceDetails {
     const line=lines.find(l=>label.test(l)); return line?.replace(label,'').trim() || null;
   };
   const labelNumber = /-?\d[\d.]*(?:,\d+)?/g;
-  const itemLabel = /^(Consumo(?:\s+Compensado|\s+Reativo\s+Excedente(?:\s+(?:NP|FP))?)?\s*\([^)]*\)|TUSD\s+Energia\s+(?:Fora\s+)?Ponta\s*\([^)]*\)|Energia\s+Ativa\s+Injetada\s*\([^)]*\)|Parc\.\s*Inj\.[^(]*\([^)]*\)|Benef[íi]cio\s+Tarif[áa]rio\s+(?:Bruto|L[íi]quido)\s+SCEE|Adicional\s+Bandeira|Cip[^\d]*?|Parcela\s*\(\d+\/\d+\)|(?:Multa\s+por\s+)?Ultrapassagem(?:\s+de)?\s+Demanda(?:\s+(?:Fora\s+Ponta|Ponta|FP|NP))?(?:\s*\([^)]*\))?|Demanda\s+Ultrapassagem(?:\s+(?:Fora\s+Ponta|Ponta|FP|NP))?(?:\s*\([^)]*\))?|Multa|Corre[çc][ãa]o\s+Monet[áa]ria(?:\s+Parcela\s*\(\d+\/\d+\))?|Juros)\s+(-?\d.*)$/i;
+  const itemLabel = /^(Consumo(?:\s+Compensado|\s+Reativo\s+Excedente(?:\s+(?:NP|FP))?)?\s*\([^)]*\)|TUSD\s+Energia\s+(?:Fora\s+)?Ponta\s*\([^)]*\)|Energia\s+Ativa\s+Injetada\s*\([^)]*\)|Parc\.\s*Inj\.[^(]*\([^)]*\)|Benef[íi]cio\s+Tarif[áa]rio\s+(?:Bruto|L[íi]quido)(?:\s+SCEE)?|Devolu[çc][ãa]o\s+de\s+ajuste|Encargo\s+Escassez\s+H[íi]drica|Adicional\s+Bandeira|Cip[^\d]*?|Parcela\s*\(\d+\/\d+\)|(?:Multa\s+por\s+)?Ultrapassagem(?:\s+de)?\s+Demanda(?:\s+(?:Fora\s+Ponta|Ponta|FP|NP))?(?:\s*\([^)]*\))?|Demanda\s+Ultrapassagem(?:\s+(?:Fora\s+Ponta|Ponta|FP|NP))?(?:\s*\([^)]*\))?|Multa|Corre[çc][ãa]o\s+Monet[áa]ria(?:\s+Parcela\s*\(\d+\/\d+\))?|Juros)\s+(-?\d.*)$/i;
   const itens:InvoiceDetails['itens']=[];
   for(const line of lines) {
     const m=line.match(itemLabel);if(!m)continue;
     // Em texto com colunas lado a lado, não incorporar a tabela tributária ao item.
-    const amountText=m[2].split(/\s+(?:ICMS|PIS|COFINS)\s/i)[0];
+    const amountText=m[2].split(/\s+(?:ICMS|PIS|COFINS|Demanda\s+Contratada|Dem\.\s+Reserva)\s/i)[0];
     const values=(amountText.match(labelNumber)??[]).map(br);
     if (![1,3,6].includes(values.length)) continue;
     itens.push({descricao:m[1],quantidade:values.length===6?values[0]:null,tarifa_com_tributos:values.length===6?values[1]:null,tarifa_sem_tributos:values.length===6?values[2]:null,pis_cofins:values.length===6?values[3]:values.length===3?values[0]:null,icms:values.length===6?values[4]:values.length===3?values[1]:null,valor:values[values.length-1]});
@@ -57,7 +57,7 @@ export function extractInvoiceDetails(text:string): InvoiceDetails {
     classificacao:lineValue(/^CLASSIFICA[ÇC][ÃA]O:\s*/i)?.split(/MODALIDADE/i)[0].trim()??null,
     modalidade:n.match(/MODALIDADE\s+TARIF[ÁA]RIA:\s*(\S+)/i)?.[1]??null,
     fornecimento:n.match(/TIPO\s+DE\s+FORNECIMENTO:\s*(\S+)/i)?.[1]??null,
-    vencimento:n.match(/PAG[ÁA]VEL\s+PREFERENCIALMENTE\s+NO\s+BANCO\s+DO\s+BRASIL\s+(\d{2}\/\d{2}\/\d{4})/i)?.[1]??n.match(/\b(?:0[1-9]|1[0-2])\/20\d{2}\s+(\d{2}\/\d{2}\/20\d{2})\s+R\$/)?.[1]??null,
+    vencimento:(n.match(/PAG[ÁA]VEL\s+PREFERENCIALMENTE\s+NO\s+BANCO\s+DO\s+BRASIL\s+(\d{2}[/.]\d{2}[/.]\d{4})/i)?.[1]??n.match(/\b(?:0[1-9]|1[0-2])\/20\d{2}\s+(\d{2}[/.]\d{2}[/.]20\d{2})\s+R\$/)?.[1])?.replace(/\./g,'/')??null,
     leitura_anterior:reading?.[1]??null,leitura_atual:reading?.[2]??null,proxima_leitura:reading?.[3]??null,
     perdas_percentual:n.match(/PERDAS\s+DE\s+TRANSFORMA[ÇC][ÃA]O\s*\/\s*RAMAL:\s*([\d.,]+)\s*%/i)?br(n.match(/PERDAS\s+DE\s+TRANSFORMA[ÇC][ÃA]O\s*\/\s*RAMAL:\s*([\d.,]+)\s*%/i)![1]):null,
     itens,tributos,historico_ativo_injetado:history,soma_itens:itens.length?Math.round(itens.reduce((sum,item)=>sum+item.valor,0)*100)/100:null,texto_extraido:text,

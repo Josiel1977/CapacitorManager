@@ -24,3 +24,20 @@ test('histórico ativo/injetado é separado e não inventado se quantidade de n�
  const d=extractInvoiceDetails('JUL/26 AGO/26 Ativo Injetado 100 20 200 30 ');assert.equal(d.historico_ativo_injetado.length,2);assert.equal(d.historico_ativo_injetado[1].injetado_kwh,30);
  assert.equal(extractInvoiceDetails('JUL/26 AGO/26 Ativo Injetado 100 20 200 ').historico_ativo_injetado.length,0);
 });
+test('concilia modelo A4 com benefícios sem SCEE, devolução negativa, encargo e vencimento pontuado',()=>{
+ const details=extractInvoiceDetails(`TUSD Energia Fora Ponta (kWh) 24.608,05 0,203246 0,151860 314,23 950,28 5.001,48
+TUSD Energia Ponta (kWh) 1.688,90 0,203239 0,151860 21,56 65,22 343,25
+Consumo Reativo Excedente NP (kVAr) 365,08 0,383067 0,286220 8,79 26,57 139,85
+Consumo Reativo Excedente FP (kVAr) 4.925,27 0,383071 0,286220 118,54 358,48 1.886,73
+Encargo Escassez Hídrica 26.296,95 0,004604 0,003440 7,61 23,00 121,07
+Benefício Tarifário Bruto 1.287,19 3.263,64 19.858,57 Demanda Contratada Única (kW): 250,00
+Devolução de ajuste -7.465,68
+Benefício Tarifário Líquido -15.307,74
+Cip-Ilum Pub Pref Munic 2.406,79
+PAGÁVEL PREFERENCIALMENTE NO BANCO DO BRASIL 21.10.2026`);
+ assert.equal(details.itens.length,9);
+ assert.equal(details.soma_itens,6984.32);
+ assert.equal(details.vencimento,'21/10/2026');
+ assert.equal(details.itens[5].icms,3263.64);
+ assert.equal(details.itens[6].valor,-7465.68);
+});
