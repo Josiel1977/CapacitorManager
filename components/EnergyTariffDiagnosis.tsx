@@ -1,5 +1,7 @@
 'use client';
 import { useState } from 'react';
+import {ReportPrintView} from '@/components/ReportPrintView';
+import type {ReportProfessional} from '@/lib/report-professional';
 import {energyStudyFromInvoice,invoiceStudyFacts} from '@/lib/audit-study-import';
 import { diagnoseEnergyTariffs, type EnergyStudy, type TariffScenario, type Mode } from '@/lib/energy-tariff-diagnosis';
 import { buildEnergyDiagnosisReport } from '@/lib/energy-diagnosis-report';
@@ -8,7 +10,7 @@ const money = (n: number | null) => n === null ? 'Pendente' : n.toLocaleString('
 const modes: Mode[] = ['B-optante', 'A-verde', 'A-azul'];
 const newScenario = (mode: Mode): TariffScenario => ({mode, energyPeak:null, energyOffPeak:null, demandPeak:null, demandOffPeak:null, contractedPeak:null, contractedOffPeak:null, gdCharge:null, otherCharges:null});
 const initial: EnergyStudy = {currentKva:null,futureKva:null,sameUnit:null,solarLocal:null,remoteCredits:null,netPeakKwh:null,netOffPeakKwh:null,measuredPeakKw:null,measuredOffPeakKw:null,confirmed:false,tariffSource:'',scenarios:modes.map(newScenario)};
-export default function EnergyTariffDiagnosis({ invoice }: { invoice?: InvoiceAuditResult }) {
+export default function EnergyTariffDiagnosis({ invoice,professional }: { invoice?: InvoiceAuditResult;professional?:ReportProfessional }) {
   const [study,setStudy] = useState<EnergyStudy>(()=>invoice?energyStudyFromInvoice({...initial,scenarios:modes.map(newScenario)},invoice):{...initial,scenarios:modes.map(newScenario)});
   const [client,setClient] = useState(invoice?.detalhes_fatura?.cliente ? `${invoice.detalhes_fatura.cliente} / UC ${invoice.detalhes_fatura.unidade_consumidora ?? 'não identificada'}` : '');
   const [notes,setNotes] = useState(invoice?invoiceStudyFacts(invoice).summary:'');
@@ -22,7 +24,7 @@ export default function EnergyTariffDiagnosis({ invoice }: { invoice?: InvoiceAu
     setGenerating(true); setPdfError('');
     try {
       const { createEnergyDiagnosisPdf } = await import('@/lib/energy-diagnosis-pdf');
-      const pdf = await createEnergyDiagnosisPdf(reportLines);
+      const pdf = await createEnergyDiagnosisPdf(reportLines,professional);
       pdf.save('Diagnostico-Energetico.pdf');
       setSaved('PDF gerado. Verifique os downloads do navegador.');
     } catch {
@@ -83,10 +85,7 @@ export default function EnergyTariffDiagnosis({ invoice }: { invoice?: InvoiceAu
       <label className="flex gap-2 text-sm"><input type="checkbox" checked={study.confirmed} onChange={e=>setStudy(s=>({...s,confirmed:e.target.checked}))}/>Conferi os dados, a compensação por posto, os custos GD, os tributos e a disponibilidade das modalidades para esta conexão.</label>
       <div className="flex flex-wrap gap-3"><button type="button" className="rounded border px-4 py-2" onClick={save}>Salvar rascunho neste navegador</button><button type="button" className="rounded border px-4 py-2" onClick={restore}>Restaurar rascunho</button></div>{pdfError && <p role="alert" className="text-sm text-red-700">{pdfError}</p>}{!invoice && <p className="text-sm">Analise uma fatura para gerar o PDF com os dados identificados.</p>}{saved && <p role="status" className="text-sm">{saved}</p>}
     </div>
-    <article id="energy-diagnosis-report" className="space-y-3 border-t pt-5">
-      {reportLines.map((line,index) => !line ? <div key={index} className="h-2"/> : line === line.toLocaleUpperCase('pt-BR') ? <h3 key={index} className="font-bold text-primary">{line}</h3> : <p key={index} className="whitespace-pre-wrap text-sm">{line}</p>)}
-    </article>
-    <style>{`@media print { body * { visibility: hidden; } #energy-diagnosis-report, #energy-diagnosis-report * { visibility: visible; } #energy-diagnosis-report { position: absolute; left: 0; top: 0; width: 100%; padding: 12mm; background: white; color: black; font-size: 10pt; } .energy-controls { display: none; } #energy-diagnosis-report table { font-size: 9pt; } #energy-diagnosis-report tr { break-inside: avoid; } }`}</style>
+    <ReportPrintView id="energy-diagnosis-report" lines={reportLines} profile={professional}/>
   </section>;
 }
 function Numeric({label,value,onChange}:{label:string;value:number|null;onChange:(v:number|null)=>void}) {return <label className="block text-sm">{label}<input className="mt-1 w-full rounded border p-2" type="number" min="0" step="any" value={value??''} onChange={e=>onChange(e.target.value===''?null:Number(e.target.value))}/></label>;}
