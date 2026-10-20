@@ -5,7 +5,8 @@ import {deflateSync} from 'node:zlib';
 import {setTimeout} from 'node:timers/promises';
 import 'pdf-parse/worker';
 import {PDFParse} from 'pdf-parse';
-import {chromium} from 'playwright';
+import {createRequire} from 'node:module';
+const {chromium}=createRequire('/tmp/cm-report-print-tools/package.json')('playwright');
 import {parseEquatorialInvoiceText} from '../lib/equatorial-invoice-parser.ts';
 import {buildInvoiceAuditResult} from '../lib/invoice-audit-result.ts';
 function crc(data){let c=0xffffffff;for(const byte of data){c^=byte;for(let bit=0;bit<8;bit++)c=(c>>>1)^((c&1)?0xedb88320:0);}return(c^0xffffffff)>>>0;}
@@ -19,7 +20,12 @@ try{
  let ready=false;for(let n=0;n<60;n++){try{if((await fetch('http://localhost:3100/auditoria')).ok){ready=true;break;}}catch{}await setTimeout(1000);}assert.ok(ready,'Servidor não iniciou: '+output.slice(-2000));
  await mkdir('artifacts/report-print',{recursive:true});
  browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1280,height:1000}});
+ page.on('pageerror',error=>console.error('Erro de página:',error.message));
+ page.on('console',message=>{if(message.type()==='error')console.error('Console:',message.text());});
  await page.goto('http://localhost:3100/auditoria');
+ await page.getByRole('button',{name:'Expansão e transformadores',exact:true}).click();
+ await page.getByRole('heading',{name:'Expansão de carga e transformadores',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Auditoria da fatura',exact:true}).click();
  const invoice=buildInvoiceAuditResult(parseEquatorialInvoiceText(`Equatorial Pará Referência: 08/2026 Total a Pagar R$ 1.000,00
 GRUPO DE TENSÃO: B SUBGRUPO: B3
 CLASSIFICAÇÃO: COMERCIAL B-OPTANTE

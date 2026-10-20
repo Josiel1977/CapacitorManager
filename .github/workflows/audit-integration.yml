@@ -24,8 +24,8 @@ jobs:
       - run: npx tsc --noEmit
       - run: npx eslint lib/report-professional.ts lib/consultancy-pdf.ts lib/energy-diagnosis-pdf.ts components/ReportProfessionalForm.tsx components/ReportPrintView.tsx tests/report-professional.test.ts lib/audit-study-import.ts lib/energy-diagnosis-report.ts components/TariffConsultancy.tsx components/ExpansionPlanner.tsx components/EnergyTariffDiagnosis.tsx app/auditoria/page.tsx tests/audit-study-import.test.ts
       - run: npm run build
-      - run: npm install --no-save --package-lock=false --ignore-scripts playwright@1.56.1
-      - run: npx playwright install --with-deps chromium
+      - run: npm install --no-save --package-lock=false --ignore-scripts --prefix /tmp/cm-report-print-tools playwright@1.56.1
+      - run: /tmp/cm-report-print-tools/node_modules/.bin/playwright install --with-deps chromium
       - run: node --experimental-strip-types scripts/test-report-print.mjs
       - uses: actions/upload-artifact@v4
         if: always()
