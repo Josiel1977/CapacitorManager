@@ -27,7 +27,7 @@ export function extractInvoiceDetails(text:string): InvoiceDetails {
     const line=lines.find(l=>label.test(l)); return line?.replace(label,'').trim() || null;
   };
   const labelNumber = /-?\d[\d.]*(?:,\d+)?/g;
-  const itemLabel = /^(Consumo(?:\s+Compensado|\s+Reativo\s+Excedente(?:\s+(?:NP|FP))?)?\s*\([^)]*\)|TUSD\s+Energia\s+(?:Fora\s+)?Ponta\s*\([^)]*\)|Energia\s+Ativa\s+Injetada\s*\([^)]*\)|Parc\.\s*Inj\.[^(]*\([^)]*\)|Benef[íi]cio\s+Tarif[áa]rio\s+(?:Bruto|L[íi]quido)\s+SCEE|Adicional\s+Bandeira|Cip[^\d]*?|Parcela\s*\(\d+\/\d+\)|Multa|Corre[çc][ãa]o\s+Monet[áa]ria(?:\s+Parcela\s*\(\d+\/\d+\))?|Juros)\s+(-?\d.*)$/i;
+  const itemLabel = /^(Consumo(?:\s+Compensado|\s+Reativo\s+Excedente(?:\s+(?:NP|FP))?)?\s*\([^)]*\)|TUSD\s+Energia\s+(?:Fora\s+)?Ponta\s*\([^)]*\)|Energia\s+Ativa\s+Injetada\s*\([^)]*\)|Parc\.\s*Inj\.[^(]*\([^)]*\)|Benef[íi]cio\s+Tarif[áa]rio\s+(?:Bruto|L[íi]quido)\s+SCEE|Adicional\s+Bandeira|Cip[^\d]*?|Parcela\s*\(\d+\/\d+\)|(?:Multa\s+por\s+)?Ultrapassagem(?:\s+de)?\s+Demanda(?:\s+(?:Fora\s+Ponta|Ponta|FP|NP))?(?:\s*\([^)]*\))?|Demanda\s+Ultrapassagem(?:\s+(?:Fora\s+Ponta|Ponta|FP|NP))?(?:\s*\([^)]*\))?|Multa|Corre[çc][ãa]o\s+Monet[áa]ria(?:\s+Parcela\s*\(\d+\/\d+\))?|Juros)\s+(-?\d.*)$/i;
   const itens:InvoiceDetails['itens']=[];
   for(const line of lines) {
     const m=line.match(itemLabel);if(!m)continue;

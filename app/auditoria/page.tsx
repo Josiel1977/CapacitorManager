@@ -3,6 +3,7 @@
 import { FormEvent, useState } from 'react';
 import TariffConsultancy from '@/components/TariffConsultancy';
 import InvoiceDetailsPanel from '@/components/InvoiceDetailsPanel';
+import InvoiceChargeReview from '@/components/InvoiceChargeReview';
 import EnergyTariffDiagnosis from '@/components/EnergyTariffDiagnosis';
 import type { InvoiceAuditResult } from '@/lib/invoice-audit-result';
 import { readJsonResponse } from '@/lib/http-json-response';
@@ -77,6 +78,7 @@ export default function AuditoriaPage() {
         </section>
       )}
       {result?.detalhes_fatura && <InvoiceDetailsPanel details={result.detalhes_fatura} total={result.valorTotalFatura} onChange={details=>setResult(old=>old?({...old,detalhes_fatura:details}):null)} />}
+      {result?.detalhes_fatura && <InvoiceChargeReview details={result.detalhes_fatura} total={result.valorTotalFatura} />}
       <EnergyTariffDiagnosis key={result?.mesReferencia ?? "manual"} invoice={result ?? undefined} />
       </div>
     </main>
