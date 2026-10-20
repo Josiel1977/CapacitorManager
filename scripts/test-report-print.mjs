@@ -32,7 +32,7 @@ Energia Ativa Injetada (kWh) 30 1,000000 0,800000 -1,00 -19,00 -30,00
 Consumo Reativo Excedente (kVAr) 10 0,500000 0,400000 0,00 0,00 5,00
 Multa 1,00`));
  await page.route('**/api/capacitormanager/auditar-fatura',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:invoice})}));
- await page.locator('input[type="file"][accept="application/pdf,.pdf"]').setInputFiles({name:'fatura-sintetica.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7 fixture')});
+ await page.locator('input[type="file"][accept="application/pdf,.pdf"]:visible').setInputFiles({name:'fatura-sintetica.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7 fixture')});
  await page.getByRole('button',{name:'Analisar fatura',exact:true}).click();
  await page.getByRole('heading',{name:'Resultado da fatura enviada',exact:true}).waitFor();
  await page.getByLabel('Geração dos inversores, cargas previstas, medições e recomendações',{exact:true}).fill('Observações técnicas sintéticas para testar paginação. '.repeat(160));
