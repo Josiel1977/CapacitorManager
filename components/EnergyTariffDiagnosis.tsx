@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import {energyStudyFromInvoice,invoiceStudyFacts} from '@/lib/audit-study-import';
 import { diagnoseEnergyTariffs, type EnergyStudy, type TariffScenario, type Mode } from '@/lib/energy-tariff-diagnosis';
 import { buildEnergyDiagnosisReport } from '@/lib/energy-diagnosis-report';
 import type { InvoiceAuditResult } from '@/lib/invoice-audit-result';
@@ -8,9 +9,9 @@ const modes: Mode[] = ['B-optante', 'A-verde', 'A-azul'];
 const newScenario = (mode: Mode): TariffScenario => ({mode, energyPeak:null, energyOffPeak:null, demandPeak:null, demandOffPeak:null, contractedPeak:null, contractedOffPeak:null, gdCharge:null, otherCharges:null});
 const initial: EnergyStudy = {currentKva:null,futureKva:null,sameUnit:null,solarLocal:null,remoteCredits:null,netPeakKwh:null,netOffPeakKwh:null,measuredPeakKw:null,measuredOffPeakKw:null,confirmed:false,tariffSource:'',scenarios:modes.map(newScenario)};
 export default function EnergyTariffDiagnosis({ invoice }: { invoice?: InvoiceAuditResult }) {
-  const [study,setStudy] = useState<EnergyStudy>(initial);
+  const [study,setStudy] = useState<EnergyStudy>(()=>invoice?energyStudyFromInvoice({...initial,scenarios:modes.map(newScenario)},invoice):{...initial,scenarios:modes.map(newScenario)});
   const [client,setClient] = useState(invoice?.detalhes_fatura?.cliente ? `${invoice.detalhes_fatura.cliente} / UC ${invoice.detalhes_fatura.unidade_consumidora ?? 'não identificada'}` : '');
-  const [notes,setNotes] = useState('');
+  const [notes,setNotes] = useState(invoice?invoiceStudyFacts(invoice).summary:'');
   const [saved,setSaved] = useState('');
   const [generating,setGenerating] = useState(false);
   const [pdfError,setPdfError] = useState('');

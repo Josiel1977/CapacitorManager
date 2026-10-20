@@ -18,6 +18,7 @@ export default function AuditoriaPage() {
   const [tab, setTab] = useState<'invoice' | 'demand' | 'expansion'>('invoice');
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<AuditResult | null>(null);
+  const [auditRevision, setAuditRevision] = useState(0);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -37,6 +38,7 @@ export default function AuditoriaPage() {
       });
       const body = await readJsonResponse<{ data: AuditResult }>(response, 'Falha ao analisar a fatura.');
       setResult(body.data);
+      setAuditRevision(version=>version+1);
     } catch (auditError) {
       setError(auditError instanceof Error ? auditError.message : 'Falha ao analisar a fatura.');
     } finally {
@@ -55,11 +57,12 @@ export default function AuditoriaPage() {
         <button type="button" aria-pressed={tab==='demand'} onClick={()=>setTab('demand')} className={`rounded-lg border px-4 py-3 ${tab==='demand'?'bg-primary text-white':''}`}>Consultoria e Gestão Tarifária</button>
         <button type="button" aria-pressed={tab==='expansion'} onClick={()=>setTab('expansion')} className={`rounded-lg border px-4 py-3 ${tab==='expansion'?'bg-primary text-white':''}`}>Expansão e transformadores</button>
       </nav>
-      <div hidden={tab!=='demand'}><TariffConsultancy invoice={result??undefined} /></div>
-      <div hidden={tab!=='expansion'}><ExpansionPlanner invoice={result??undefined} /></div>
+      <div hidden={tab!=='demand'}><TariffConsultancy key={auditRevision} invoice={result??undefined} /></div>
+      <div hidden={tab!=='expansion'}><ExpansionPlanner key={auditRevision} invoice={result??undefined} /></div>
       <div hidden={tab!=='invoice'} className="space-y-6">
       <form onSubmit={audit} className="space-y-4 rounded-2xl border bg-white p-6 shadow-sm">
         <label className="block font-medium">Fatura em PDF (até 8 MB)</label>
+        <p className="text-sm text-slate-600">Cada nova auditoria concluída prepara os estudos com os dados da nova fatura. Exporte os estudos atuais antes de analisar outro arquivo.</p>
         <input type="file" required accept="application/pdf,.pdf" onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="block w-full rounded-lg border p-3" />
         <button disabled={!file || loading} className="rounded-lg bg-primary px-6 py-3 font-semibold text-white disabled:opacity-50">{loading ? 'Analisando…' : 'Analisar fatura'}</button>
         {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
@@ -82,7 +85,7 @@ export default function AuditoriaPage() {
       )}
       {result?.detalhes_fatura && <InvoiceDetailsPanel details={result.detalhes_fatura} total={result.valorTotalFatura} onChange={details=>setResult(old=>old?({...old,detalhes_fatura:details}):null)} />}
       {result?.detalhes_fatura && <InvoiceChargeReview details={result.detalhes_fatura} total={result.valorTotalFatura} />}
-      <EnergyTariffDiagnosis key={result?.mesReferencia ?? "manual"} invoice={result ?? undefined} />
+      <EnergyTariffDiagnosis key={auditRevision} invoice={result ?? undefined} />
       </div>
     </main>
   );

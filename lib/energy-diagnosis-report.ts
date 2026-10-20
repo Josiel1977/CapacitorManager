@@ -1,6 +1,7 @@
 import type { EnergyStudy } from './energy-tariff-diagnosis';
 import type { InvoiceAuditResult } from './invoice-audit-result';
 import { reviewInvoiceCharges } from './invoice-charge-review.ts';
+import { invoiceStudyFacts } from './audit-study-import.ts';
 export interface DiagnosisReportInput {
   client: string;
   notes: string;
@@ -29,6 +30,8 @@ export function buildEnergyDiagnosisReport(input: DiagnosisReportInput): string[
       `Total a pagar: ${money(invoice.valorTotalFatura)}`,
       `Consumo ativo faturado: ${invoice.consumoKwh.toLocaleString('pt-BR')} kWh`,
       `Cobrança reativa identificada: ${money(invoice.totalMultas)}`);
+    const facts = invoiceStudyFacts(invoice);
+    lines.push(facts.injected===null ? 'Energia injetada na rede: não identificada.' : `Energia injetada na rede identificada: ${facts.injected.toLocaleString('pt-BR')} kWh`, 'Energia injetada, compensação e geração total são grandezas distintas; a geração total não foi inferida.');
     if (c) lines.push(c.energia_compensada_kwh > 0 ? `Energia compensada identificada: ${c.energia_compensada_kwh.toLocaleString('pt-BR')} kWh` : 'Energia compensada: não identificada; isso não comprova ausência de geração solar.');
     if (charges) {
       lines.push(`Multas, juros e correções identificados (débitos): ${money(charges.financialCharges)}`,

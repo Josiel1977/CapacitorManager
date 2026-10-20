@@ -1,0 +1,26 @@
+name: Verificar integração da auditoria
+on:
+  push:
+    branches: [feat/estudo-demanda-contratada]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: public-test-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npx tsc --noEmit
+      - run: npx eslint lib/audit-study-import.ts lib/energy-diagnosis-report.ts components/TariffConsultancy.tsx components/ExpansionPlanner.tsx components/EnergyTariffDiagnosis.tsx app/auditoria/page.tsx tests/audit-study-import.test.ts
+      - run: npm run build
