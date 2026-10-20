@@ -91,7 +91,7 @@ Esses itens não são ocultados como resultado conclusivo. Tarifas manuais docum
 
 ## Validação deste incremento
 
-- 152 testes automatizados passaram; incluem comparação de custos, pisos, crescimento, tolerância, lacunas/duplicidades, dados ausentes, restrições de modalidade, SCEE, importação e paginação PDF com fonte incorporada.
+- 154 testes automatizados passaram; incluem comparação de custos, pisos, crescimento, tolerância, lacunas/duplicidades, dados ausentes, restrições de modalidade, SCEE, importação e paginação PDF com fonte incorporada.
 - TypeScript e lint dos arquivos novos/alterados sem erros.
 - Build Next completo: compilação, tipagem e geração de 48 páginas com configuração pública Supabase fictícia apenas para teste. Não valida credenciais ou banco de produção.
 - Handler compilado da consulta ANEEL verificado contra o serviço real: parâmetro inválido retornou 400; lista retornou 200/116 agentes; Equatorial PA/A4 em 15/07/2026 retornou 200/50 linhas/zero formatos rejeitados.
@@ -103,3 +103,8 @@ Esses itens não são ocultados como resultado conclusivo. Tarifas manuais docum
 ## Observação orientativa de ampliação e medição
 
 A tela e o relatório incluem o exemplo Equatorial PA de 112,5 + 112,5 kVA, distinguindo B-optante/SCEE, demanda em kW e padrão físico de medição. A referência direta é a NT.00002.EQTL revisão 10, itens 6.8.1 e 6.8.8–6.8.10, consultada no PDF oficial publicado no portal Pará. A observação não é utilizada pelo motor como dimensionamento ou recomendação de obra. Há botão para inserir um roteiro editável no campo de diagnóstico, sem duplicar inserções e preservando o texto existente.
+
+
+### Correção de homologação: contrato zero na Azul
+
+Azul aceita contrato e mínimo iguais a zero em qualquer posto, preservando pelo menos 30 kW em um deles. A otimização compara qual posto deve satisfazer o mínimo geral quando as soluções independentes ficam abaixo desse piso. A referência atual preserva zero informado, sem tratá-lo como dado ausente. Dois testes adicionais cobrem os dois sentidos e o bloqueio de contratos abaixo do mínimo geral.

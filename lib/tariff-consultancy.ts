@@ -35,7 +35,7 @@ export const EXPANSION_NOTES_TEMPLATE = 'AMPLIAÇÃO A AVALIAR (preencher e vali
 export const CONSULTING_METHOD=[
  'Estudo prospectivo: reaplica as tarifas de referência ao perfil mensal informado. Não reconstitui faturas históricas e não comprova restituição de tributos. Tarifas de todas as alternativas na mesma base, sem tributos, bandeiras e CIP. Não se aplica cálculo genérico de ICMS por dentro.',
  'Demanda regular = max(medida prevista, contratada) × tarifa. Para consumo, se medida > 1,05 × contratada: adicional = 2 × tarifa × (medida - contratada). Verde usa o maior pico entre os postos; Azul calcula cada posto. A tolerância não disponibiliza capacidade adicional.',
- 'A busca de demanda considera incrementos de 0,01 kW e mínimos informados. Em empate prefere menos ultrapassagens e maior contrato. A alternativa com margem usa o maior pico previsto × (1 + margem). Confirmar incrementos, mínimos, prazos e condições de alteração no CUSD.',
+ 'A busca de demanda considera incrementos de 0,01 kW e mínimos informados. Em empate prefere menos ultrapassagens e maior contrato. A alternativa com margem usa o maior pico previsto × (1 + margem). Azul permite zero em um posto, mantendo pelo menos 30 kW no outro; Verde usa o mínimo geral de 30 kW. Confirmar incrementos, mínimos, prazos e condições de alteração no CUSD.',
  'Crescimento percentual aplica-se a energia e demanda de todos os meses e cenários. Energia injetada, compensada e custo reativo registrados são evidências separadas, sem projeção automática de geração ou eliminação de reativo.',
  'Convencional: maior entre consumo líquido informado e custo de disponibilidade em kWh. Branca: soma por posto, respeitando o piso de disponibilidade calculado pela tarifa convencional. Baixa renda e B4 não são elegíveis à Branca neste módulo.',
  'SCEE: confirmar consumo líquido faturável e conversões de créditos por posto para cada alternativa; informar custo residual GD mensal específico de cada modalidade. Não calcula automaticamente transição GD, créditos, autoconsumo ou tributação. Energia injetada não é geração total; não subtrair injeção novamente do consumo já líquido.',
@@ -66,7 +66,7 @@ export function analyzeConsultancy(s:ConsultingStudy){
  if(s.subgroup==='B1-baixa-renda')issues.push('Tarifa social exige cálculo específico por faixa e benefício; este modelo não libera recomendação para baixa renda.');
  if(!s.reviewed)issues.push('Confira e confirme os dados do estudo.');
  if(!s.alternativesApproved)issues.push('Confirme a elegibilidade das alternativas e as condições da conexão/CUSD.');
- if(!valid(s.growthPercent)||!valid(s.marginPercent)||!valid(s.minimumPeak)||!valid(s.minimumOffPeak)||s.minimumPeak<=0||s.minimumOffPeak<=0)issues.push('Crescimento, margem ou mínimos inválidos.');
+ if(!valid(s.growthPercent)||!valid(s.marginPercent)||!valid(s.minimumPeak)||!valid(s.minimumOffPeak))issues.push('Crescimento, margem ou mínimos inválidos.');
  const modes=eligibleModes(s.subgroup,s.alternativesApproved);
  if(!modes.includes(s.current))issues.push('Modalidade atual incompatível com o enquadramento informado.');
  if(!s.gd&&s.months.some(m=>valid(m.injectedKwh)&&m.injectedKwh>0))issues.push('Há energia injetada no histórico: confirme o enquadramento GD/SCEE antes da recomendação.');
@@ -92,7 +92,7 @@ export function analyzeConsultancy(s:ConsultingStudy){
   if(missing.length||!t)return {mode,missing,options:[]};
   let demand:ReturnType<typeof studyDemand>|null=null;
   if(a){
-   try{demand=studyDemand({mode:mode as 'verde'|'azul',months:s.months.map(m=>({month:m.month,peak:m.peakKw,offPeak:m.offPeakKw})),contractedPeak:valid(s.contractedPeak)&&s.contractedPeak>0?s.contractedPeak:s.minimumPeak,contractedOffPeak:valid(s.contractedOffPeak)&&s.contractedOffPeak>0?s.contractedOffPeak:s.minimumOffPeak,tariffPeak:t.demandPeak??1,tariffOffPeak:t.demandOffPeak!,minimumPeak:s.minimumPeak,minimumOffPeak:s.minimumOffPeak,growthPercent:s.growthPercent,marginPercent:s.marginPercent});}
+   try{demand=studyDemand({mode:mode as 'verde'|'azul',months:s.months.map(m=>({month:m.month,peak:m.peakKw,offPeak:m.offPeakKw})),contractedPeak:s.current===mode&&valid(s.contractedPeak)?s.contractedPeak:s.minimumPeak,contractedOffPeak:s.current===mode&&valid(s.contractedOffPeak)?s.contractedOffPeak:Math.max(30,s.minimumOffPeak),tariffPeak:t.demandPeak??1,tariffOffPeak:t.demandOffPeak!,minimumPeak:s.minimumPeak,minimumOffPeak:mode==='verde'?Math.max(30,s.minimumOffPeak):s.minimumOffPeak,growthPercent:s.growthPercent,marginPercent:s.marginPercent});}
    catch(e){return {mode,missing:[e instanceof Error?e.message:'Dados de demanda inválidos'],options:[]};}
   }
   const options=(a?['economic','margin']:['economic']) .map(kind=>{
@@ -113,7 +113,7 @@ export function analyzeConsultancy(s:ConsultingStudy){
  let baseline:number|null=null;
  if(currentSimulation&&!currentSimulation.missing.length&&currentTariff){
   if(s.current==='verde'||s.current==='azul'){
-   if(valid(s.contractedOffPeak)&&s.contractedOffPeak>0&&(s.current!=='azul'||(valid(s.contractedPeak)&&s.contractedPeak>0))){
+   if(valid(s.contractedOffPeak)&&(s.current==='verde'?s.contractedOffPeak>=30:valid(s.contractedPeak)&&Math.max(s.contractedPeak,s.contractedOffPeak)>=30)){
     const energy=currentSimulation.options[0].monthly.reduce((v,m)=>v+m.energy+m.gd,0);
     baseline=round(energy+s.months.reduce((v,m)=>v+monthlyDemandCost((s.current==='verde'?Math.max(m.peakKw!,m.offPeakKw!):m.offPeakKw!)*factor,s.contractedOffPeak!,currentTariff.demandOffPeak!).total+(s.current==='azul'?monthlyDemandCost(m.peakKw!*factor,s.contractedPeak!,currentTariff.demandPeak!).total:0),0));
    }else issues.push('Informe demandas contratadas atuais para comparação econômica.');

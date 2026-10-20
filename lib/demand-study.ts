@@ -27,7 +27,7 @@ function optimize(values: number[], tariff: number, minimum: number, current: nu
 export function studyDemand(input: DemandInput) {
   if (!['verde','azul'].includes(input.mode)) throw new Error('Modalidade inválida.');
   const numbers = [input.contractedOffPeak,input.tariffOffPeak,input.minimumOffPeak,input.growthPercent,input.marginPercent,...(input.mode==='azul'?[input.contractedPeak,input.tariffPeak,input.minimumPeak]:[])];
-  if (numbers.some(v=>!valid(v)) || input.contractedOffPeak<=0 || input.tariffOffPeak<=0 || input.minimumOffPeak<=0 || (input.mode==='azul' && (input.contractedPeak<=0 || input.tariffPeak<=0 || input.minimumPeak<=0))) throw new Error('Preencha contratos, tarifas e mínimos positivos; crescimento e margem não podem ser negativos.');
+  if (numbers.some(v=>!valid(v)) || input.tariffOffPeak<=0 || (input.mode==='verde'&&(input.contractedOffPeak<=0||input.minimumOffPeak<=0)) || (input.mode==='azul'&&(input.tariffPeak<=0||Math.max(input.contractedPeak,input.contractedOffPeak)<30))) throw new Error('Informe tarifas positivas e valores não negativos. Azul exige pelo menos 30 kW em um dos postos; Verde exige contrato e mínimo positivos.');
   if (!input.months.length || input.months.length>12) throw new Error('Informe de 1 a 12 meses.');
   const seen = new Set<string>();
   for (const row of input.months) {
@@ -39,7 +39,17 @@ export function studyDemand(input: DemandInput) {
   const offValues = input.months.map(r=>(input.mode==='verde'?Math.max(r.peak!,r.offPeak!):r.offPeak!)*factor);
   const off = optimize(offValues,input.tariffOffPeak,input.minimumOffPeak,input.contractedOffPeak,input.marginPercent);
   const peak = input.mode==='azul'?optimize(input.months.map(r=>r.peak!*factor),input.tariffPeak,input.minimumPeak,input.contractedPeak,input.marginPercent):null;
-  const scenarios = (['current','economic','margin'] as const).map(key=>({key,offPeak:off[key].contract,peak:peak?.[key].contract??null,total:cents(off[key].total+(peak?.[key].total??0)),excess:cents(off[key].excess+(peak?.[key].excess??0)),breaches:off[key].breaches+(peak?.[key].breaches??0)}));
+  const peakFloor=peak?optimize(input.months.map(r=>r.peak!*factor),input.tariffPeak,Math.max(30,input.minimumPeak),input.contractedPeak,input.marginPercent):null;
+  const offFloor=peak?optimize(offValues,input.tariffOffPeak,Math.max(30,input.minimumOffPeak),input.contractedOffPeak,input.marginPercent):null;
+  const scenarios = (['current','economic','margin'] as const).map(key=>{
+    let selectedOff=off[key],selectedPeak=peak?.[key]??null;
+    if(key!=='current'&&selectedPeak&&Math.max(selectedOff.contract,selectedPeak.contract)<30){
+      const choices=[{off:off[key],peak:peakFloor![key]},{off:offFloor![key],peak:peak![key]}];
+      choices.sort((a,b)=>(a.off.total+a.peak.total)-(b.off.total+b.peak.total)||(a.off.breaches+a.peak.breaches)-(b.off.breaches+b.peak.breaches)||(b.off.contract+b.peak.contract)-(a.off.contract+a.peak.contract));
+      selectedOff=choices[0].off;selectedPeak=choices[0].peak;
+    }
+    return {key,offPeak:selectedOff.contract,peak:selectedPeak?.contract??null,total:cents(selectedOff.total+(selectedPeak?.total??0)),excess:cents(selectedOff.excess+(selectedPeak?.excess??0)),breaches:selectedOff.breaches+(selectedPeak?.breaches??0)};
+  });
   if (scenarios.some(s=>!Number.isFinite(s.total))) throw new Error('Valores excedem o limite de cálculo.');
   const dates=input.months.map(m=>m.month).sort();
   const serial=(m:string)=>Number(m.slice(0,4))*12+Number(m.slice(5));

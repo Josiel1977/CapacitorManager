@@ -47,3 +47,11 @@ test('busca por pontos críticos coincide com varredura em centésimos de kW',()
   assert.ok(Math.abs(result.scenarios[1].total-Math.round(best*100)/100)<0.001);
  }
 });
+test('Azul admite contrato zero em qualquer posto e preserva mínimo geral nas alternativas',()=>{
+ for(const peakZero of [true,false]){
+  const r=studyDemand({...input,mode:'azul',contractedPeak:peakZero?0:30,contractedOffPeak:peakZero?30:0,minimumPeak:0,minimumOffPeak:0,months:[{month:'2026-01',peak:0,offPeak:0}]});
+  assert.equal(r.scenarios[0].peak,peakZero?0:30);assert.equal(r.scenarios[0].offPeak,peakZero?30:0);
+  for(const candidate of r.scenarios.slice(1))assert.ok(Math.max(candidate.peak!,candidate.offPeak)>=30);
+ }
+ assert.throws(()=>studyDemand({...input,mode:'azul',contractedPeak:0,contractedOffPeak:0}));
+});

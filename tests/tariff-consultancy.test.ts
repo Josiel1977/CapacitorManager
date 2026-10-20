@@ -27,3 +27,10 @@ test('restauração remove confirmações e rejeita estrutura perigosa ou incomp
 test('relatório explica escopo, memória mensal, dados ausentes e plano de ação',()=>{
  const s=fixture();s.months.pop();const lines=consultancyReport(s,'20/10/2026').join('\n');assert.ok(lines.includes('Não há recomendação final'));assert.ok(lines.includes('MEMÓRIA MENSAL'));assert.ok(lines.includes('PLANO DE AÇÃO'));assert.ok(lines.includes('REFERÊNCIAS'));
 });
+test('consultoria não transforma zero contratado na Azul em dado ausente',()=>{
+ for(const peakZero of [true,false]){
+  const s=fixture();s.current='azul';s.contractedPeak=peakZero?0:30;s.contractedOffPeak=peakZero?100:0;s.minimumPeak=0;s.minimumOffPeak=0;
+  const r=analyzeConsultancy(s);assert.equal(r.simulations.find(v=>v.mode==='azul')?.missing.length,0);assert.notEqual(r.baseline,null);
+  assert.ok(r.baseline!>0);assert.ok(r.recommendation);
+ }
+});
