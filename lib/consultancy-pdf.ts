@@ -56,19 +56,20 @@ export async function createConsultancyPdf(lines:string[],profile?:ReportProfess
   const professional=parseReportProfessional(profile),identification=professionalReportLines(professional);
   if(identification.length){
    style(10.5,[35,42,52]);
-   const rows=identification.map(text=>pdf.splitTextToSize(text,width) as string[]);
-   const imageHeight=professional.signatureDataUrl?Math.min(24,85*professional.signatureHeight!/professional.signatureWidth!):0;
-   const imageWidth=professional.signatureDataUrl?Math.min(85,24*professional.signatureWidth!/professional.signatureHeight!):0;
-   const blockHeight=rows.reduce((sum,group)=>sum+group.length*lineHeight+1.5,0)+imageHeight+14;
+   const imageHeight=professional.signatureDataUrl?Math.min(22,85*professional.signatureHeight!/professional.signatureWidth!):0;
+   const imageWidth=professional.signatureDataUrl?Math.min(85,22*professional.signatureWidth!/professional.signatureHeight!):0;
+   const textWidth=imageWidth?width-imageWidth-8:width;
+   const rows=identification.map(text=>pdf.splitTextToSize(text,textWidth) as string[]);
+   const textHeight=rows.reduce((sum,group)=>sum+group.length*lineHeight+1.5,0);
+   const blockHeight=Math.max(textHeight,imageHeight+lineHeight+1.5)+11;
    if(y+blockHeight>bottom)next();
-   y+=6;pdf.setDrawColor(100,120,135);pdf.setLineWidth(0.2);pdf.line(margin,y,margin+85,y);y+=7;
+   y+=4;pdf.setDrawColor(100,120,135);pdf.setLineWidth(0.2);pdf.line(margin,y,margin+85,y);y+=6;
    style(10.5,[35,42,52]);
-   for(let index=0;index<rows.length;index++){
-    for(const row of rows[index]){pdf.text(row,margin,y);y+=lineHeight;}y+=1.5;
-    if(index===0&&professional.signatureDataUrl){
-     pdf.addImage(professional.signatureDataUrl,professional.signatureDataUrl.startsWith('data:image/jpeg')?'JPEG':'PNG',margin,y,imageWidth,imageHeight);y+=imageHeight+2;
-    }
+   if(professional.signatureDataUrl){
+    pdf.addImage(professional.signatureDataUrl,professional.signatureDataUrl.startsWith('data:image/jpeg')?'JPEG':'PNG',margin+width-imageWidth,y+lineHeight,imageWidth,imageHeight);
    }
+   for(const group of rows){for(const row of group){pdf.text(row,margin,y);y+=lineHeight;}y+=1.5;}
+
   }
  }
  const pages=pdf.getNumberOfPages();
