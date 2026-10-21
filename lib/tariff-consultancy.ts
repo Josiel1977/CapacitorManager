@@ -25,6 +25,9 @@ export const CONSULTING_SOURCES=[
  {title:'Lei 14.300/2022 - geração distribuída e SCEE',url:'https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2022/lei/l14300.htm'},
  {title:'ANEEL - estudos de inversão de fluxo, Despacho 2.216/2024',url:'https://www2.aneel.gov.br/cedoc/adsp20242216_2.pdf'},
 ];
+export function showExpansionExample(subgroup:string):boolean {
+ return ['B1','B2','B3','B4','B1-BAIXA-RENDA','B-OPTANTE'].includes(subgroup.trim().toUpperCase());
+}
 export const EXPANSION_EXAMPLE = [
  'Exemplo orientativo — Equatorial Pará: um transformador atual de 112,5 kVA mais outro igual na mesma UC somam 225 kVA. É capacidade de transformação, não demanda contratada de 225 kW. Com SCEE, a soma ultrapassa o requisito de 112,5 kVA do B-optante (REN 1.000, art. 292, § 3º).',
  'Passar do faturamento B-optante ao Grupo A não exige, por si só, cabine de medição primária. Pela NT.00002.EQTL, revisão 10, item 6.8.1, um único transformador até 300 kVA em poste ou pedestal tem medição no secundário, respeitadas as condições de localização e os demais requisitos da norma.',
@@ -160,7 +163,7 @@ export function consultancyReport(s:ConsultingStudy,date:string){
  'MEMÓRIA MENSAL DAS ALTERNATIVAS',...r.simulations.flatMap(v=>v.options.flatMap(o=>[`${v.mode} / ${o.kind}`,...o.monthly.map(m=>`${m.month}: energia R$ ${m.energy.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}, demanda R$ ${m.demand.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}, ultrapassagem R$ ${m.excess.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}, GD R$ ${m.gd.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}; total R$ ${m.total.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}.`)])),
  'REATIVO E ENERGIA INJETADA',`Reativo identificado: R$ ${r.reactive.total.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})} em ${r.reactive.months} meses informados; não equivale a economia garantida. Injeção informada: ${r.injection.kwh} kWh em ${r.injection.months} meses; não equivale à geração total.`,
  'PLANO DE AÇÃO','1. Conferir 12 faturas, CUSD, resolução tarifária e perfil por posto; obter curva de carga de 15 minutos quando necessária.','2. Validar cargas futuras, capacidade de conexão, opções disponíveis e custos de adequação com a distribuidora.','3. Para reativo: realizar campanha horária de P/Q/FP e harmônicas, revisar o banco existente e emitir especificação por responsável habilitado.','4. Para energia injetada: conferir projeto/aprovação, potência de inversores, medição bidirecional, créditos, regime GD e limites de exportação.','5. Solicitar formalmente a alteração após validação, registrar protocolo, vigência e monitorar as faturas seguintes.',
- 'AMPLIAÇÃO E MEDIÇÃO — EXEMPLO ORIENTATIVO (EQUATORIAL PARÁ)',...EXPANSION_EXAMPLE,
+ ...(showExpansionExample(s.subgroup)?['AMPLIAÇÃO E MEDIÇÃO — EXEMPLO ORIENTATIVO (EQUATORIAL PARÁ)',...EXPANSION_EXAMPLE]:[]),
  `Observações: ${s.notes}`,'PREMISSAS E LIMITES',...CONSULTING_METHOD,'REFERÊNCIAS',...CONSULTING_SOURCES.map(v=>`${v.title}: ${v.url}`)];
 }
 export function parseConsultingStudy(value:unknown):ConsultingStudy {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {analyzeConsultancy,consultancyReport,eligibleModes,parseConsultingStudy,type ConsultingStudy} from '../lib/tariff-consultancy.ts';
+import {analyzeConsultancy,consultancyReport,showExpansionExample,eligibleModes,parseConsultingStudy,type ConsultingStudy} from '../lib/tariff-consultancy.ts';
 const fixture=():ConsultingStudy=>({version:1,client:'Teste',uc:'1',distributor:'Teste',subgroup:'A4',current:'verde',months:Array.from({length:12},(_,i)=>({month:`2026-${String(i+1).padStart(2,'0')}`,peakKwh:100,offPeakKwh:1000,intermediateKwh:0,peakKw:20,offPeakKw:100,reactiveCost:10,injectedKwh:null,compensatedKwh:null})),tariffs:[{mode:'verde',peak:1,offPeak:0.5,intermediate:null,demandPeak:null,demandOffPeak:10,residualGd:null,source:'tabela oficial conferida',date:'2026-07-01',verified:true},{mode:'azul',peak:0.6,offPeak:0.5,intermediate:null,demandPeak:20,demandOffPeak:5,residualGd:null,source:'tabela oficial conferida',date:'2026-07-01',verified:true}],contractedPeak:null,contractedOffPeak:150,minimumPeak:30,minimumOffPeak:30,growthPercent:0,marginPercent:10,availabilityKwh:100,gd:false,gdVerified:false,alternativesApproved:true,reviewed:true,notes:''});
 test('compara energia e demanda no mesmo período e identifica verde econômica',()=>{
  const r=analyzeConsultancy(fixture());assert.deepEqual(r.issues,[]);assert.equal(r.baseline,25200);assert.equal(r.recommendation?.mode,'verde');assert.equal(r.recommendation?.total,19200);assert.equal(r.saving,6000);assert.equal(r.reactive.total,120);
@@ -33,4 +33,23 @@ test('consultoria não transforma zero contratado na Azul em dado ausente',()=>{
   const r=analyzeConsultancy(s);assert.equal(r.simulations.find(v=>v.mode==='azul')?.missing.length,0);assert.notEqual(r.baseline,null);
   assert.ok(r.baseline!>0);assert.ok(r.recommendation);
  }
+});
+
+test('clientes do Grupo A não recebem exemplo de migração do B-optante no relatório',()=>{
+ for(const subgroup of ['A1','A2','A3','A3a','A4','AS']){
+  const study={...fixture(),subgroup};
+  assert.equal(showExpansionExample(subgroup),false);
+  const report=consultancyReport(study,'21/10/2026').join('\n');
+  assert.ok(!report.includes('AMPLIAÇÃO E MEDIÇÃO — EXEMPLO ORIENTATIVO'));
+  assert.ok(!report.includes('um transformador atual de 112,5 kVA mais outro igual'));
+  assert.ok(report.includes('PLANO DE AÇÃO'));
+ }
+});
+test('Grupo B mantém exemplo e alternância de enquadramento não apaga observações',()=>{
+ const study=fixture();study.notes='Observação técnica do responsável.';
+ for(const subgroup of ['B1','B2','B3','B4','B1-baixa-renda','B-optante']){
+  study.subgroup=subgroup;assert.equal(showExpansionExample(subgroup),true);
+  assert.ok(consultancyReport(study,'21/10/2026').includes('AMPLIAÇÃO E MEDIÇÃO — EXEMPLO ORIENTATIVO (EQUATORIAL PARÁ)'));
+ }
+ study.subgroup='A4';assert.ok(consultancyReport(study,'21/10/2026').includes('Observações: Observação técnica do responsável.'));
 });

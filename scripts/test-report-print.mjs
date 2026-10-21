@@ -15,7 +15,7 @@ function png(){const head=Buffer.alloc(13);head.writeUInt32BE(1,0);head.writeUIn
 const server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','-p','3100'],{env:process.env,stdio:['ignore','pipe','pipe']});
 let output='';server.stdout.on('data',data=>output+=data);server.stderr.on('data',data=>output+=data);
 let browser;
-async function inspectPdf(buffer,label){const parser=new PDFParse({data:buffer});try{const result=await parser.getText();assert.match(result.text,/Profissional Teste/);assert.match(result.text,/CRT-TESTE-0000/);assert.ok(!result.text.includes('Prévia — data definida'),label+': data de impressão não atualizada');assert.match(result.text,/CLIENTE SINTETICO TESTE/);assert.ok(result.pages.every(page=>page.text.replace(/\s/g,'').length>30),label+': página em branco');assert.ok(!result.text.includes('Salvar dados e assinatura neste navegador'),label+': formulário impresso');console.log(label+': '+result.pages.length+' páginas com conteúdo e identificação.');}finally{await parser.destroy();}}
+async function inspectPdf(buffer,label){const parser=new PDFParse({data:buffer});try{const result=await parser.getText();assert.match(result.text,/Profissional Teste/);assert.match(result.text,/CRT-TESTE-0000/);assert.ok(!result.text.includes('Prévia — data definida'),label+': data de impressão não atualizada');assert.match(result.text,/CLIENTE SINTETICO TESTE/);assert.ok(result.pages.every(page=>page.text.replace(/\s/g,'').length>30),label+': página em branco');assert.ok(!result.text.includes('Salvar dados e assinatura neste navegador'),label+': formulário impresso');console.log(label+': '+result.pages.length+' páginas com conteúdo e identificação.');return result.text;}finally{await parser.destroy();}}
 try{
  let ready=false;for(let n=0;n<60;n++){try{if((await fetch('http://localhost:3100/auditoria')).ok){ready=true;break;}}catch{}await setTimeout(1000);}assert.ok(ready,'Servidor não iniciou: '+output.slice(-2000));
  await mkdir('artifacts/report-print',{recursive:true});
@@ -48,6 +48,25 @@ Multa 1,00`));
  await page.getByRole('status').filter({hasText:'Assinatura adicionada'}).waitFor();
  for(const [label,file] of [['Auditoria da fatura','auditoria'],['Consultoria e Gestão Tarifária','consultoria'],['Expansão e transformadores','expansao']]){
   await page.emulateMedia({media:'screen'});await page.getByRole('button',{name:label,exact:true}).click();
+  if(file==='consultoria'){
+   const example=page.getByRole('heading',{name:'Ampliação: um transformador maior ou dois transformadores?',exact:true});
+   for(const subgroup of ['A1','A2','A3','A3a','A4','AS']){
+    await page.getByLabel('Enquadramento').selectOption(subgroup);
+    assert.equal(await example.count(),0,'Grupo A não deve exibir exemplo de migração');
+    assert.equal(await page.getByRole('button',{name:'Adicionar roteiro às observações do estudo',exact:true}).count(),0);
+   }
+   await page.getByLabel('Enquadramento').selectOption('A4');
+   await page.emulateMedia({media:'print'});
+   const groupA=await page.pdf({path:'artifacts/report-print/consultoria-grupo-a.pdf',preferCSSPageSize:true,printBackground:true});
+   const groupAText=await inspectPdf(groupA,'Consultoria Grupo A');
+   assert.ok(!groupAText.includes('AMPLIAÇÃO E MEDIÇÃO'));
+   assert.ok(!groupAText.includes('um transformador atual de 112,5'));
+   await page.emulateMedia({media:'screen'});
+   for(const subgroup of ['B3','B-optante']){
+    await page.getByLabel('Enquadramento').selectOption(subgroup);
+    await example.waitFor({state:'visible'});
+   }
+  }
   await page.emulateMedia({media:'print'});
   const data=await page.pdf({path:'artifacts/report-print/'+file+'.pdf',preferCSSPageSize:true,printBackground:true});
   await inspectPdf(data,label);
