@@ -51,11 +51,11 @@ Multa 1,00`));
   if(file==='consultoria'){
    const example=page.getByRole('heading',{name:'Ampliação: um transformador maior ou dois transformadores?',exact:true});
    for(const subgroup of ['A1','A2','A3','A3a','A4','AS']){
-    await page.getByLabel('Enquadramento').selectOption(subgroup);
+    await page.getByLabel('Enquadramento',{exact:true}).selectOption(subgroup);
     assert.equal(await example.count(),0,'Grupo A não deve exibir exemplo de migração');
     assert.equal(await page.getByRole('button',{name:'Adicionar roteiro às observações do estudo',exact:true}).count(),0);
    }
-   await page.getByLabel('Enquadramento').selectOption('A4');
+   await page.getByLabel('Enquadramento',{exact:true}).selectOption('A4');
    await page.emulateMedia({media:'print'});
    const groupA=await page.pdf({path:'artifacts/report-print/consultoria-grupo-a.pdf',preferCSSPageSize:true,printBackground:true});
    const groupAText=await inspectPdf(groupA,'Consultoria Grupo A');
@@ -63,7 +63,7 @@ Multa 1,00`));
    assert.ok(!groupAText.includes('um transformador atual de 112,5'));
    await page.emulateMedia({media:'screen'});
    for(const subgroup of ['B3','B-optante']){
-    await page.getByLabel('Enquadramento').selectOption(subgroup);
+    await page.getByLabel('Enquadramento',{exact:true}).selectOption(subgroup);
     await example.waitFor({state:'visible'});
    }
   }
