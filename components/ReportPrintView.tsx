@@ -27,7 +27,7 @@ export function ReportPrintStyles(){
   .audit-report-surface {display:block!important;position:static!important;width:auto!important;padding:0!important;margin:0!important;background:white!important;color:#111!important;font:10.5pt/1.3 Arial,sans-serif!important;}
   .audit-report-surface p {font:inherit!important;margin:0 0 1mm!important;white-space:pre-wrap;overflow-wrap:anywhere;orphans:2;widows:2;}
   .audit-report-surface .report-title {font:700 17pt/1.2 Arial,sans-serif!important;color:#174056!important;margin:0 0 5mm!important;break-after:avoid-page;}\n  .audit-report-surface .report-section {font:700 10.5pt/1.4 Arial,sans-serif!important;margin:4mm 0 2mm!important;padding:2.5mm 3mm!important;background:#ebf2f6!important;color:#174056!important;border-left:3px solid #174056;break-inside:avoid-page;break-after:avoid-page;print-color-adjust:exact;}\n  .audit-report-surface .report-professional h3 {font:700 10.5pt/1.4 Arial,sans-serif!important;}
-  .audit-report-surface .report-spacer {height:2mm;}
+  .audit-report-surface .report-spacer {display:none!important;}
   .audit-report-surface .report-professional {break-inside:avoid-page;margin-top:6mm;padding-top:3mm;border-top:1px solid #999;max-width:100%;}
   body [hidden],body [hidden] * {display:none!important;}
  }

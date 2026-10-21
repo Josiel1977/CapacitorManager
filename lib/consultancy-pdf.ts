@@ -22,7 +22,7 @@ export async function createConsultancyPdf(lines:string[],profile?:ReportProfess
  const content=groupReportLines(lines);
  for(let index=0;index<content.length;index++){
   const text=content[index];
-  if(!text.trim()){y=Math.min(y+2,bottom);continue;}
+  if(!text.trim())continue;
   const title=index===0,heading=!title&&isReportHeading(text);
   const size=title?17:10.5;
   style(size,[35,42,52]);
