@@ -1,12 +1,12 @@
 'use client';
 import {useState} from 'react';
-import {parseReportProfessional,type ReportProfessional} from '@/lib/report-professional';
+import {newReportProfessional,parseReportProfessional,type ReportProfessional} from '@/lib/report-professional';
 const key='cm-report-professional-v1';
 export default function ReportProfessionalForm({value,onChange}:{value:ReportProfessional;onChange:(value:ReportProfessional)=>void}){
  const [message,setMessage]=useState('');
  function field(name:'name'|'title'|'registration'|'status',text:string){onChange({...value,[name]:text});setMessage('');}
  function save(){try{localStorage.setItem(key,JSON.stringify(parseReportProfessional(value)));setMessage('Dados e assinatura salvos neste navegador.');}catch(error){setMessage(error instanceof Error?error.message:'Não foi possível salvar neste navegador.');}}
- function restore(){try{const raw=localStorage.getItem(key);if(!raw){setMessage('Nenhuma identificação salva neste navegador.');return;}onChange(parseReportProfessional(JSON.parse(raw)));setMessage('Identificação restaurada. Confira o nome e o registro antes de emitir.');}catch{setMessage('Não foi possível restaurar a identificação.');}}
+ function restore(){try{const raw=localStorage.getItem(key);if(!raw){setMessage('Nenhuma identificação salva neste navegador.');return;}const restored=parseReportProfessional(JSON.parse(raw));if(restored.name==='Josiel Maia'&&!restored.registration)restored.registration=newReportProfessional().registration;onChange(restored);setMessage('Identificação restaurada. Confira o nome e o registro antes de emitir.');}catch{setMessage('Não foi possível restaurar a identificação.');}}
  async function signature(file:File|undefined){if(!file)return;setMessage('');try{
   if(file.size>500000||!['image/png','image/jpeg'].includes(file.type))throw new Error('Use imagem PNG ou JPEG de até 500 KB.');
   const dataUrl=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('Falha na leitura da assinatura.'));reader.readAsDataURL(file);});

@@ -43,7 +43,7 @@ export function buildEnergyDiagnosisReport(input: DiagnosisReportInput): string[
   if (details) {
     lines.push(`Titular: ${details.cliente ?? 'Não identificado'} | Documento: ${details.documento ?? 'Não identificado'}`,
       `UC: ${details.unidade_consumidora ?? 'Não identificada'} | Endereço: ${details.endereco ?? 'Não identificado'}`,
-      `Grupo: ${details.grupo ?? 'Não identificado'} / ${details.subgrupo ?? 'Não identificado'} | Modalidade: ${details.modalidade ?? 'Não identificada'} | Fornecimento: ${details.fornecimento ?? 'Não identificado'}`,
+      `Grupo: ${details.grupo ?? 'Não identificado'} / ${details.subgrupo ?? 'Não identificado'}${c?.b_optante?' | Faturamento: B-optante':''} | Modalidade: ${details.modalidade ?? 'Não identificada'} | Fornecimento: ${details.fornecimento ?? 'Não identificado'}`,
       `Vencimento: ${details.vencimento ?? 'Não identificado'} | Leituras: ${details.leitura_anterior ?? 'Não identificada'} a ${details.leitura_atual ?? 'Não identificada'}`);
   }
   if (invoice?.consultoria) {
@@ -58,8 +58,7 @@ export function buildEnergyDiagnosisReport(input: DiagnosisReportInput): string[
     if (history.length) {
       const largest = Math.max(...history.flatMap(item => [item.demanda_ponta_kw!, item.demanda_fora_ponta_kw!]));
       lines.push(`Histórico disponível: ${history.length} meses; maior demanda medida entre os postos: ${number(largest)} kW.`,
-        'Histórico de demanda por mês (ponta / fora de ponta):');
-      for (const month of history) lines.push(`${month.mes_referencia}: ${number(month.demanda_ponta_kw!)} / ${number(month.demanda_fora_ponta_kw!)} kW.`);
+        ['Histórico de demanda por mês (ponta / fora de ponta):',...history.map(month=>`${month.mes_referencia}: ${number(month.demanda_ponta_kw!)} / ${number(month.demanda_fora_ponta_kw!)} kW.`)].join('\n'));
       if (demand.contratada_unica_kw !== null && largest < demand.contratada_unica_kw) lines.push(`Diferença entre o contrato atual e a maior demanda do histórico: ${number(demand.contratada_unica_kw - largest)} kW. Isso não é economia comprovada nem recomendação de redução; confirmar contratos vigentes em cada mês, completar 12 meses e considerar a expansão.`);
     }
   }
@@ -93,10 +92,10 @@ export function buildEnergyDiagnosisReport(input: DiagnosisReportInput): string[
     for (const item of details.itens) lines.push(`${item.descricao}: ${money(item.valor)}${item.quantidade===null?'':`; quantidade ${item.quantidade.toLocaleString('pt-BR')}; tarifa com/sem tributos ${item.tarifa_com_tributos} / ${item.tarifa_sem_tributos}`}${item.pis_cofins===null?'':`; PIS/COFINS ${money(item.pis_cofins)}`}${item.icms===null?'':`; ICMS ${money(item.icms)}`}.`);
     if (details.soma_itens !== null) lines.push(`Soma dos itens: ${money(details.soma_itens)}. ${Math.abs(details.soma_itens-invoice!.valorTotalFatura)<0.02?'Conciliada com o total.':'Divergente do total: conferir o original.'}`);
     lines.push('Tributos demonstrativos já integram os itens; não somar novamente.');
-    for (const tax of details.tributos) lines.push(`${tax.nome}: base ${money(tax.base)}; alíquota ${tax.aliquota}%; valor ${money(tax.valor)}.`);
+    if(details.tributos.length)lines.push('TRIBUTOS DEMONSTRATIVOS',details.tributos.map(tax=>`${tax.nome}: base ${money(tax.base)}; alíquota ${tax.aliquota}%; valor ${money(tax.valor)}.`).join('\n'));
     if (details.historico_ativo_injetado.length) {
       lines.push('', 'HISTÓRICO DO GRÁFICO (ATIVO / INJETADO)');
-      for (const h of details.historico_ativo_injetado) lines.push(`${h.mes}: ativo ${h.ativo_kwh.toLocaleString('pt-BR')} kWh / injetado ${h.injetado_kwh.toLocaleString('pt-BR')} kWh.`);
+      lines.push(details.historico_ativo_injetado.map(h=>`${h.mes}: ativo ${h.ativo_kwh.toLocaleString('pt-BR')} kWh / injetado ${h.injetado_kwh.toLocaleString('pt-BR')} kWh.`).join('\n'));
       lines.push('Energia injetada do gráfico não é reativo excedente nem produção solar total.');
     }
   }

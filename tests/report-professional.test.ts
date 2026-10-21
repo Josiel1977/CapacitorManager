@@ -6,9 +6,9 @@ import {createConsultancyPdf} from '../lib/consultancy-pdf.ts';
 function crc(data:Buffer){let c=0xffffffff;for(const byte of data){c^=byte;for(let bit=0;bit<8;bit++)c=(c>>>1)^((c&1)?0xedb88320:0);}return(c^0xffffffff)>>>0;}
 function chunk(type:string,data:Buffer){const name=Buffer.from(type),size=Buffer.alloc(4),sum=Buffer.alloc(4);size.writeUInt32BE(data.length);sum.writeUInt32BE(crc(Buffer.concat([name,data])));return Buffer.concat([size,name,data,sum]);}
 function png(){const head=Buffer.alloc(13);head.writeUInt32BE(1,0);head.writeUInt32BE(1,4);head[8]=8;head[9]=6;return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',head),chunk('IDAT',deflateSync(Buffer.from([0,0,0,0,255]))),chunk('IEND',Buffer.alloc(0))]);}
-test('identificação usa nome e formação informados sem inventar número de registro',()=>{
- const profile=newReportProfessional();assert.equal(profile.name,'Josiel Maia');assert.equal(profile.title,'Eletrotécnico');assert.equal(profile.registration,'');assert.equal(profile.signatureDataUrl,null);
- assert.match(professionalReportLines(profile).join('\n'),/CRT\/CFT: número não informado/);
+test('identificação usa nome e formação informados com o número de registro fornecido pelo responsável',()=>{
+ const profile=newReportProfessional();assert.equal(profile.name,'Josiel Maia');assert.equal(profile.title,'Eletrotécnico');assert.equal(profile.registration,'51693658291');assert.equal(profile.signatureDataUrl,null);
+ assert.match(professionalReportLines(profile).join('\n'),/CRT\/CFT: 51693658291/);
  assert.match(professionalReportLines(profile).join('\n'),/Situação declarada/);
 });
 test('perfil inválido ou imagem de outra origem não entra nos relatórios',()=>{

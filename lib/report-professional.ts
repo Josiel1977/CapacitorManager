@@ -3,7 +3,7 @@ export interface ReportProfessional {
   signatureDataUrl: string | null; signatureWidth: number | null; signatureHeight: number | null;
 }
 export const newReportProfessional = (): ReportProfessional => ({
-  name:'Josiel Maia',title:'Eletrotécnico',registration:'',status:'Ativo',
+  name:'Josiel Maia',title:'Eletrotécnico',registration:'51693658291',status:'Ativo',
   signatureDataUrl:null,signatureWidth:null,signatureHeight:null,
 });
 export function parseReportProfessional(value: unknown): ReportProfessional {
@@ -20,7 +20,7 @@ export function professionalReportLines(profile?: ReportProfessional): string[] 
   if(!profile)return [];
   const p=parseReportProfessional(profile);
   if(!p.name&&!p.registration&&!p.signatureDataUrl)return [];
-  return ['RESPONSÁVEL PELO RELATÓRIO',p.name||'Nome não informado',...(p.title?[p.title]:[]),
+  return ['ASSINATURA DO RESPONSÁVEL',`${p.name||'Nome não informado'}${p.title?' | '+p.title:''}`, 
     `CRT/CFT: ${p.registration||'número não informado'}`,
     `Situação declarada do registro: ${p.status||'não informada'}`];
 }
