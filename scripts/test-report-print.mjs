@@ -26,7 +26,7 @@ try{
  await page.getByRole('button',{name:'Expansão e transformadores',exact:true}).click();
  await page.getByRole('heading',{name:'Expansão de carga e transformadores',exact:true}).waitFor();
  await page.getByRole('button',{name:'Auditoria da fatura',exact:true}).click();
- const invoice=buildInvoiceAuditResult(parseEquatorialInvoiceText(`Equatorial Pará Referência: 08/2026 Total a Pagar R$ 1.000,00
+ const invoice=buildInvoiceAuditResult(parseEquatorialInvoiceText(`Equatorial Pará Referência: 08/2026 Total a Pagar R$ 96,00
 GRUPO DE TENSÃO: B SUBGRUPO: B3
 CLASSIFICAÇÃO: COMERCIAL B-OPTANTE
 CLIENTE SINTETICO TESTE
@@ -41,6 +41,15 @@ Multa 1,00`));
  await page.locator('input[type="file"][accept="application/pdf,.pdf"]:visible').setInputFiles({name:'fatura-sintetica.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7 fixture')});
  await page.getByRole('button',{name:'Analisar fatura',exact:true}).click();
  await page.getByRole('heading',{name:'Resultado da fatura enviada',exact:true}).waitFor();
+ const currentScenario=page.getByRole('group',{name:'B-optante',exact:true});
+ assert.equal(await currentScenario.getByLabel('Energia monômia (R$/kWh)',{exact:true}).inputValue(),'1');
+ assert.equal(await currentScenario.getByLabel('Demais custos recorrentes (R$/mês)',{exact:true}).inputValue(),'5');
+ const alternativeScenario=page.getByRole('group',{name:'A-verde',exact:true});
+ assert.equal(await alternativeScenario.getByLabel('Demais custos recorrentes (R$/mês)',{exact:true}).inputValue(),'');
+ await currentScenario.getByLabel('Demais custos recorrentes (R$/mês)',{exact:true}).fill('7');
+ await page.getByRole('button',{name:'Preencher campos vazios com a fatura',exact:true}).click();
+ assert.equal(await currentScenario.getByLabel('Demais custos recorrentes (R$/mês)',{exact:true}).inputValue(),'7');
+ console.log('Preenchimento da fatura confirmado: cenário atual, alternativas pendentes e edição manual preservada.');
  await page.getByLabel('Geração dos inversores, cargas previstas, medições e recomendações').fill('Observações técnicas sintéticas para testar paginação. '.repeat(160));
  await page.getByLabel('Nome do responsável',{exact:true}).fill('Profissional Teste');
  await page.getByLabel('Número do CRT/CFT e regional',{exact:true}).fill('CRT-TESTE-0000');

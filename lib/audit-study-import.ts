@@ -1,6 +1,7 @@
 import type { InvoiceAuditResult } from './invoice-audit-result';
 import type { ConsultingStudy, ConsultingMonth, ConsultingMode } from './tariff-consultancy';
 import type { EnergyStudy } from './energy-tariff-diagnosis';
+import {fillInvoiceScenario,invoiceCurrentMode,invoiceScenarioValues} from './invoice-scenario-import.ts';
 import type { ExpansionStudy } from './expansion-study';
 
 const known = (value: number | null | undefined): number | null =>
@@ -54,9 +55,11 @@ export function expansionStudyFromInvoice(base: ExpansionStudy, invoice: Invoice
 
 export function energyStudyFromInvoice(base: EnergyStudy, invoice: InvoiceAuditResult): EnergyStudy {
   const f=invoiceStudyFacts(invoice),c=invoice.consultoria;
+  const currentMode=invoiceCurrentMode(invoice);
+  const extracted=invoiceScenarioValues(invoice,currentMode);
   const hasPosts=invoice.detalhes_fatura?.grupo==='A'&&!f.gd&&!f.bOptante;
-  return {...base,confirmed:false,netPeakKwh:hasPosts?known(invoice.consumo_ponta_kwh):null,netOffPeakKwh:hasPosts?known(invoice.consumo_fora_ponta_kwh):null,
+  return {...base,confirmed:false,tariffSource:currentMode&&extracted.reconciled&&extracted.values.length?extracted.source:base.tariffSource,netPeakKwh:hasPosts?known(invoice.consumo_ponta_kwh):null,netOffPeakKwh:hasPosts?known(invoice.consumo_fora_ponta_kwh):null,
     measuredPeakKw:f.peakKw,measuredOffPeakKw:f.offPeakKw,
-    scenarios:base.scenarios.map(s=>({...s,contractedPeak:s.mode==='A-azul'?c?.contratada_ponta_kw??null:s.contractedPeak,
+    scenarios:base.scenarios.map(s=>({...((s.mode===currentMode)?fillInvoiceScenario(s,invoice):s),contractedPeak:s.mode==='A-azul'?c?.contratada_ponta_kw??null:s.contractedPeak,
       contractedOffPeak:s.mode==='A-verde'?c?.contratada_unica_kw??null:s.mode==='A-azul'?c?.contratada_fora_kw??null:s.contractedOffPeak}))};
 }

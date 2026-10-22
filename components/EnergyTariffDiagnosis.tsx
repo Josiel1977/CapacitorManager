@@ -3,6 +3,7 @@ import { useState } from 'react';
 import {useReportPrintDate} from '@/hooks/use-report-print-date';
 import {ReportPrintView} from '@/components/ReportPrintView';
 import type {ReportProfessional} from '@/lib/report-professional';
+import {fillInvoiceScenario,invoiceCurrentMode,invoiceScenarioValues} from '@/lib/invoice-scenario-import';
 import {energyStudyFromInvoice,invoiceStudyFacts} from '@/lib/audit-study-import';
 import { diagnoseEnergyTariffs, type EnergyStudy, type TariffScenario, type Mode } from '@/lib/energy-tariff-diagnosis';
 import { buildEnergyDiagnosisReport } from '@/lib/energy-diagnosis-report';
@@ -15,6 +16,9 @@ export default function EnergyTariffDiagnosis({ invoice,professional }: { invoic
   const [study,setStudy] = useState<EnergyStudy>(()=>invoice?energyStudyFromInvoice({...initial,scenarios:modes.map(newScenario)},invoice):{...initial,scenarios:modes.map(newScenario)});
   const [client,setClient] = useState(invoice?.detalhes_fatura?.cliente ? `${invoice.detalhes_fatura.cliente} / UC ${invoice.detalhes_fatura.unidade_consumidora ?? 'não identificada'}` : '');
   const [notes,setNotes] = useState(invoice?invoiceStudyFacts(invoice).summary:'');
+  const [invoiceMode,setInvoiceMode] = useState<Mode|null>(()=>invoice?invoiceCurrentMode(invoice):null);
+  const invoiceValues=invoice?invoiceScenarioValues(invoice,invoiceMode):null;
+  const detectedMode=invoice?invoiceCurrentMode(invoice):null;
   const [saved,setSaved] = useState('');
   const [generating,setGenerating] = useState(false);
   const [pdfError,setPdfError] = useState('');
@@ -36,6 +40,11 @@ export default function EnergyTariffDiagnosis({ invoice,professional }: { invoic
   function field(key: keyof EnergyStudy, value: unknown) { setStudy(old => ({...old,[key]:value,confirmed:false})); }
   function scenario(index: number, key: keyof TariffScenario, value: number | null) {
     setStudy(old=>({...old,confirmed:false,scenarios:old.scenarios.map((s,i)=>i===index?{...s,[key]:value}:s)}));
+  }
+  function useInvoiceValues(){
+    if(!invoice||!invoiceMode||!invoiceValues?.reconciled)return;
+    setStudy(old=>({...old,confirmed:false,tariffSource:old.tariffSource.includes(invoiceValues.source)?old.tariffSource:[old.tariffSource,invoiceValues.source].filter(Boolean).join(' | '),scenarios:old.scenarios.map(s=>s.mode===invoiceMode?fillInvoiceScenario(s,invoice):s)}));
+    setSaved('Valores disponíveis preenchidos somente nos campos vazios da modalidade atual. Confira os subtotais e complete os dados pendentes.');
   }
   function save() {
     try { localStorage.setItem('cm-energy-study-v1',JSON.stringify({study,client,notes})); setSaved('Rascunho salvo neste navegador.'); }
@@ -76,7 +85,15 @@ export default function EnergyTariffDiagnosis({ invoice,professional }: { invoic
       </div>
       <p className="text-sm text-slate-600">Use o mesmo mês e as mesmas cargas em todos os cenários. Consumo líquido após compensação por posto deve considerar as regras e conversões de créditos. Este simulador não calcula automaticamente o SCEE. Para ampliação, use uma previsão documentada das cargas novas.</p>
       <label className="block text-sm">Fonte, vigência e tensão das tarifas<input className="mt-1 w-full rounded border p-2" placeholder="Distribuidora, resolução/tabela, vigência, tensão e tributos" value={study.tariffSource} onChange={e=>field('tariffSource',e.target.value)}/></label>
-      <p className="text-sm text-slate-600">Informe TE + TUSD de energia e tarifas de demanda com tributos na mesma base. Em encargos GD, inclua o custo residual da compensação de cada modalidade; em demais custos, CIP, bandeiras, reativo e outros itens recorrentes. Exclua parcelamentos, multa e juros. Não some novamente tributos já incluídos.</p>
+      <p className="text-sm text-slate-600">A auditoria reaproveita os valores explícitos da modalidade atual quando identificada. Confirme abaixo a modalidade se o código da fatura for ambíguo. Tarifas completas exigem TE + TUSD na mesma base com tributos; TUSD isolada não basta. Os custos das outras modalidades precisam de tarifas e regras próprias. Parcelamentos, multa e juros não entram nos subtotais importados; tributos demonstrativos não são somados novamente.</p>
+      {invoiceValues&&<section aria-label="Valores disponíveis da fatura para comparação" className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
+        <h3 className="font-bold">Preenchimento a partir da fatura</h3>
+        <label className="block text-sm">Modalidade atual desta fatura<select aria-label="Modalidade atual desta fatura" className="mt-1 w-full rounded border p-2" value={invoiceMode??''} onChange={e=>setInvoiceMode((e.target.value||null) as Mode|null)}><option value="">Confirmar modalidade</option>{modes.map(mode=><option key={mode} value={mode} disabled={detectedMode!==null&&detectedMode!==mode}>{mode}</option>)}</select></label>
+        {invoiceValues.values.length>0&&<div className="overflow-x-auto"><table className="w-full text-left text-sm"><caption className="mb-2 text-left">Valores extraídos para conferência; custos são subtotais dos itens identificados.</caption><thead><tr><th className="p-2">Dado</th><th className="p-2">Valor</th><th className="p-2">Origem</th></tr></thead><tbody>{invoiceValues.values.map(value=><tr key={value.field} className="border-t"><td className="p-2">{value.label}</td><td className="whitespace-nowrap p-2">{value.value.toLocaleString('pt-BR',{maximumFractionDigits:9})} {value.unit}</td><td className="p-2">{value.source}</td></tr>)}</tbody></table></div>}
+        {invoiceValues.pending.length>0&&<ul className="list-disc space-y-1 pl-5 text-sm">{invoiceValues.pending.map(text=><li key={text}>{text}</li>)}</ul>}
+        <p className="text-sm">Aplicação somente no cenário da modalidade atual. As modalidades alternativas ficam pendentes. Benefícios, devoluções e compensação de energia não foram classificados como economia nem como tarifa; residual GD e demais custos importados exigem conferência da composição completa.</p>
+        <button type="button" disabled={!invoiceMode||!invoiceValues.reconciled||invoiceValues.values.length===0} onClick={useInvoiceValues} className="rounded border bg-white px-3 py-2 text-sm disabled:opacity-50">Preencher campos vazios com a fatura</button>
+      </section>}
       <div className="grid gap-4 lg:grid-cols-3">{study.scenarios.map((s,i)=><fieldset key={s.mode} className="space-y-3 rounded-xl border p-4"><legend className="px-1 font-bold">{s.mode}</legend>
         <Numeric label={s.mode==='B-optante'?'Energia monômia (R$/kWh)':'Energia fora de ponta (R$/kWh)'} value={s.energyOffPeak} onChange={v=>scenario(i,'energyOffPeak',v)}/>
         {s.mode!=='B-optante' && <><Numeric label="Energia ponta (R$/kWh)" value={s.energyPeak} onChange={v=>scenario(i,'energyPeak',v)}/><Numeric label={s.mode==='A-verde'?'Demanda única contratada (kW)':'Demanda fora de ponta contratada (kW)'} value={s.contractedOffPeak} onChange={v=>scenario(i,'contractedOffPeak',v)}/><Numeric label="Tarifa demanda (R$/kW)" value={s.demandOffPeak} onChange={v=>scenario(i,'demandOffPeak',v)}/></>}
