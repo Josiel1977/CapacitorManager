@@ -58,6 +58,14 @@ Multa 1,00`));
  for(const [label,file] of [['Auditoria da fatura','auditoria'],['Consultoria e Gestão Tarifária','consultoria'],['Expansão e transformadores','expansao']]){
   await page.emulateMedia({media:'screen'});await page.getByRole('button',{name:label,exact:true}).click();
   if(file==='consultoria'){
+   const currentTariff=page.getByRole('group',{name:'Convencional',exact:true});
+   assert.equal(await currentTariff.getByLabel('Energia única / fora (R$/kWh)',{exact:true}).inputValue(),'0.8');
+   const reference=currentTariff.locator('input[type="date"]');assert.equal(await reference.inputValue(),'');
+   await page.getByRole('checkbox',{name:'Permitir substituir o estudo atual pela importação.',exact:true}).check();
+   await page.getByRole('button',{name:'Importar dados identificados na fatura analisada',exact:true}).click();
+   await page.getByRole('status').filter({hasText:'1 valor(es) tarifário(s)'}).waitFor();
+   assert.equal(await currentTariff.getByLabel('Energia única / fora (R$/kWh)',{exact:true}).inputValue(),'0.8');
+   console.log('Consultoria importa tarifa sem tributos, informa pendências e não inventa data de referência.');
    const example=page.getByRole('heading',{name:'Ampliação: um transformador maior ou dois transformadores?',exact:true});
    for(const subgroup of ['A1','A2','A3','A3a','A4','AS']){
     await page.getByLabel('Enquadramento',{exact:true}).selectOption(subgroup);

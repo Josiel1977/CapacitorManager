@@ -1,5 +1,5 @@
 import type { InvoiceAuditResult } from './invoice-audit-result';
-import type { ConsultingStudy, ConsultingMonth, ConsultingMode } from './tariff-consultancy';
+import type { ConsultingStudy, ConsultingMonth, ConsultingMode, ConsultingTariff } from './tariff-consultancy';
 import type { EnergyStudy } from './energy-tariff-diagnosis';
 import {fillInvoiceScenario,invoiceCurrentMode,invoiceScenarioValues} from './invoice-scenario-import.ts';
 import type { ExpansionStudy } from './expansion-study';
@@ -23,6 +23,14 @@ export function invoiceStudyFacts(invoice: InvoiceAuditResult) {
     offPeakKw:c?.demanda_fora_identificada?known(invoice.demanda_fora_ponta_kw):null};
 }
 
+export function consultancyInvoiceImportNotice(invoice:InvoiceAuditResult):string {
+ const detected=invoiceCurrentMode(invoice),extracted=invoiceScenarioValues(invoice,detected,'without-tax');
+ if(!extracted.reconciled)return 'Dados importados como rascunho. Importação de tarifas bloqueada: a soma dos itens diverge do total da fatura. Confira a extração com o original.';
+ if(!detected)return 'Dados importados como rascunho. A modalidade não foi identificada com segurança pelo código da fatura; as tarifas ficam pendentes. Confirme o enquadramento e use o catálogo ANEEL ou documentação da distribuidora.';
+ if(!extracted.values.length)return 'Dados importados como rascunho. Nenhuma tarifa completa na base sem tributos foi identificada; TUSD isolada não substitui TE + TUSD. Consulte as tarifas no catálogo ANEEL ou na documentação da distribuidora.';
+ return `Dados importados como rascunho. ${extracted.values.length} valor(es) tarifário(s) explícito(s), sem tributos, reaproveitado(s) da fatura somente para a modalidade atual. Confira fonte, data de referência e valores antes de confirmar; alternativas e custos GD continuam pendentes.`;
+}
+
 export function tariffStudyFromInvoice(base: ConsultingStudy, invoice: InvoiceAuditResult): ConsultingStudy {
   const f=invoiceStudyFacts(invoice),d=invoice.detalhes_fatura,c=invoice.consultoria;
   const blank=(month:string):ConsultingMonth=>({month,peakKwh:null,offPeakKwh:null,intermediateKwh:null,peakKw:null,offPeakKw:null,reactiveCost:null,injectedKwh:null,compensatedKwh:null});
@@ -40,7 +48,18 @@ export function tariffStudyFromInvoice(base: ConsultingStudy, invoice: InvoiceAu
   }
   const code=d?.modalidade?.toUpperCase()??'';
   const current:ConsultingMode=f.bOptante||d?.grupo==='B'?'convencional':code.includes('AZUL')?'azul':'verde';
-  return {...base,client:f.client,uc:f.uc,distributor:f.distributor,subgroup:f.subgroup,current,gd:f.gd,gdVerified:false,alternativesApproved:false,reviewed:false,
+  const detected=invoiceCurrentMode(invoice),extracted=invoiceScenarioValues(invoice,detected,'without-tax');
+  const detectedMode:ConsultingMode|null=detected==='B-optante'?'convencional':detected==='A-verde'?'verde':detected==='A-azul'?'azul':null;
+  const fields:Record<string,'peak'|'offPeak'|'demandPeak'|'demandOffPeak'>={energyPeak:'peak',energyOffPeak:'offPeak',demandPeak:'demandPeak',demandOffPeak:'demandOffPeak'};
+  const tariffs:ConsultingTariff[]=base.tariffs.map(t=>{
+    const result={...t,verified:false};
+    if(t.mode!==detectedMode||!extracted.reconciled)return result;
+    const sources:string[]=[];
+    for(const row of extracted.values){const key=fields[row.field];if(key&&result[key]===null){result[key]=row.value;sources.push(row.source);}}
+    if(sources.length){result.source=[result.source,extracted.source,...sources].filter(Boolean).join(' | ');result.date='';}
+    return result;
+  });
+  return {...base,client:f.client,uc:f.uc,distributor:f.distributor,subgroup:f.subgroup,current,tariffs,gd:f.gd,gdVerified:false,alternativesApproved:false,reviewed:false,
     months:months.slice(0,12),contractedOffPeak:c?.contratada_unica_kw??c?.contratada_fora_kw??null,contractedPeak:c?.contratada_ponta_kw??null,
     notes:`${f.summary}\nCódigo da modalidade: ${d?.modalidade??'não identificado'}. Confirmar modalidade, tarifas e enquadramento; não presumir tarifa de demanda a partir de benefícios. Consumo por posto permanece pendente quando houver SCEE ou conta monômia.`};
 }

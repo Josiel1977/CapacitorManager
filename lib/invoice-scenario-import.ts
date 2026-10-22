@@ -15,7 +15,9 @@ export function invoiceCurrentMode(invoice:InvoiceAuditResult):Mode|null {
  if(blue&&!green)return 'A-azul';
  return null;
 }
-export function invoiceScenarioValues(invoice:InvoiceAuditResult,mode:Mode|null){
+export function invoiceScenarioValues(invoice:InvoiceAuditResult,mode:Mode|null,basis:'with-tax'|'without-tax'='with-tax'){
+ const rateKey=basis==='with-tax'?'tarifa_com_tributos':'tarifa_sem_tributos';
+ const basisLabel=basis==='with-tax'?'com tributos':'sem tributos';
  const reconciled=invoice.detalhes_fatura?.soma_itens!==null&&invoice.detalhes_fatura?.soma_itens!==undefined&&Math.abs(invoice.detalhes_fatura.soma_itens-invoice.valorTotalFatura)<0.02;
  const items=invoice.detalhes_fatura?.itens??[],values:InvoiceScenarioValue[]=[],pending:string[]=[];
  const add=(field:NumericField,label:string,value:number,unit:string,source:string)=>values.push({field,label,value,unit,source});
@@ -26,25 +28,27 @@ export function invoiceScenarioValues(invoice:InvoiceAuditResult,mode:Mode|null)
  };
  if(!reconciled)pending.push('Conciliação pendente: a soma dos itens não confere com o total. Corrija a extração antes de importar valores.');
  // Apenas subtotais positivos explicitamente identificados; nunca total líquido menos dívida.
+ if(basis==='with-tax'){
  moneyGroup('otherCharges','Custos recorrentes identificados',items.filter(item=>/^(?:CIP\b|ADICIONAL\s+BANDEIRA\b|CONSUMO\s+REATIVO\s+EXCEDENTE\b|ENCARGO\s+ESCASSEZ\s+HIDRICA\b)/.test(normalized(item.descricao))));
  moneyGroup('gdCharge','Residual GD identificado',items.filter(item=>/^PARC\.\s*INJ\./.test(normalized(item.descricao))));
+ }
  if(mode==='B-optante'){
   const candidates=items.filter(item=>/^CONSUMO\s*\(KWH\)$/.test(normalized(item.descricao)));
-  if(candidates.length===1&&valid(candidates[0].valor)&&valid(candidates[0].tarifa_com_tributos)&&candidates[0].tarifa_com_tributos>0)add('energyOffPeak','Energia monômia',candidates[0].tarifa_com_tributos,'R$/kWh',`${candidates[0].descricao}; tarifa com tributos explícita`);
-  else pending.push('Energia monômia: tarifa com tributos ausente ou mais de uma linha; conferir a fatura.');
+  if(candidates.length===1&&valid(candidates[0].valor)&&valid(candidates[0][rateKey])&&candidates[0][rateKey]>0)add('energyOffPeak','Energia monômia',candidates[0][rateKey],'R$/kWh',`${candidates[0].descricao}; tarifa ${basisLabel} explícita`);
+  else pending.push(`Energia monômia: tarifa ${basisLabel} ausente ou mais de uma linha; conferir a fatura.`);
  }else if(mode){
   for(const [post,field] of [['FORA PONTA','energyOffPeak'],['PONTA','energyPeak']] as const){
    const description=(prefix:string)=>new RegExp(`^${prefix}\\s+ENERGIA\\s+${post}\\s*\\(KWH\\)$`);
    const te=items.filter(item=>description('TE').test(normalized(item.descricao))),tusd=items.filter(item=>description('TUSD').test(normalized(item.descricao)));
-   if(te.length===1&&tusd.length===1&&valid(te[0].valor)&&valid(tusd[0].valor)&&valid(te[0].tarifa_com_tributos)&&valid(tusd[0].tarifa_com_tributos)&&valid(te[0].quantidade)&&valid(tusd[0].quantidade)&&Math.abs(te[0].quantidade-tusd[0].quantidade)<0.02){
-    const rate=te[0].tarifa_com_tributos+tusd[0].tarifa_com_tributos;
-    if(rate>0)add(field,`TE + TUSD ${post.toLocaleLowerCase('pt-BR')}`,Math.round(rate*1e9)/1e9,'R$/kWh',`${te[0].descricao} + ${tusd[0].descricao}; tarifas com tributos; quantidades compatíveis`);
-   }else pending.push(`Energia ${post.toLocaleLowerCase('pt-BR')}: falta TE + TUSD com tributos e quantidades compatíveis. TUSD isolada não é a tarifa completa.`);
+   if(te.length===1&&tusd.length===1&&valid(te[0].valor)&&valid(tusd[0].valor)&&valid(te[0][rateKey])&&valid(tusd[0][rateKey])&&valid(te[0].quantidade)&&valid(tusd[0].quantidade)&&Math.abs(te[0].quantidade-tusd[0].quantidade)<0.02){
+    const rate=te[0][rateKey]+tusd[0][rateKey];
+    if(rate>0)add(field,`TE + TUSD ${post.toLocaleLowerCase('pt-BR')}`,Math.round(rate*1e9)/1e9,'R$/kWh',`${te[0].descricao} + ${tusd[0].descricao}; tarifas ${basisLabel}; quantidades compatíveis`);
+   }else pending.push(`Energia ${post.toLocaleLowerCase('pt-BR')}: falta TE + TUSD ${basisLabel} e quantidades compatíveis. TUSD isolada não é a tarifa completa.`);
   }
   const demandRows=items.filter(item=>/^DEMANDA(?:\s+(?:ATIVA|UNICA|CONTRATADA))?(?:\s+(?:FORA\s+PONTA|PONTA|FP|NP))?\s*\(KW\)$/.test(normalized(item.descricao)));
   const readDemand=(field:'demandPeak'|'demandOffPeak',rows:Item[])=>{
-   if(rows.length===1&&valid(rows[0].valor)&&valid(rows[0].tarifa_com_tributos)&&rows[0].tarifa_com_tributos>0)add(field,field==='demandPeak'?'Demanda ponta':'Demanda única / fora de ponta',rows[0].tarifa_com_tributos,'R$/kW',`${rows[0].descricao}; tarifa com tributos explícita`);
-   else pending.push(`${field==='demandPeak'?'Demanda ponta':'Demanda única / fora de ponta'}: tarifa com tributos ausente ou ambígua.`);
+   if(rows.length===1&&valid(rows[0].valor)&&valid(rows[0][rateKey])&&rows[0][rateKey]>0)add(field,field==='demandPeak'?'Demanda ponta':'Demanda única / fora de ponta',rows[0][rateKey],'R$/kW',`${rows[0].descricao}; tarifa ${basisLabel} explícita`);
+   else pending.push(`${field==='demandPeak'?'Demanda ponta':'Demanda única / fora de ponta'}: tarifa ${basisLabel} ausente ou ambígua.`);
   };
   const isOff=(item:Item)=>/FORA\s+PONTA|\bFP\b/.test(normalized(item.descricao));
   const isPeak=(item:Item)=>!isOff(item)&&/\bPONTA\b|\bNP\b/.test(normalized(item.descricao));
@@ -52,7 +56,7 @@ export function invoiceScenarioValues(invoice:InvoiceAuditResult,mode:Mode|null)
   if(mode==='A-azul')readDemand('demandPeak',demandRows.filter(isPeak));
  }
  if(!mode)pending.push('Confirme a modalidade atual: o código da fatura não permite selecionar Verde, Azul ou B-optante com segurança.');
- return {mode,reconciled,values,pending,source:`Fatura ${invoice.mesReferencia} / ${invoice.concessionaria}; modalidade ${mode??'a confirmar'}; valores explícitos com tributos. Importação preliminar, sujeita à conferência; não são tarifas das modalidades alternativas.`};
+ return {mode,reconciled,values,pending,source:`Fatura ${invoice.mesReferencia} / ${invoice.concessionaria}; modalidade ${mode??'a confirmar'}; valores explícitos ${basisLabel}. Importação preliminar, sujeita à conferência; não são tarifas das modalidades alternativas.`};
 }
 export function fillInvoiceScenario(scenario:TariffScenario,invoice:InvoiceAuditResult){
  const detected=invoiceCurrentMode(invoice);

@@ -108,3 +108,10 @@ A tela e o relatório incluem o exemplo Equatorial PA de 112,5 + 112,5 kVA, dist
 ### Correção de homologação: contrato zero na Azul
 
 Azul aceita contrato e mínimo iguais a zero em qualquer posto, preservando pelo menos 30 kW em um deles. A otimização compara qual posto deve satisfazer o mínimo geral quando as soluções independentes ficam abaixo desse piso. A referência atual preserva zero informado, sem tratá-lo como dado ausente. Dois testes adicionais cobrem os dois sentidos e o bloqueio de contratos abaixo do mínimo geral.
+
+
+### Reaproveitamento de tarifas da fatura
+
+A importação da auditoria para a consultoria reaproveita tarifas explícitas **sem tributos** somente na modalidade identificada e quando a soma dos itens concilia com o total. TE e TUSD por posto precisam estar presentes na mesma base e com quantidades compatíveis. TUSD isolada não é tratada como tarifa completa; códigos de modalidade ambíguos não autorizam preenchimento tarifário.
+
+Valores importados conservam a origem na fatura e permanecem sem confirmação. A data de referência precisa ser conferida: o mês de faturamento não é inventado como início de vigência. Tarifas de alternativas e residual GD de cada modalidade continuam pendentes. Custos monetários brutos da fatura não são copiados para essa comparação sem tributos. O diagnóstico mensal da auditoria usa separadamente a base com tributos, conforme a indicação de sua tela.

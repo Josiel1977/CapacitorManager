@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {parseEquatorialInvoiceText} from '../lib/equatorial-invoice-parser.ts';
 import {buildInvoiceAuditResult} from '../lib/invoice-audit-result.ts';
 import {newExpansionStudy} from '../lib/expansion-study.ts';
-import {invoiceStudyFacts,tariffStudyFromInvoice,expansionStudyFromInvoice,energyStudyFromInvoice} from '../lib/audit-study-import.ts';
+import {invoiceStudyFacts,tariffStudyFromInvoice,expansionStudyFromInvoice,energyStudyFromInvoice,consultancyInvoiceImportNotice} from '../lib/audit-study-import.ts';
 import type {ConsultingStudy} from '../lib/tariff-consultancy.ts';
 import type {EnergyStudy} from '../lib/energy-tariff-diagnosis.ts';
 const base=():ConsultingStudy=>({version:1,client:'',uc:'',distributor:'',subgroup:'A4',current:'verde',months:[],tariffs:[],contractedPeak:null,contractedOffPeak:null,minimumPeak:30,minimumOffPeak:30,growthPercent:0,marginPercent:10,availabilityKwh:100,gd:false,gdVerified:false,alternativesApproved:false,reviewed:false,notes:''});
@@ -55,4 +55,36 @@ TUSD Energia Ponta (kWh) 10 1,000000 0,800000 1,00 19,00 10,00`));
 test('nova importação substitui a identidade anterior sem mudar o objeto-base nem transportar confirmações',()=>{
  const old=base();old.client='OUTRO CLIENTE';old.reviewed=true;const snapshot=JSON.stringify(old);
  const imported=tariffStudyFromInvoice(old,solar());assert.equal(imported.client,'CLIENTE SOLAR TESTE');assert.equal(imported.reviewed,false);assert.equal(JSON.stringify(old),snapshot);
+});
+
+const tariffBase=():ConsultingStudy=>({...base(),tariffs:(['verde','azul','convencional','branca'] as const).map(mode=>({mode,peak:null,offPeak:null,intermediate:null,demandPeak:null,demandOffPeak:null,residualGd:null,source:'',date:'',verified:false}))});
+test('consultoria importa a tarifa explícita sem tributos do B-optante sem copiar custos brutos nem inventar vigência',()=>{
+ const bill=solar();bill.valorTotalFatura=bill.detalhes_fatura!.soma_itens!;
+ const result=tariffStudyFromInvoice(tariffBase(),bill),current=result.tariffs.find(t=>t.mode==='convencional')!;
+ assert.equal(current.offPeak,0.8);assert.equal(current.residualGd,null);assert.equal(current.date,'');assert.equal(current.verified,false);
+ assert.match(current.source,/sem tributos/);assert.match(current.source,/08\/2026/);
+ assert.equal(result.tariffs.find(t=>t.mode==='verde')!.offPeak,null);assert.equal(result.reviewed,false);
+ assert.match(consultancyInvoiceImportNotice(bill),/1 valor/);
+});
+test('consultoria soma TE e TUSD sem tributos somente na modalidade identificada',()=>{
+ const bill=buildInvoiceAuditResult(parseEquatorialInvoiceText(`Equatorial Pará Referência: 07/2026 Total a Pagar R$ 558,00
+GRUPO DE TENSÃO: A SUBGRUPO: A4
+MODALIDADE TARIFÁRIA: VERDE
+TE Energia Fora Ponta (kWh) 100 0,300000 0,200000 1,00 2,00 30,00
+TUSD Energia Fora Ponta (kWh) 100 0,200000 0,100000 1,00 2,00 20,00
+TE Energia Ponta (kWh) 10 0,500000 0,400000 1,00 2,00 5,00
+TUSD Energia Ponta (kWh) 10 0,300000 0,200000 1,00 2,00 3,00
+Demanda Única (kW) 50 10,000000 8,000000 1,00 2,00 500,00`));
+ const result=tariffStudyFromInvoice(tariffBase(),bill),current=result.tariffs.find(t=>t.mode==='verde')!;
+ assert.equal(current.offPeak,0.3);assert.equal(current.peak,0.6);assert.equal(current.demandOffPeak,8);
+ assert.equal(result.tariffs.find(t=>t.mode==='azul')!.demandOffPeak,null);assert.match(consultancyInvoiceImportNotice(bill),/3 valor/);
+});
+test('aviso da consultoria distingue ausência de tarifa, modalidade ambígua e conciliação pendente',()=>{
+ const bill=solar();bill.valorTotalFatura=bill.detalhes_fatura!.soma_itens!;
+ bill.detalhes_fatura!.itens[0].tarifa_sem_tributos=null;
+ assert.match(consultancyInvoiceImportNotice(bill),/Nenhuma tarifa completa/);
+ assert.equal(tariffStudyFromInvoice(tariffBase(),bill).tariffs.find(t=>t.mode==='convencional')!.offPeak,null);
+ bill.contexto_energetico!.b_optante=false;bill.detalhes_fatura!.grupo='A';bill.detalhes_fatura!.modalidade='A4_LVVD';
+ assert.match(consultancyInvoiceImportNotice(bill),/modalidade não foi identificada/);
+ bill.valorTotalFatura=999;assert.match(consultancyInvoiceImportNotice(bill),/soma dos itens diverge/);
 });
