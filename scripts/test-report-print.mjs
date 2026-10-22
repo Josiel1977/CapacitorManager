@@ -17,7 +17,7 @@ let output='';server.stdout.on('data',data=>output+=data);server.stderr.on('data
 let browser;
 async function inspectPdf(buffer,label){const parser=new PDFParse({data:buffer});try{const result=await parser.getText();assert.match(result.text,/Profissional Teste/);assert.match(result.text,/CRT-TESTE-0000/);assert.ok(!result.text.includes('Prévia — data definida'),label+': data de impressão não atualizada');assert.match(result.text,/CLIENTE SINTETICO TESTE/);assert.ok(result.pages.every(page=>page.text.replace(/\s/g,'').length>30),label+': página em branco');assert.ok(!result.text.includes('Salvar dados e assinatura neste navegador'),label+': formulário impresso');console.log(label+': '+result.pages.length+' páginas com conteúdo e identificação.');return result.text;}finally{await parser.destroy();}}
 try{
- let ready=false;for(let n=0;n<60;n++){try{if((await fetch('http://localhost:3100/auditoria')).ok){ready=true;break;}}catch{}await setTimeout(1000);}assert.ok(ready,'Servidor não iniciou: '+output.slice(-2000));
+ let ready=false;for(let n=0;n<60;n++){try{if((await fetch('http://localhost:3100/auditoria',{signal:AbortSignal.timeout(5000)})).ok){ready=true;break;}}catch{}await setTimeout(1000);}assert.ok(ready,'Servidor não iniciou: '+output.slice(-2000));
  await mkdir('artifacts/report-print',{recursive:true});
  browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1280,height:1000}});
  page.on('pageerror',error=>console.error('Erro de página:',error.message));
@@ -39,7 +39,8 @@ Consumo Reativo Excedente (kVAr) 10 0,500000 0,400000 0,00 0,00 5,00
 Multa 1,00`));
  invoice.detalhes_fatura.leitura_atual='03/08/2026';
  const aneelRequests=[];
- await page.route('**/api/tarifas-aneel?**',route=>{aneelRequests.push(route.request().url());return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({tariffs:[],consultedAt:'2026-08-03T12:00:00Z',rejected:0})});});
+ const actualA4Rows=JSON.parse(await readFile('tests/fixtures/aneel-equatorial-pa-a4-2026-07.json','utf8'));
+ await page.route('**/api/tarifas-aneel?**',route=>{aneelRequests.push(route.request().url());return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({tariffs:new URL(route.request().url()).searchParams.get('subgroup')==='A4'?actualA4Rows:[],consultedAt:'2026-08-03T12:00:00Z',rejected:0})});});
  await page.route('**/api/capacitormanager/auditar-fatura',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:invoice})}));
  await page.locator('input[type="file"][accept="application/pdf,.pdf"]:visible').setInputFiles({name:'fatura-sintetica.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7 fixture')});
  await page.getByRole('button',{name:'Analisar fatura',exact:true}).click();
@@ -75,6 +76,26 @@ Multa 1,00`));
    await page.getByRole('status').filter({hasText:'1 valor(es) tarifário(s)'}).waitFor();
    assert.equal(await currentTariff.getByLabel('Energia única / fora (R$/kWh)',{exact:true}).inputValue(),'0.8');
    console.log('Consultoria importa tarifa sem tributos, informa pendências e não inventa data de referência.');
+   await page.getByLabel('Enquadramento',{exact:true}).selectOption('A4');
+   await page.getByLabel('Subgrupo do catálogo ANEEL',{exact:true}).selectOption('A4');
+   await page.getByRole('button',{name:'Buscar tarifas',exact:true}).click();
+   await page.getByRole('status').filter({hasText:'Referências completas disponíveis: Verde e Azul'}).waitFor();
+   for(const [name,peak,demand] of [['Horária Verde','3.02115',null],['Horária Azul','0.59043','100.12']]){
+    const group=page.getByRole('group',{name,exact:true});
+    await group.getByLabel('Energia ponta (R$/kWh)',{exact:true}).waitFor();
+    assert.equal(await group.getByLabel('Energia ponta (R$/kWh)',{exact:true}).inputValue(),peak);
+    assert.equal(await group.getByLabel('Energia única / fora (R$/kWh)',{exact:true}).inputValue(),'0.42079');
+    assert.equal(await group.getByLabel('Demanda única / fora (R$/kW)',{exact:true}).inputValue(),'44.81');
+    if(demand)assert.equal(await group.getByLabel('Demanda ponta (R$/kW)',{exact:true}).inputValue(),demand);
+    assert.equal(await group.locator('input[type="date"]').inputValue(),'2026-08-03');
+    assert.equal(await group.getByRole('checkbox').isChecked(),false);
+   }
+   const green=page.getByRole('group',{name:'Horária Verde',exact:true});
+   await green.getByLabel('Energia única / fora (R$/kWh)',{exact:true}).fill('0.99');
+   await page.getByRole('button',{name:'Buscar tarifas',exact:true}).click();
+   await page.getByRole('status').filter({hasText:'Referências completas disponíveis: Verde e Azul'}).waitFor();
+   assert.equal(await green.getByLabel('Energia única / fora (R$/kWh)',{exact:true}).inputValue(),'0.99');
+   console.log('Resposta real ANEEL preenche as sete tarifas Verde/Azul, fonte e data; preserva edição manual e mantém revisão pendente.');
    const example=page.getByRole('heading',{name:'Ampliação: um transformador maior ou dois transformadores?',exact:true});
    for(const subgroup of ['A1','A2','A3','A3a','A4','AS']){
     await page.getByLabel('Enquadramento',{exact:true}).selectOption(subgroup);
@@ -110,6 +131,25 @@ Multa 1,00`));
  const download=await downloadPromise;await download.saveAs('artifacts/report-print/expansao-download.pdf');
  const direct=await readFile('artifacts/report-print/expansao-download.pdf');
  await inspectPdf(direct,'PDF direto');assert.match(direct.toString('latin1'),/\/Subtype \/Image/);
+ const autoPage=await browser.newPage();
+ const groupA=structuredClone(invoice);groupA.detalhes_fatura.grupo='A';groupA.detalhes_fatura.subgrupo='A4';groupA.detalhes_fatura.modalidade='A4_LVVD';groupA.detalhes_fatura.itens=[];groupA.contexto_energetico.b_optante=false;
+ await autoPage.route('**/api/capacitormanager/auditar-fatura',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:groupA})}));
+ await autoPage.route('**/api/tarifas-aneel?**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({tariffs:actualA4Rows,consultedAt:'2026-08-03T12:00:00Z',rejected:0})}));
+ await autoPage.goto('http://localhost:3100/auditoria');
+ await autoPage.locator('input[type="file"][accept="application/pdf,.pdf"]:visible').setInputFiles({name:'grupo-a.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7 fixture')});
+ await autoPage.getByRole('button',{name:'Analisar fatura',exact:true}).click();
+ await autoPage.getByRole('heading',{name:'Resultado da fatura enviada',exact:true}).waitFor();
+ await autoPage.getByRole('button',{name:'Consultoria e Gestão Tarifária',exact:true}).click();
+ const autoGreen=autoPage.getByRole('group',{name:'Horária Verde',exact:true});
+ await autoPage.waitForFunction(()=>document.querySelector('fieldset input[type="number"]')!==null);
+ await autoPage.getByRole('status').filter({hasText:'Referências completas disponíveis: Verde e Azul'}).waitFor();
+ assert.equal(await autoGreen.getByLabel('Energia ponta (R$/kWh)',{exact:true}).inputValue(),'3.02115');
+ await autoPage.getByRole('checkbox',{name:'Permitir substituir o estudo atual pela importação.',exact:true}).check();
+ await autoPage.getByRole('button',{name:'Importar dados identificados na fatura analisada',exact:true}).click();
+ await autoPage.getByRole('status').filter({hasText:'Referências completas disponíveis: Verde e Azul'}).waitFor();
+ assert.equal(await autoGreen.getByLabel('Energia ponta (R$/kWh)',{exact:true}).inputValue(),'3.02115');
+ console.log('Fatura A4_LVVD inicia consulta e preenche referências Verde/Azul sem clique; reimportação também recupera as referências sem presumir modalidade contratual.');
+ await autoPage.close();
  console.log('Impressão das três áreas e PDF direto verificados, incluindo assinatura sintética.');
 }catch(error){console.error(output.slice(-2000));throw error;}
 finally{if(browser)await browser.close();server.kill('SIGTERM');}

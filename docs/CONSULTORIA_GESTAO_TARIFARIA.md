@@ -42,6 +42,10 @@ Recurso CKAN: `fcf2906c-7c32-4b9b-a637-054e7a5234f4`. A ação `datastore_search
 
 Validação real em 20/10/2026: lista com 116 agentes; Equatorial PA/A4 teve 846 registros de aplicação históricos e 50 registros vigentes para 15/07/2026. O número inclui linhas e possíveis registros repetidos, não 50 opções elegíveis para qualquer cliente. O sistema não escolhe automaticamente uma linha por ser a primeira ou a mais barata.
 
+Preenchimento automático: referências comuns completas de Verde e Azul, com classe/subclasse/detalhe/acessante “Não se aplica”, mesma resolução e vigência, preenchem cenários inteiramente vazios da mesma distribuidora e subgrupo. Duplicatas de mesmo valor são aceitas; valores conflitantes, TE ausente/zero na energia, tarifas especiais e conjuntos incompletos bloqueiam esse preenchimento. Os valores permanecem sem confirmação, com fonte e registros identificados. Não determina mercado de compra, modalidade atual ou elegibilidade; contratos de energia no mercado livre não são precificados por essa referência. Cenários já preenchidos não são misturados ou substituídos. Reimportar a fatura refaz a consulta.
+
+Validação de regressão em 22/10/2026: resposta real da aplicação para Equatorial PA/A4 em 31/07/2026, 50 registros. Fixture pública dos 14 registros comuns Verde/Azul verifica as sete tarifas, data e rastreabilidade na interface.
+
 Conversões:
 
 - `MWh`: TE e TUSD divididos por 1.000 para R$/kWh.
