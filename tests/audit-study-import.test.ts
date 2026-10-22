@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {parseEquatorialInvoiceText} from '../lib/equatorial-invoice-parser.ts';
 import {buildInvoiceAuditResult} from '../lib/invoice-audit-result.ts';
 import {newExpansionStudy} from '../lib/expansion-study.ts';
-import {invoiceStudyFacts,tariffStudyFromInvoice,expansionStudyFromInvoice,energyStudyFromInvoice,consultancyInvoiceImportNotice} from '../lib/audit-study-import.ts';
+import {invoiceStudyFacts,tariffStudyFromInvoice,expansionStudyFromInvoice,energyStudyFromInvoice,consultancyInvoiceImportNotice,invoiceTariffCatalogContext} from '../lib/audit-study-import.ts';
 import type {ConsultingStudy} from '../lib/tariff-consultancy.ts';
 import type {EnergyStudy} from '../lib/energy-tariff-diagnosis.ts';
 const base=():ConsultingStudy=>({version:1,client:'',uc:'',distributor:'',subgroup:'A4',current:'verde',months:[],tariffs:[],contractedPeak:null,contractedOffPeak:null,minimumPeak:30,minimumOffPeak:30,growthPercent:0,marginPercent:10,availabilityKwh:100,gd:false,gdVerified:false,alternativesApproved:false,reviewed:false,notes:''});
@@ -87,4 +87,15 @@ test('aviso da consultoria distingue ausência de tarifa, modalidade ambígua e 
  bill.contexto_energetico!.b_optante=false;bill.detalhes_fatura!.grupo='A';bill.detalhes_fatura!.modalidade='A4_LVVD';
  assert.match(consultancyInvoiceImportNotice(bill),/modalidade não foi identificada/);
  bill.valorTotalFatura=999;assert.match(consultancyInvoiceImportNotice(bill),/soma dos itens diverge/);
+});
+
+test('catálogo recebe distribuidora, subgrupo físico e data real da leitura identificados no PDF',()=>{
+ const bill=solar();bill.detalhes_fatura!.leitura_atual='03/08/2026';
+ const context=invoiceTariffCatalogContext(bill);
+ assert.deepEqual(context,{agent:'EQUATORIAL PA',subgroup:'B3',date:'2026-08-03'});
+ assert.notEqual(context.subgroup,'B-optante');
+});
+test('catálogo não inventa data a partir do mês de referência nem aceita leitura inválida',()=>{
+ const bill=solar();assert.equal(invoiceTariffCatalogContext(bill).date,'');
+ bill.detalhes_fatura!.leitura_atual='31/02/2026';assert.equal(invoiceTariffCatalogContext(bill).date,'');
 });

@@ -1,3 +1,4 @@
+import {validDate} from './aneel-tariffs.ts';
 import type { InvoiceAuditResult } from './invoice-audit-result';
 import type { ConsultingStudy, ConsultingMonth, ConsultingMode, ConsultingTariff } from './tariff-consultancy';
 import type { EnergyStudy } from './energy-tariff-diagnosis';
@@ -21,6 +22,14 @@ export function invoiceStudyFacts(invoice: InvoiceAuditResult) {
   return {client:d?.cliente??'',uc:d?.unidade_consumidora??'',distributor:invoice.concessionaria==='EQUATORIAL_PARA'?'EQUATORIAL PA':'',subgroup:bOptante?'B-optante':d?.subgrupo??'',gd,bOptante,compensated,injected,summary,
     peakKw:c?.demanda_ponta_identificada?known(invoice.demanda_ponta_kw):null,
     offPeakKw:c?.demanda_fora_identificada?known(invoice.demanda_fora_ponta_kw):null};
+}
+
+export function invoiceTariffCatalogContext(invoice:InvoiceAuditResult){
+ const facts=invoiceStudyFacts(invoice),reading=invoice.detalhes_fatura?.leitura_atual??'';
+ const match=reading.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+ const date=match?`${match[3]}-${match[2]}-${match[1]}`:'';
+ const subgroup=invoice.detalhes_fatura?.subgrupo??'';
+ return {agent:facts.distributor,subgroup,date:validDate(date)?date:''};
 }
 
 export function consultancyInvoiceImportNotice(invoice:InvoiceAuditResult):string {

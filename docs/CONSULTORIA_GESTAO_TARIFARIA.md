@@ -115,3 +115,8 @@ Azul aceita contrato e mínimo iguais a zero em qualquer posto, preservando pelo
 A importação da auditoria para a consultoria reaproveita tarifas explícitas **sem tributos** somente na modalidade identificada e quando a soma dos itens concilia com o total. TE e TUSD por posto precisam estar presentes na mesma base e com quantidades compatíveis. TUSD isolada não é tratada como tarifa completa; códigos de modalidade ambíguos não autorizam preenchimento tarifário.
 
 Valores importados conservam a origem na fatura e permanecem sem confirmação. A data de referência precisa ser conferida: o mês de faturamento não é inventado como início de vigência. Tarifas de alternativas e residual GD de cada modalidade continuam pendentes. Custos monetários brutos da fatura não são copiados para essa comparação sem tributos. O diagnóstico mensal da auditoria usa separadamente a base com tributos, conforme a indicação de sua tela.
+
+
+### Consulta automática do catálogo após leitura
+
+Após analisar a fatura, o catálogo recebe a distribuidora, o subgrupo identificado no PDF e a data de leitura atual. Havendo os três dados, a consulta é iniciada automaticamente e os resultados são exibidos para conferência. A data de leitura é uma referência de busca, não uma afirmação de início de vigência; quando ausente ou inválida, a data continua pendente. A consulta não seleciona registros ambíguos de classe, modalidade, acessante ou regime de contratação, nem libera recomendação econômica. O quadro de leitura distingue os dados importados das pendências do estudo.

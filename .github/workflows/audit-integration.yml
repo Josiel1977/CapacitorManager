@@ -22,7 +22,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npx tsc --noEmit
-      - run: npx eslint lib/invoice-scenario-import.ts tests/invoice-scenario-import.test.ts lib/invoice-details.ts hooks/use-report-print-date.ts lib/report-professional.ts lib/consultancy-pdf.ts lib/energy-diagnosis-pdf.ts components/ReportProfessionalForm.tsx components/ReportPrintView.tsx tests/report-professional.test.ts lib/audit-study-import.ts lib/energy-diagnosis-report.ts components/TariffConsultancy.tsx components/ExpansionPlanner.tsx components/EnergyTariffDiagnosis.tsx app/auditoria/page.tsx tests/audit-study-import.test.ts
+      - run: npx eslint components/AneelTariffCatalog.tsx lib/invoice-scenario-import.ts tests/invoice-scenario-import.test.ts lib/invoice-details.ts hooks/use-report-print-date.ts lib/report-professional.ts lib/consultancy-pdf.ts lib/energy-diagnosis-pdf.ts components/ReportProfessionalForm.tsx components/ReportPrintView.tsx tests/report-professional.test.ts lib/audit-study-import.ts lib/energy-diagnosis-report.ts components/TariffConsultancy.tsx components/ExpansionPlanner.tsx components/EnergyTariffDiagnosis.tsx app/auditoria/page.tsx tests/audit-study-import.test.ts
       - run: npm run build
       - run: npm install --no-save --package-lock=false --ignore-scripts --prefix /tmp/cm-report-print-tools playwright@1.56.1
       - run: /tmp/cm-report-print-tools/node_modules/.bin/playwright install --with-deps chromium

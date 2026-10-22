@@ -37,6 +37,9 @@ Consumo Compensado (kWh) 20 1,000000 0,800000 1,00 19,00 20,00
 Energia Ativa Injetada (kWh) 30 1,000000 0,800000 -1,00 -19,00 -30,00
 Consumo Reativo Excedente (kVAr) 10 0,500000 0,400000 0,00 0,00 5,00
 Multa 1,00`));
+ invoice.detalhes_fatura.leitura_atual='03/08/2026';
+ const aneelRequests=[];
+ await page.route('**/api/tarifas-aneel?**',route=>{aneelRequests.push(route.request().url());return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({tariffs:[],consultedAt:'2026-08-03T12:00:00Z',rejected:0})});});
  await page.route('**/api/capacitormanager/auditar-fatura',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:invoice})}));
  await page.locator('input[type="file"][accept="application/pdf,.pdf"]:visible').setInputFiles({name:'fatura-sintetica.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7 fixture')});
  await page.getByRole('button',{name:'Analisar fatura',exact:true}).click();
@@ -58,6 +61,12 @@ Multa 1,00`));
  for(const [label,file] of [['Auditoria da fatura','auditoria'],['Consultoria e Gestão Tarifária','consultoria'],['Expansão e transformadores','expansao']]){
   await page.emulateMedia({media:'screen'});await page.getByRole('button',{name:label,exact:true}).click();
   if(file==='consultoria'){
+   await page.getByRole('button',{name:'Buscar tarifas',exact:true}).waitFor();
+   assert.equal(await page.getByLabel('Distribuidora do catálogo ANEEL',{exact:true}).inputValue(),'EQUATORIAL PA');
+   assert.equal(await page.getByLabel('Subgrupo do catálogo ANEEL',{exact:true}).inputValue(),'B3');
+   assert.equal(await page.getByLabel('Data de referência do catálogo ANEEL',{exact:true}).inputValue(),'2026-08-03');
+   assert.ok(aneelRequests.some(value=>{const params=new URL(value).searchParams;return params.get('agent')==='EQUATORIAL PA'&&params.get('subgroup')==='B3'&&params.get('date')==='2026-08-03';}),'Consulta ANEEL não iniciada automaticamente com os dados da fatura.');
+   console.log('Leitura da fatura prepara filtros e inicia consulta ANEEL automaticamente.');
    const currentTariff=page.getByRole('group',{name:'Convencional',exact:true});
    assert.equal(await currentTariff.getByLabel('Energia única / fora (R$/kWh)',{exact:true}).inputValue(),'0.8');
    const reference=currentTariff.locator('input[type="date"]');assert.equal(await reference.inputValue(),'');
