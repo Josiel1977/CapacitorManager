@@ -6,7 +6,7 @@ const source = (relativePath: string) =>
   readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
 
 test('visitante recebe uma página de valor antes do painel demonstrativo', () => {
-  const home = source('app/page.tsx');
+  const home = source('components/HomePageContent.tsx');
   const landing = source('components/PublicLanding.tsx');
   assert.match(home, /isAuthenticated \? <DashboardReal \/> : <PublicLanding \/>/);
   assert.match(landing, /Analisar uma fatura grátis/);

@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import {publicPageMetadata} from '@/lib/site-seo';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -12,10 +12,7 @@ import {
   Wrench,
 } from 'lucide-react';
 
-export const metadata: Metadata = {
-  title: 'Relatório técnico de exemplo',
-  description: 'Veja como o CapacitorManager transforma faturas e medições em diagnóstico, rastreabilidade e plano de ação.',
-};
+export const metadata=publicPageMetadata('/relatorio-exemplo');
 
 const actions = [
   'Confirmar demanda e fator de potência no mesmo intervalo de medição.',

@@ -22,8 +22,9 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npx tsc --noEmit
-      - run: npx eslint lib/aneel-reference-fill.ts tests/aneel-reference-fill.test.ts components/AneelTariffCatalog.tsx lib/invoice-scenario-import.ts tests/invoice-scenario-import.test.ts lib/invoice-details.ts hooks/use-report-print-date.ts lib/report-professional.ts lib/consultancy-pdf.ts lib/energy-diagnosis-pdf.ts components/ReportProfessionalForm.tsx components/ReportPrintView.tsx tests/report-professional.test.ts lib/audit-study-import.ts lib/energy-diagnosis-report.ts components/TariffConsultancy.tsx components/ExpansionPlanner.tsx components/EnergyTariffDiagnosis.tsx app/auditoria/page.tsx tests/audit-study-import.test.ts
+      - run: npx eslint lib/site-seo.ts tests/site-seo.test.ts app/layout.tsx app/page.tsx components/HomePageContent.tsx app/robots.ts app/sitemap.ts app/opengraph-image.tsx app/{auditoria,como-usar,planos,contato,demo,ajuda}/layout.tsx app/relatorio-exemplo/page.tsx lib/aneel-reference-fill.ts tests/aneel-reference-fill.test.ts components/AneelTariffCatalog.tsx lib/invoice-scenario-import.ts tests/invoice-scenario-import.test.ts lib/invoice-details.ts hooks/use-report-print-date.ts lib/report-professional.ts lib/consultancy-pdf.ts lib/energy-diagnosis-pdf.ts components/ReportProfessionalForm.tsx components/ReportPrintView.tsx tests/report-professional.test.ts lib/audit-study-import.ts lib/energy-diagnosis-report.ts components/TariffConsultancy.tsx components/ExpansionPlanner.tsx components/EnergyTariffDiagnosis.tsx app/auditoria/page.tsx tests/audit-study-import.test.ts
       - run: npm run build
+      - run: node --experimental-strip-types scripts/test-site-seo.mjs
       - run: npm install --no-save --package-lock=false --ignore-scripts --prefix /tmp/cm-report-print-tools playwright@1.56.1
       - run: /tmp/cm-report-print-tools/node_modules/.bin/playwright install --with-deps chromium
       - run: node --experimental-strip-types scripts/test-report-print.mjs
